@@ -1,0 +1,15 @@
+{
+  "name": "phygitalia",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Oráculos Telúrico-Sintéticos — monorepo (o.Oraculos.app)",
+  "packageManager": "pnpm@11.11.0",
+  "scripts": {
+    "dev": "turbo run dev",
+    "build": "turbo run build",
+    "lint": "turbo run lint"
+  },
+  "devDependencies": {
+    "turbo": "^2.5.8"
+  }
+}

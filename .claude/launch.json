@@ -1,0 +1,1 @@
+{"version":"0.0.1","configurations":[{"name":"web","runtimeExecutable":"pnpm","runtimeArgs":["--filter","@phygitalia/web","dev"],"port":3000}]}

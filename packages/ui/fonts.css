@@ -1,0 +1,35 @@
+/* Chakra Petch (OFL) — display "runa tecnológica".
+   Los .ttf viven en apps/web/public/fonts/ y se sirven desde /fonts/.
+   Pesos usados: 400, 500, 600, 700. */
+
+@font-face {
+  font-family: "Chakra Petch";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("/fonts/ChakraPetch-Regular.ttf") format("truetype");
+}
+
+@font-face {
+  font-family: "Chakra Petch";
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("/fonts/ChakraPetch-Medium.ttf") format("truetype");
+}
+
+@font-face {
+  font-family: "Chakra Petch";
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url("/fonts/ChakraPetch-SemiBold.ttf") format("truetype");
+}
+
+@font-face {
+  font-family: "Chakra Petch";
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url("/fonts/ChakraPetch-Bold.ttf") format("truetype");
+}

@@ -1,0 +1,9 @@
+{
+  "name": "@phygitalia/content",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Presets de biósferas, fichas de Oráculos y textos declarativos.",
+  "exports": {
+    "./biospheres/paqo.json": "./biospheres/paqo.json"
+  }
+}

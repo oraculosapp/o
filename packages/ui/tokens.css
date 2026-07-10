@@ -1,0 +1,65 @@
+/* Phygitalia — tokens de marca (sistema Exposicion).
+   Fuente: docs/investigacion/02-sistema-de-marca.md §1.
+   Dark-first, cósmico-dorado. Hex exactos, no aproximar. */
+
+:root {
+  /* Fondos */
+  --bg-0: #080a12;
+  --bg-1: #0d0f1a;
+  --bg-2: #141726;
+  --panel: rgba(20, 23, 38, 0.66);
+  --panel-solid: #12141f;
+  --panel-hi: rgba(31, 35, 54, 0.9);
+
+  /* Acento dorado (único acento interactivo) */
+  --gold: #e3b063;
+  --gold-bright: #f6dca0;
+  --gold-dim: #b0854a;
+
+  /* Cerámica */
+  --terra: #c98a5e;
+  --sand: #d8c3a5;
+
+  /* Texto */
+  --text: #ece7dd;
+  --text-dim: #9d97a9;
+  --text-faint: #948fa4;
+
+  /* Bordes / resplandor */
+  --line: rgba(227, 176, 99, 0.16);
+  --line-soft: rgba(214, 195, 165, 0.1);
+  --glow: rgba(227, 176, 99, 0.35);
+
+  /* Radios */
+  --radius: 16px;
+  --radius-sm: 11px;
+  --radius-pill: 999px;
+  --radius-avatar: 50%;
+
+  /* Sombra + movimiento */
+  --shadow: 0 18px 50px -18px rgba(0, 0, 0, 0.7);
+  --ease-brand: cubic-bezier(0.22, 0.61, 0.36, 1);
+  --dur-fast: 160ms;
+  --dur-slow: 320ms;
+
+  /* Tipografías */
+  --font-display: "Chakra Petch", ui-monospace, monospace;
+  --font-body: system-ui, "Segoe UI", Roboto, sans-serif; /* Gotham pendiente de licencia */
+
+  /* theme-color del sistema */
+  --theme-color: #0b0d16;
+}
+
+/* Fondo cósmico reutilizable: gradientes radiales sobre lineal base. */
+.phy-cosmos-bg {
+  background:
+    radial-gradient(60% 80% at 20% 15%, rgba(201, 138, 94, 0.16), transparent 60%),
+    radial-gradient(70% 90% at 85% 25%, rgba(80, 96, 150, 0.18), transparent 65%),
+    radial-gradient(50% 60% at 50% 80%, rgba(227, 176, 99, 0.08), transparent 60%),
+    linear-gradient(160deg, #0a0c16, #0b0d18 40%, #0d0e19 70%, #0a0b13);
+}
+
+::selection {
+  background: var(--gold);
+  color: var(--bg-0);
+}

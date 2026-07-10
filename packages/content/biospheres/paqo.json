@@ -1,0 +1,73 @@
+{
+  "id": "paqo",
+  "mood": ["brumoso", "receptivo", "umbral"],
+  "palette": {
+    "primary": "#3B4A3F",
+    "secondary": "#8FA98C",
+    "accent": "#A8B84E",
+    "ground": "#5C6B5A",
+    "sky": "#E8ECEA"
+  },
+  "terrain": {
+    "type": "valley",
+    "heightNoise": { "kind": "perlin", "amplitude": 42, "frequency": 0.012, "octaves": 4 },
+    "ridges": { "enabled": true, "steepness": 0.85 },
+    "centralClearing": { "enabled": true, "radius": 30, "flatness": 0.9 },
+    "rockScatter": { "density": 0.3, "mossy": true, "lowPolyFacets": 7 }
+  },
+  "vegetation": {
+    "grass": { "density": 0.85, "height": 1.4, "windSway": 0.6 },
+    "trees": { "type": "gnarled", "density": 0.35, "mossHang": true, "clusterAtEdges": true },
+    "shrubs": { "type": "fern", "density": 0.4 },
+    "flowers": { "density": 0.15, "colors": ["#E8ECEA", "#E67E22"] },
+    "special": { "type": "none" }
+  },
+  "water": {
+    "present": true,
+    "bodies": ["stream", "waterfalls", "glacialLake"],
+    "color": "#C9D2CE",
+    "flowSpeed": 0.4,
+    "foam": 0.7,
+    "reflectivity": 0.5
+  },
+  "sky": {
+    "preset": "overcastDawn",
+    "gradientTop": "#E8ECEA",
+    "gradientBottom": "#C9D2CE",
+    "sunVisible": false,
+    "moon": false,
+    "stars": false,
+    "milkyWay": false,
+    "godrays": { "enabled": false }
+  },
+  "lighting": {
+    "keyColor": "#DCE4E2",
+    "keyIntensity": 0.7,
+    "keyAngle": 25,
+    "ambientColor": "#B8C4C0",
+    "ambientIntensity": 0.6,
+    "shadowSoftness": 0.9,
+    "celBands": 3
+  },
+  "fog": {
+    "type": "exp2",
+    "color": "#D8E0DE",
+    "density": 0.045,
+    "groundLayer": { "enabled": true, "height": 6, "rolling": true }
+  },
+  "particles": [
+    { "type": "mist", "density": 0.6, "color": "#FFFFFF", "size": 0.4 },
+    { "type": "spores", "density": 0.3, "color": "#C9D2CE" },
+    { "type": "spray", "density": 0.2, "anchor": "waterfalls" }
+  ],
+  "props": [
+    { "type": "guardianTree", "count": 6, "placement": "edges" },
+    { "type": "menhirRock", "count": 4 },
+    { "type": "totemMount", "count": 1, "placement": "centralClearing", "scale": 8 }
+  ],
+  "postFx": {
+    "bloom": 0.3,
+    "outline": { "enabled": true, "thickness": 1.5, "color": "#0E1512" },
+    "colorGrade": "cool"
+  }
+}

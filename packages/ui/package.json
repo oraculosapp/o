@@ -1,0 +1,10 @@
+{
+  "name": "@phygitalia/ui",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Design system Phygitalia: tokens de marca y estilos base.",
+  "exports": {
+    "./tokens.css": "./tokens.css",
+    "./fonts.css": "./fonts.css"
+  }
+}

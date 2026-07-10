@@ -1,0 +1,72 @@
+.hero {
+  position: relative;
+  min-height: 100dvh;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  background: var(--bg-0);
+}
+
+/* Nebulosa cósmica: gradientes radiales del informe de marca sobre el dark base. */
+.nebula {
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(60% 80% at 20% 15%, rgba(201, 138, 94, 0.16), transparent 60%),
+    radial-gradient(70% 90% at 85% 25%, rgba(80, 96, 150, 0.18), transparent 65%),
+    radial-gradient(50% 60% at 50% 85%, rgba(227, 176, 99, 0.08), transparent 60%),
+    linear-gradient(160deg, #0a0c16, #0b0d18 40%, #0d0e19 70%, #0a0b13);
+}
+
+.inner {
+  position: relative;
+  text-align: center;
+  padding: 2rem;
+}
+
+.logotype {
+  margin: 0;
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: clamp(2.6rem, 9vw, 6rem);
+  letter-spacing: 0.34em;
+  /* Compensar el letter-spacing amplio que empuja a la derecha. */
+  text-indent: 0.34em;
+  color: var(--gold);
+  text-shadow: 0 0 42px var(--glow);
+}
+
+.tagline {
+  margin: 1.2rem 0 2.6rem;
+  font-family: var(--font-display);
+  font-weight: 400;
+  font-size: clamp(0.85rem, 2.4vw, 1.15rem);
+  letter-spacing: 0.16em;
+  color: var(--text-dim);
+}
+
+.enter {
+  display: inline-block;
+  padding: 0.95rem 3rem;
+  border-radius: var(--radius-pill);
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 1rem;
+  letter-spacing: 0.24em;
+  color: var(--bg-0);
+  background: linear-gradient(135deg, var(--gold-bright), var(--gold) 55%, var(--gold-dim));
+  box-shadow: var(--shadow), 0 0 30px var(--glow);
+  transition:
+    transform var(--dur-fast) var(--ease-brand),
+    box-shadow var(--dur-fast) var(--ease-brand);
+}
+
+.enter:hover {
+  transform: translateY(-3px);
+  box-shadow: var(--shadow), 0 0 46px var(--glow);
+}
+
+.enter:focus-visible {
+  outline: 2px solid var(--gold-bright);
+  outline-offset: 3px;
+}

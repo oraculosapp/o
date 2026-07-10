@@ -1,0 +1,21 @@
+# deps
+node_modules/
+
+# builds
+.next/
+out/
+dist/
+.turbo/
+
+# env
+.env
+.env.*
+!.env.example
+
+# assets pipeline output
+tools/assets/out/
+
+# misc
+*.log
+.DS_Store
+Thumbs.db
