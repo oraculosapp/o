@@ -1,9 +1,15 @@
 import * as THREE from "three";
 import { Planet } from "./planet/Planet";
 import { CharacterController } from "./controller/CharacterController";
+import { TestDummy } from "./avatar/TestDummy";
 import { FollowCamera } from "./camera/FollowCamera";
 import { InputManager } from "./input/InputManager";
 import { makeToonRamp, makeSoftCircleTexture } from "./util/toon";
+import { Vegetation } from "./world/Vegetation";
+import { Water } from "./world/Water";
+import { Atmosphere } from "./world/Atmosphere";
+import { Totem } from "./world/Totem";
+import { BloomComposer } from "./postfx/BloomComposer";
 import type { BiospherePreset } from "./planet/types";
 
 /**
@@ -19,6 +25,7 @@ export class PaqoWorld {
 
   private planet!: Planet;
   private controller!: CharacterController;
+  private rig!: TestDummy;
   private follow!: FollowCamera;
   private input!: InputManager;
 
@@ -27,6 +34,13 @@ export class PaqoWorld {
   private marker!: THREE.Mesh; // destino de tap-to-move
   private moveTarget: THREE.Vector3 | null = null;
   private markerLife = 0;
+
+  // Biósfera: vegetación, agua, atmósfera, tótem y bloom selectivo.
+  private vegetation!: Vegetation;
+  private water!: Water;
+  private atmosphere!: Atmosphere;
+  private totem!: Totem;
+  private bloom!: BloomComposer;
 
   private rafId = 0;
   private disposed = false;
@@ -60,7 +74,23 @@ export class PaqoWorld {
     this.buildMist();
     this.buildMarker();
 
-    this.controller = new CharacterController(this.planet, this.spawnDir);
+    // --- Biósfera: vegetación instanciada, agua, atmósfera ---
+    this.vegetation = new Vegetation(this.planet.field, this.preset, this.spawnDir);
+    this.vegetation.build();
+    this.vegetation.addTo(this.scene);
+
+    this.water = new Water(this.planet.field, this.preset);
+    this.water.build();
+    this.water.addTo(this.scene);
+
+    this.atmosphere = new Atmosphere(this.planet.field, this.preset);
+    this.atmosphere.build();
+    this.atmosphere.addTo(this.scene);
+
+    // Avatar: maniquí chibi procedural (TestDummy) hasta que lleguen los GLB
+    // de Tripo3D — mismo contrato IAvatarRig, cambio de una línea después.
+    this.rig = new TestDummy();
+    this.controller = new CharacterController(this.planet, this.spawnDir, this.rig);
     this.controller.addTo(this.scene);
     // Mirar hacia la runa (polo +Y) para el encuadre inicial bonito.
     this.controller.faceToward(this.rune.position);
@@ -72,10 +102,31 @@ export class PaqoWorld {
     this.input.onTap = (x, y) => this.handleTap(x, y);
     this.input.onManualMove = () => this.clearMoveTarget();
 
+    // --- Bloom selectivo: sólo el anillo-runa emisivo (degradable en móvil) ---
+    this.bloom = new BloomComposer(
+      this.renderer,
+      this.scene,
+      this.camera,
+      this.preset.postFx?.bloom ?? 0.3,
+    );
+    this.bloom.addSelection(this.rune);
+    const { w, h } = this.size();
+    this.bloom.setSize(w, h);
+
     // Calentamiento de shaders antes de avisar "listo".
     this.renderer.compile(this.scene, this.camera);
-    this.onReady?.();
     this.loop();
+
+    // Tótem de Paqo: se carga async (GLB draco+webp). El valle ya es jugable;
+    // cuando aterriza, se avisa "listo" para el money-shot completo.
+    this.totem = new Totem(this.planet.field);
+    this.totem
+      .load(this.scene)
+      .catch(() => undefined)
+      .finally(() => {
+        if (!this.disposed) this.renderer.compile(this.scene, this.camera);
+        this.onReady?.();
+      });
   }
 
   /** Tamaño del contenedor con fallback a la ventana (evita canvas 0×0 en el 1er frame). */
@@ -151,15 +202,16 @@ export class PaqoWorld {
     this.scene.add(new THREE.HemisphereLight(0xe8ecea, 0x3b4a3f, 0.95));
   }
 
-  /** Runa emisiva dorada tumbada en el claro (polo +Y). */
+  /** Anillo-runa emisivo dorado en el suelo, rodeando la base del tótem (polo +Y). */
   private buildRune(): void {
     const dir = new THREE.Vector3(0, 1, 0);
     const p = this.planet.field.surfacePoint(dir);
-    const geo = new THREE.TorusGeometry(3.2, 0.5, 12, 40);
+    // Delgado y contenido: el glifo ACOMPAÑA al tótem, no le compite.
+    const geo = new THREE.TorusGeometry(3.6, 0.26, 10, 48);
     const mat = new THREE.MeshToonMaterial({
       color: 0x3a2f18,
       emissive: new THREE.Color(0xe3b063),
-      emissiveIntensity: 1.3,
+      emissiveIntensity: 0.6,
       gradientMap: makeToonRamp(),
     });
     this.rune = new THREE.Mesh(geo, mat);
@@ -237,6 +289,7 @@ export class PaqoWorld {
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
     this.renderer.setSize(w, h);
+    this.bloom?.setSize(w, h);
   };
 
   private loop = (): void => {
@@ -302,8 +355,14 @@ export class PaqoWorld {
 
     // --- Animaciones de ambiente ---
     const runeMat = this.rune.material as THREE.MeshToonMaterial;
-    runeMat.emissiveIntensity = 1.0 + Math.sin(t * 1.6) * 0.45;
+    runeMat.emissiveIntensity = 0.55 + Math.sin(t * 1.6) * 0.18; // pulso sutil, místico
+
     this.mist.rotation.y -= dt * 0.01;
+
+    // Vegetación (viento), agua (espuma) y atmósfera (niebla rodante + polen).
+    this.vegetation.update(dt, t);
+    this.water.update(dt, t);
+    this.atmosphere.update(dt, t);
 
     // Marcador: pulso + desvanecido al llegar.
     if (this.marker.visible) {
@@ -317,7 +376,8 @@ export class PaqoWorld {
       this.marker.scale.setScalar(pulse);
     }
 
-    this.renderer.render(this.scene, this.camera);
+    // Render con bloom selectivo (o directo si degradado en móvil débil).
+    this.bloom.render(dt);
   };
 
   dispose(): void {
@@ -326,7 +386,13 @@ export class PaqoWorld {
     this.resizeObs?.disconnect();
     window.removeEventListener("resize", this.onResize);
     this.input?.dispose();
-    this.controller?.dispose();
+    this.controller?.dispose(); // desengancha el rig sin liberarlo…
+    this.rig?.dispose(); // …aquí se liberan sus geometrías/clips (dueño: el mundo)
+    this.vegetation?.dispose();
+    this.water?.dispose();
+    this.atmosphere?.dispose();
+    this.totem?.dispose();
+    this.bloom?.dispose();
     this.planet?.dispose();
     this.scene?.traverse((obj) => {
       const mesh = obj as THREE.Mesh;

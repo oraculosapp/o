@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import type { Planet } from "../planet/Planet";
+import type { IAvatarRig } from "../avatar/types";
 import { makeToonRamp, makeSoftCircleTexture, addInvertedHullOutline } from "../util/toon";
 
 /** Intención de movimiento de un frame (la produce el InputManager). */
@@ -44,7 +45,8 @@ export class CharacterController {
   private readonly jumpBuffer = 0.12; // s de gracia si saltas antes de aterrizar
   private readonly turnRate = 12; // slerp/s hacia la dirección de avance
   private readonly slopeLimitCos = Math.cos(THREE.MathUtils.degToRad(50));
-  private readonly eyeHeight = 0.9; // mitad de la cápsula (pies→centro)
+  /** Distancia pies→centro del pivote. Con rig = rig.height/2; sin rig, media cápsula. */
+  private eyeHeight = 0.9;
 
   private horizVel = new THREE.Vector3(); // velocidad tangente (mundo)
   private vertVel = 0; // velocidad a lo largo de up (radial)
@@ -54,14 +56,26 @@ export class CharacterController {
   private facing = new THREE.Quaternion();
   private groundNormal = new THREE.Vector3(0, 1, 0);
 
-  private avatar!: THREE.Group;
+  private avatar?: THREE.Group;
   private blob!: THREE.Mesh;
+  private rig?: IAvatarRig;
 
   constructor(
     private planet: Planet,
     spawnDir = new THREE.Vector3(0, 1, 0),
+    rig?: IAvatarRig,
   ) {
-    this.buildAvatar();
+    if (rig) {
+      // Rig de avatar (TestDummy hoy, GLB Tripo3D mañana): su root tiene el
+      // origen en los PIES; el pivote del controller está en el centro.
+      this.rig = rig;
+      this.eyeHeight = rig.height / 2;
+      rig.root.position.set(0, -this.eyeHeight, 0);
+      this.object.add(rig.root);
+    } else {
+      // Fallback: cápsula low-poly con nariz.
+      this.buildAvatar();
+    }
     this.buildBlobShadow();
 
     // Spawn: sobre el claro (+Y). Cae unos centímetros al suelo en el 1er frame.
@@ -181,6 +195,14 @@ export class CharacterController {
     this.facing.slerp(TMP.q, tSlerp);
     this.object.quaternion.copy(this.facing);
 
+    // --- 6. Conducción del rig de avatar (mixer + selección de clip) ---
+    this.rig?.update(dt, {
+      speed: this.horizVel.length(),
+      maxSpeed: this.runSpeed,
+      grounded: this.grounded,
+      jumping: !this.grounded,
+    });
+
     this.updateBlob(orientUp);
   }
 
@@ -265,6 +287,9 @@ export class CharacterController {
   }
 
   dispose(): void {
+    // El rig es propiedad de quien lo inyectó (PaqoWorld llama rig.dispose());
+    // se desengancha aquí para no liberar sus recursos dos veces.
+    if (this.rig) this.object.remove(this.rig.root);
     this.object.traverse((o) => {
       const mesh = o as THREE.Mesh;
       if (mesh.geometry) mesh.geometry.dispose();

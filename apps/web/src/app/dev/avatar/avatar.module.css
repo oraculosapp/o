@@ -1,0 +1,145 @@
+.stage {
+  position: fixed;
+  inset: 0;
+  overflow: hidden;
+  background: var(--bg-0);
+  touch-action: none;
+}
+
+.canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+/* Panel de controles flotante (tokens de marca @phygitalia/ui). */
+.panel {
+  position: absolute;
+  left: 1rem;
+  bottom: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  padding: 0.9rem;
+  max-width: min(92vw, 340px);
+  background: var(--panel);
+  backdrop-filter: blur(14px);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  font-family: var(--font-body);
+}
+
+.title {
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 0.72rem;
+  letter-spacing: 0.28em;
+  text-indent: 0.28em;
+  color: var(--gold);
+  margin: 0;
+}
+
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.label {
+  font-size: 0.66rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+
+.btn {
+  flex: 1 1 auto;
+  min-width: 62px;
+  padding: 0.5rem 0.7rem;
+  font-family: var(--font-display);
+  font-size: 0.74rem;
+  letter-spacing: 0.08em;
+  color: var(--text);
+  background: var(--panel-hi);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition:
+    border-color var(--dur-fast) var(--ease-brand),
+    color var(--dur-fast) var(--ease-brand),
+    background var(--dur-fast) var(--ease-brand);
+}
+
+.btn:hover {
+  border-color: var(--gold-dim);
+  color: var(--gold-bright);
+}
+
+.btnActive {
+  color: var(--bg-0);
+  background: var(--gold);
+  border-color: var(--gold);
+}
+
+.swatch {
+  width: 34px;
+  height: 34px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--line);
+  cursor: pointer;
+  padding: 0;
+  transition: transform var(--dur-fast) var(--ease-brand);
+}
+
+.swatch:hover {
+  transform: scale(1.08);
+  border-color: var(--gold-bright);
+}
+
+.glbRow {
+  display: flex;
+  gap: 0.4rem;
+}
+
+.input {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 0.5rem 0.65rem;
+  font-family: var(--font-body);
+  font-size: 0.78rem;
+  color: var(--text);
+  background: var(--bg-1);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+}
+
+.input::placeholder {
+  color: var(--text-faint);
+}
+
+.hint {
+  font-size: 0.62rem;
+  color: var(--text-faint);
+  line-height: 1.4;
+  margin: 0;
+}
+
+/* Toast estilo "selbar" de marca. */
+.toast {
+  position: absolute;
+  top: 1rem;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 0.6rem 1rem;
+  max-width: 90vw;
+  font-family: var(--font-body);
+  font-size: 0.78rem;
+  color: var(--text);
+  background: var(--panel-solid);
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--gold);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow);
+}

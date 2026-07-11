@@ -11,3 +11,10 @@ export type { BiospherePreset } from "./planet/types";
 export { HolaPlaneta } from "./HolaPlaneta";
 export type { PlanetPreset } from "./HolaPlaneta";
 export { SimplexNoise } from "./noise";
+
+// --- Avatares (equipo Avatares S2) ---
+export { AvatarRig, type AvatarRigOptions } from "./avatar/AvatarRig";
+export { TestDummy } from "./avatar/TestDummy";
+export { AnimationDriver, type Locomotion } from "./avatar/AnimationDriver";
+export { TintController, toToonMaterial, avatarToonRamp, type HueBand } from "./avatar/tint";
+export type { IAvatarRig, AvatarDriveState, TintZone, PropSocket } from "./avatar/types";

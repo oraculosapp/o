@@ -10,6 +10,7 @@
     ".": "./src/index.ts"
   },
   "dependencies": {
+    "postprocessing": "^6.39.2",
     "three-mesh-bvh": "^0.9.1"
   },
   "peerDependencies": {
