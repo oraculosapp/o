@@ -7,47 +7,117 @@
   background: var(--bg-0);
 }
 
-/* Nebulosa cósmica: gradientes radiales del informe de marca sobre el dark base. */
+/* ---- Capa 0: nebulosa cósmica (informe de marca) ---- */
 .nebula {
   position: absolute;
   inset: 0;
+  z-index: 0;
   background:
-    radial-gradient(60% 80% at 20% 15%, rgba(201, 138, 94, 0.16), transparent 60%),
-    radial-gradient(70% 90% at 85% 25%, rgba(80, 96, 150, 0.18), transparent 65%),
-    radial-gradient(50% 60% at 50% 85%, rgba(227, 176, 99, 0.08), transparent 60%),
+    radial-gradient(60% 80% at 20% 12%, rgba(201, 138, 94, 0.18), transparent 60%),
+    radial-gradient(70% 90% at 84% 22%, rgba(80, 96, 150, 0.2), transparent 65%),
+    radial-gradient(55% 60% at 50% 82%, rgba(227, 176, 99, 0.1), transparent 60%),
     linear-gradient(160deg, #0a0c16, #0b0d18 40%, #0d0e19 70%, #0a0b13);
 }
 
-.inner {
+/* Campo de estrellas sutil, puramente CSS (sin peso de red). */
+.stars {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  background-image:
+    radial-gradient(1.4px 1.4px at 12% 18%, rgba(246, 220, 160, 0.75), transparent),
+    radial-gradient(1.2px 1.2px at 78% 12%, rgba(236, 231, 221, 0.6), transparent),
+    radial-gradient(1px 1px at 33% 62%, rgba(246, 220, 160, 0.55), transparent),
+    radial-gradient(1.3px 1.3px at 62% 78%, rgba(236, 231, 221, 0.5), transparent),
+    radial-gradient(1px 1px at 88% 54%, rgba(246, 220, 160, 0.5), transparent),
+    radial-gradient(1.1px 1.1px at 47% 30%, rgba(236, 231, 221, 0.45), transparent),
+    radial-gradient(1px 1px at 8% 76%, rgba(246, 220, 160, 0.4), transparent),
+    radial-gradient(1.2px 1.2px at 70% 42%, rgba(236, 231, 221, 0.4), transparent);
+  opacity: 0.9;
+  animation: twinkle 7s var(--ease-brand, ease-in-out) infinite alternate;
+}
+
+@keyframes twinkle {
+  from {
+    opacity: 0.5;
+  }
+  to {
+    opacity: 0.95;
+  }
+}
+
+/* ---- Capa 1: canvas del diorama ---- */
+.canvas {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  opacity: 0;
+  transition: opacity 1200ms var(--ease-brand, ease);
+  pointer-events: none;
+}
+
+.canvasOn {
+  opacity: 1;
+}
+
+/* ---- Capa 2: contenido ---- */
+.content {
   position: relative;
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
   text-align: center;
   padding: 2rem;
+  /* Empuja logo arriba y botón abajo dejando el círculo respirar en el centro. */
+  justify-content: space-between;
+  min-height: min(100dvh, 780px);
+  pointer-events: none;
+}
+
+.content > * {
+  pointer-events: auto;
+}
+
+.header {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  margin-top: clamp(1.5rem, 6vh, 4rem);
 }
 
 .logotype {
   margin: 0;
-  font-family: var(--font-display);
-  font-weight: 700;
-  font-size: clamp(2.6rem, 9vw, 6rem);
-  letter-spacing: 0.34em;
-  /* Compensar el letter-spacing amplio que empuja a la derecha. */
-  text-indent: 0.34em;
-  color: var(--gold);
-  text-shadow: 0 0 42px var(--glow);
+  line-height: 0;
+}
+
+.logo {
+  display: block;
+  width: clamp(230px, 42vw, 520px);
+  height: auto;
+  /* El logotipo es negro sobre transparente: se invierte a dorado (técnica de
+     Exposicion/index.html) y se le añade resplandor. */
+  filter: invert(1) sepia(0.42) saturate(1.25) brightness(1.02)
+    drop-shadow(0 0 26px rgba(227, 176, 99, 0.45));
 }
 
 .tagline {
-  margin: 1.2rem 0 2.6rem;
+  margin: 1.3rem 0 0;
+  max-width: 34ch;
   font-family: var(--font-display);
   font-weight: 400;
-  font-size: clamp(0.85rem, 2.4vw, 1.15rem);
-  letter-spacing: 0.16em;
-  color: var(--text-dim);
+  font-size: clamp(0.8rem, 2.2vw, 1.05rem);
+  letter-spacing: 0.14em;
+  line-height: 1.7;
+  /* Contraste AA sobre la nebulosa: sand claro + sombra de asiento. */
+  color: #efe7d7;
+  text-shadow: 0 1px 14px rgba(6, 7, 12, 0.85);
 }
 
 .enter {
   display: inline-block;
-  padding: 0.95rem 3rem;
+  margin: 0 0 clamp(2rem, 8vh, 4.5rem);
+  padding: 0.95rem 3.2rem;
   border-radius: var(--radius-pill);
   font-family: var(--font-display);
   font-weight: 600;
@@ -58,15 +128,52 @@
   box-shadow: var(--shadow), 0 0 30px var(--glow);
   transition:
     transform var(--dur-fast) var(--ease-brand),
-    box-shadow var(--dur-fast) var(--ease-brand);
+    box-shadow var(--dur-fast) var(--ease-brand),
+    filter var(--dur-fast) var(--ease-brand);
 }
 
 .enter:hover {
   transform: translateY(-3px);
-  box-shadow: var(--shadow), 0 0 46px var(--glow);
+  box-shadow: var(--shadow), 0 0 48px var(--glow);
+  filter: brightness(1.06);
+}
+
+.enter:active {
+  transform: translateY(-1px);
 }
 
 .enter:focus-visible {
   outline: 2px solid var(--gold-bright);
-  outline-offset: 3px;
+  outline-offset: 4px;
+}
+
+/* Viñeta radial: oscurece los bordes, asienta el texto sobre la escena. */
+.vignette {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+  background: radial-gradient(120% 120% at 50% 42%, transparent 52%, rgba(4, 5, 9, 0.62) 100%);
+}
+
+@media (max-width: 640px) {
+  .content {
+    justify-content: space-between;
+    min-height: 100dvh;
+  }
+  .tagline {
+    max-width: 26ch;
+  }
+}
+
+/* Sin movimiento: la escena three.js ya congela rotación/parallax por su cuenta;
+   aquí quitamos el parpadeo de las estrellas. */
+@media (prefers-reduced-motion: reduce) {
+  .stars {
+    animation: none;
+    opacity: 0.8;
+  }
+  .canvas {
+    transition: none;
+  }
 }

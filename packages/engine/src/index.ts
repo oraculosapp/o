@@ -1,7 +1,7 @@
-// Escena jugable de la Biósfera Paqo (planeta + controller + cámara + input).
+// Escena jugable de la Biósfera Paqo (isla flotante + controller + cámara + input).
 export { PaqoWorld } from "./PaqoWorld";
-export { Planet } from "./planet/Planet";
-export { PlanetField } from "./planet/PlanetField";
+export { Island } from "./island/Island";
+export { IslandField } from "./island/IslandField";
 export { CharacterController } from "./controller/CharacterController";
 export { FollowCamera } from "./camera/FollowCamera";
 export { InputManager } from "./input/InputManager";

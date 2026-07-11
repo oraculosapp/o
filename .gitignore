@@ -19,3 +19,6 @@ tools/assets/out/
 *.log
 .DS_Store
 Thumbs.db
+
+# modelos fuente crudos (viven solo en disco; al repo van los optimizados de public/)
+assets/**/*.glb

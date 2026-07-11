@@ -2,38 +2,42 @@ import * as THREE from "three";
 import type { CharacterController } from "../controller/CharacterController";
 
 /**
- * Cámara de tercera persona con up dinámico (sigue la normal del planeta).
- * Órbita manual con drag; vuelve suavemente detrás del personaje tras ~2 s
- * sin input (estilo Messenger). Zoom con límites. Damping en posición y up
- * para que no haya saltos al cruzar el planeta.
+ * Cámara de tercera persona PLANAR (up constante (0,1,0)). Órbita manual con
+ * drag; vuelve suavemente detrás del personaje tras ~2 s sin input (estilo
+ * Messenger). Zoom con límites. Damping en posición para que no haya saltos.
+ * Conserva la órbita con auto-retorno, el zoom y PITCH_DIR invertido ("vuelo").
  */
 export class FollowCamera {
+  private static readonly UP = new THREE.Vector3(0, 1, 0);
+
   private yaw = 0; // offset azimutal alrededor del up (0 = detrás)
-  // Pitch bajo (~19°): más horizonte en cuadro → desde el spawn se ven las
-  // laderas del anfiteatro alzándose tras la runa, fundidas en la niebla.
-  private pitch = 0.34; // elevación sobre el hombro (rad)
+  // Pitch bajo (~19°): más horizonte → se ven las laderas del anfiteatro tras
+  // la runa y, mirando lejos, el abismo brumoso bajo la isla.
+  private pitch = 0.34;
   private distance = 7.5;
   private readonly minDist = 4;
   private readonly maxDist = 12;
   private readonly minPitch = 0.06;
   private readonly maxPitch = 1.15;
 
-  /**
-   * Dirección del eje vertical de órbita — preferencia de dirección (S2.5):
-   * el director pidió "estilo vuelo": arrastrar hacia abajo mira hacia arriba.
-   * +1 = vuelo (invertido) · -1 = clásico. Será un setting de usuario a futuro.
-   */
+  /** +1 = "vuelo" (arrastrar abajo mira arriba) · -1 = clásico. (S2.5, dirección.) */
   private static readonly PITCH_DIR = 1;
 
   private idleTime = 0;
-  private readonly returnDelay = 2.0; // s sin input → vuelve detrás
+  private readonly returnDelay = 2.0;
   private manualYaw = false;
 
-  // Estado suavizado.
-  private smoothUp = new THREE.Vector3(0, 1, 0);
   private smoothPos = new THREE.Vector3();
   private smoothTarget = new THREE.Vector3();
   private initialized = false;
+
+  // Scratch.
+  private _fwd = new THREE.Vector3();
+  private _right = new THREE.Vector3();
+  private _horiz = new THREE.Vector3();
+  private _boom = new THREE.Vector3();
+  private _shoulder = new THREE.Vector3();
+  private _desired = new THREE.Vector3();
 
   constructor(
     private camera: THREE.PerspectiveCamera,
@@ -51,7 +55,6 @@ export class FollowCamera {
 
   orbit(dx: number, dy: number): void {
     this.yaw -= dx * 0.005;
-    // Mouse y táctil (drag mitad derecha) pasan ambos por aquí → consistentes.
     this.pitch = THREE.MathUtils.clamp(
       this.pitch + FollowCamera.PITCH_DIR * dy * 0.005,
       this.minPitch,
@@ -67,11 +70,9 @@ export class FollowCamera {
 
   update(dt: number, force = false): void {
     this.idleTime += dt;
-
+    const up = FollowCamera.UP;
     const charPos = this.target.position;
-    const up = charPos.clone().normalize();
 
-    // Tras el retardo, la órbita vuelve suavemente a 0 (detrás del personaje).
     if (this.manualYaw && this.idleTime > this.returnDelay) {
       const k = 1 - Math.exp(-2.5 * dt);
       this.yaw = THREE.MathUtils.lerp(this.yaw, 0, k);
@@ -81,41 +82,36 @@ export class FollowCamera {
       }
     }
 
-    // Base de órbita a partir del frente del personaje, proyectado al tangente.
-    const fwd = this.target.getForward().clone();
-    fwd.addScaledVector(up, -fwd.dot(up));
-    if (fwd.lengthSq() < 1e-5) fwd.set(1, 0, 0);
-    fwd.normalize();
-    const right = new THREE.Vector3().crossVectors(up, fwd).normalize();
+    // Frente del personaje proyectado a XZ.
+    this.target.getForward(this._fwd);
+    this._fwd.y = 0;
+    if (this._fwd.lengthSq() < 1e-5) this._fwd.set(0, 0, -1);
+    this._fwd.normalize();
+    this._right.crossVectors(up, this._fwd).normalize();
 
-    // Boom: detrás del personaje = -fwd, girado por yaw y elevado por pitch.
     const cosY = Math.cos(this.yaw);
     const sinY = Math.sin(this.yaw);
-    const horiz = new THREE.Vector3()
-      .addScaledVector(fwd, -cosY)
-      .addScaledVector(right, sinY); // dirección horizontal desde el personaje a la cámara
-    const boom = new THREE.Vector3()
-      .addScaledVector(horiz, Math.cos(this.pitch))
+    this._horiz.set(0, 0, 0).addScaledVector(this._fwd, -cosY).addScaledVector(this._right, sinY);
+    this._boom
+      .set(0, 0, 0)
+      .addScaledVector(this._horiz, Math.cos(this.pitch))
       .addScaledVector(up, Math.sin(this.pitch))
       .normalize();
 
-    const shoulder = charPos.clone().addScaledVector(up, 1.7);
-    const desiredPos = shoulder.clone().addScaledVector(boom, this.distance);
+    this._shoulder.copy(charPos).addScaledVector(up, 1.7);
+    this._desired.copy(this._shoulder).addScaledVector(this._boom, this.distance);
 
     if (!this.initialized || force) {
-      this.smoothPos.copy(desiredPos);
-      this.smoothTarget.copy(shoulder);
-      this.smoothUp.copy(up);
+      this.smoothPos.copy(this._desired);
+      this.smoothTarget.copy(this._shoulder);
     } else {
       const kPos = 1 - Math.exp(-9 * dt);
-      const kUp = 1 - Math.exp(-5 * dt); // up más lento = giros suaves al rodar
-      this.smoothPos.lerp(desiredPos, kPos);
-      this.smoothTarget.lerp(shoulder, kPos);
-      this.smoothUp.lerp(up, kUp).normalize();
+      this.smoothPos.lerp(this._desired, kPos);
+      this.smoothTarget.lerp(this._shoulder, kPos);
     }
 
     this.camera.position.copy(this.smoothPos);
-    this.camera.up.copy(this.smoothUp);
+    this.camera.up.copy(up);
     this.camera.lookAt(this.smoothTarget);
   }
 }

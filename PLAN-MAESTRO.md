@@ -28,7 +28,7 @@ multijugador, con el flujo suave y delicioso de messenger.abeto.co como listón 
 | Tema | Decisión |
 |---|---|
 | Avatares | **Híbrido**: 18 arquetipos Tripo3D (9 × M/F) + capa de personalización (tinte de paleta / prop) |
-| Topología | **Mini-planeta esférico por Biósfera**, generado por presets (ref: [ZyFou/ProceduralTerrains](https://github.com/ZyFou/ProceduralTerrains) MIT — cube-sphere + ruido GPU + LOD; y logartis.info → Freeflight) |
+| Topología | ~~Mini-planeta esférico~~ → **ISLAS FLOTANTES** (pivote 2026-07-11 tras jugar S2.6: la esfera generaba fricción constante — claro-jaula, hundimientos, pasto radial). Modelo híbrido: terreno heightmap con borde de acantilado + panza rocosa, mapas GLB de autor Y/O procedurales, aderezo procedural por preset. Gravedad normal, motor más simple, compatible con mapas hechos a mano (ej. floating-jungle-island.glb) |
 | Alcance beta | **Núcleo pulido**: Biósfera Paqo completa (ver §6). Voz, DMs, push y perfiles completos → fase 2 |
 | Voz | **LiveKit Cloud** (fase 2) |
 | Stack casa | **Vercel + Supabase + Resend + Turnstile** |

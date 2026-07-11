@@ -1,0 +1,62 @@
+{
+  "generado": "2026-07-11T11:51:31.422Z",
+  "textura": "webp 512",
+  "compresion": "meshopt",
+  "modelos": [
+    {
+      "archivo": "mage.glb",
+      "fuente": "mage-character.glb",
+      "bytes": 334260,
+      "tris": 39470,
+      "notas": [
+        "PBR podado: normal, metallicRoughness"
+      ]
+    },
+    {
+      "archivo": "shaman.glb",
+      "fuente": "chibi-female-shaman.glb",
+      "bytes": 348704,
+      "tris": 39394,
+      "notas": [
+        "PBR podado: normal, metallicRoughness"
+      ]
+    },
+    {
+      "archivo": "dwarf.glb",
+      "fuente": "dwarf-shaman.glb",
+      "bytes": 349228,
+      "tris": 39234,
+      "notas": [
+        "PBR podado: normal, metallicRoughness"
+      ]
+    },
+    {
+      "archivo": "purple.glb",
+      "fuente": "purple-haired-chibi.glb",
+      "bytes": 349464,
+      "tris": 38476,
+      "notas": [
+        "PBR podado: normal, metallicRoughness"
+      ]
+    },
+    {
+      "archivo": "painter.glb",
+      "fuente": "painter-character.glb",
+      "bytes": 338524,
+      "tris": 39210,
+      "notas": [
+        "PBR podado: normal, metallicRoughness"
+      ]
+    },
+    {
+      "archivo": "hacker.glb",
+      "fuente": "1-hacker-1.glb",
+      "bytes": 326512,
+      "tris": 28638,
+      "notas": [
+        "PBR podado: normal, metallicRoughness"
+      ]
+    }
+  ],
+  "totalBytes": 2046692
+}

@@ -1,38 +1,34 @@
 import * as THREE from "three";
-import type { PlanetField } from "../planet/PlanetField";
+import type { IslandField } from "../island/IslandField";
 import type { BiospherePreset } from "../planet/types";
 
 /**
- * Agua estilizada de Paqo (S2): laguna glaciar en una cuenca REAL del terreno
- * (elegida muestreando heightAt para hallar la zona baja), arroyo que baja por
- * un meridiano hasta ella, y una cascada-hilo en la ladera. Material toon plano
- * translúcido color glaciar con franja de espuma animada por scroll de ruido —
- * sin reflejos ni refracción (fuera de presupuesto en S2).
+ * Agua estilizada de Paqo (isla flotante): laguna glaciar en una cuenca REAL del
+ * terreno (hallada muestreando heightAt), un río que NACE en el claro y sale por
+ * el paso de cañón +X hasta el filo de la isla, donde cae como CASCADA AL VACÍO
+ * hacia la niebla (el money shot de la isla flotante). Material toon plano
+ * translúcido con espuma animada por scroll de ruido — sin reflejos ni refracción.
  */
 export class Water {
   readonly group = new THREE.Group();
   private mats: THREE.ShaderMaterial[] = [];
   private geos: THREE.BufferGeometry[] = [];
-  private readonly axis = new THREE.Vector3(0, 1, 0);
-  private readonly R: number;
 
-  /** Dir de la cuenca (para anclar spray de cascada desde Atmosphere si hace falta). */
-  basinDir = new THREE.Vector3(0, 1, 0);
+  /** Posición de la cuenca (para anclar spray si hace falta). */
+  basinPos = new THREE.Vector3();
+  /** Cima de la cascada al vacío (ancla del spray de Atmosphere). */
   waterfallTop = new THREE.Vector3();
 
   constructor(
-    private field: PlanetField,
+    private field: IslandField,
     private preset: BiospherePreset,
-  ) {
-    this.R = field.radius;
-  }
+  ) {}
 
   build(): void {
     const basin = this.findBasin();
-    this.basinDir.copy(basin.dir);
+    this.basinPos.set(basin.x, this.field.heightAt(basin.x, basin.z), basin.z);
     this.buildLagoon(basin);
-    this.buildStream(basin);
-    this.buildWaterfall(basin);
+    this.buildRiver();
   }
 
   addTo(scene: THREE.Scene): void {
@@ -43,103 +39,81 @@ export class Water {
     for (const m of this.mats) m.uniforms.uTime.value = t;
   }
 
-  // ---- localizar la cuenca más baja fuera del claro (banda del anfiteatro exterior) ----
+  // ---- cuenca más baja (banda del anfiteatro exterior, fuera del paso +X) ----
 
-  private findBasin(): { dir: THREE.Vector3; level: number; angle: number } {
-    let best = { dir: new THREE.Vector3(0, 1, 0), level: Infinity, angle: 0.5 };
-    const d = new THREE.Vector3();
+  private findBasin(): { x: number; z: number } {
+    let best = { x: 0, z: 22, level: Infinity };
     for (let ai = 0; ai < 6; ai++) {
-      const angle = 0.42 + (ai / 5) * 0.18; // ~17..24 u de arco (ladera exterior)
+      const r = 17 + (ai / 5) * 9; // 17..26 u
       for (let pi = 0; pi < 72; pi++) {
         const phi = (pi / 72) * Math.PI * 2;
-        this.dirAt(angle, phi, d);
-        const h = this.field.heightAt(d);
-        if (h < best.level) best = { dir: d.clone(), level: h, angle };
+        // Evita el corredor del río (±~25° de +X) para que la laguna no lo pise.
+        if (Math.abs(Math.atan2(Math.sin(phi), Math.cos(phi))) < 0.45) continue;
+        const x = Math.cos(phi) * r;
+        const z = Math.sin(phi) * r;
+        const h = this.field.heightAt(x, z);
+        if (h < best.level) best = { x, z, level: h };
       }
     }
     return best;
   }
 
-  /** Dirección a `angle` (rad) del polo +Y y azimut `phi`. */
-  private dirAt(angle: number, phi: number, out = new THREE.Vector3()): THREE.Vector3 {
-    const s = Math.sin(angle);
-    return out.set(s * Math.cos(phi), Math.cos(angle), s * Math.sin(phi)).normalize();
-  }
-
   // ---- laguna ----
 
-  private buildLagoon(basin: { dir: THREE.Vector3; angle: number }): void {
+  private buildLagoon(basin: { x: number; z: number }): void {
     const radius = 5.5;
-    // Nivel del agua = mínimo del terreno en la huella (charca pozada, orillas altas).
-    const center = basin.dir.clone();
-    const up = center.clone();
-    // Base ortonormal tangente.
-    const t = Math.abs(up.y) < 0.99 ? new THREE.Vector3(0, 1, 0) : new THREE.Vector3(1, 0, 0);
-    const ex = new THREE.Vector3().crossVectors(t, up).normalize();
-    const ez = new THREE.Vector3().crossVectors(up, ex);
-
     let level = Infinity;
-    const probe = new THREE.Vector3();
-    const angRadius = radius / this.R;
     for (let i = 0; i < 16; i++) {
       const a = (i / 16) * Math.PI * 2;
-      probe
-        .copy(up)
-        .addScaledVector(ex, Math.cos(a) * angRadius)
-        .addScaledVector(ez, Math.sin(a) * angRadius)
-        .normalize();
-      level = Math.min(level, this.field.heightAt(probe));
+      const x = basin.x + Math.cos(a) * radius;
+      const z = basin.z + Math.sin(a) * radius;
+      level = Math.min(level, this.field.heightAt(x, z));
     }
     level -= 0.15;
 
     const geo = new THREE.CircleGeometry(radius, 48);
-    const mat = this.makeWaterMaterial(0); // modo laguna: espuma en la orilla
+    const mat = this.makeWaterMaterial(0);
     const mesh = new THREE.Mesh(geo, mat);
-    // Plano tangente en la superficie de la cuenca, a la altura del agua.
-    const pos = up.clone().multiplyScalar(this.R + level);
-    mesh.position.copy(pos);
-    mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), up);
+    mesh.position.set(basin.x, level, basin.z);
+    mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), new THREE.Vector3(0, 1, 0));
     mesh.renderOrder = 2;
     this.group.add(mesh);
     this.geos.push(geo);
   }
 
-  // ---- arroyo: cinta a lo largo del meridiano claro→cuenca ----
+  // ---- río: nace en el claro, sale por el paso +X hasta el filo ----
 
-  private buildStream(basin: { dir: THREE.Vector3; angle: number }): void {
-    const startAngle = 0.30; // justo fuera del claro
-    const endAngle = basin.angle - 0.02;
-    const startDir = this.slerpDir(this.axis, basin.dir, startAngle / basin.angle);
-    void startDir;
+  private buildRiver(): void {
+    const rStart = 6; // manantial dentro del claro
+    const edge = this.field.edgeRadiusAt(1, 0);
+    const rEnd = edge - 1.5; // justo en el filo, donde vuelca al vacío
 
-    const segments = 40;
+    const segments = 48;
     const width = 1.6;
     const positions: number[] = [];
     const uvs: number[] = [];
     const indices: number[] = [];
 
     const p = new THREE.Vector3();
-    const nextP = new THREE.Vector3();
+    const flow = new THREE.Vector3();
     const side = new THREE.Vector3();
-    const dir = new THREE.Vector3();
-    const nextDir = new THREE.Vector3();
+    const up = new THREE.Vector3(0, 1, 0);
+
+    const pathAt = (r: number, out: THREE.Vector3): THREE.Vector3 => {
+      const meander = Math.sin((r - rStart) * 0.16) * 2.2; // serpenteo en z
+      const x = r;
+      const z = meander;
+      return out.set(x, this.field.heightAt(x, z) + 0.08, z);
+    };
 
     for (let i = 0; i <= segments; i++) {
-      const a = startAngle + ((endAngle - startAngle) * i) / segments;
-      this.dirAlongMeridian(basin.dir, a, dir);
-      this.field.surfacePoint(dir, p).addScaledVector(dir, 0.08);
-      // Tangente de avance (hacia el siguiente punto) para orientar el ancho.
-      const a2 = a + 0.01;
-      this.dirAlongMeridian(basin.dir, a2, nextDir);
-      this.field.surfacePoint(nextDir, nextP);
-      const flow = nextP.clone().sub(p).normalize();
-      side.crossVectors(flow, dir).normalize(); // perpendicular tangente
-      // Ligero serpenteo del cauce.
-      const wob = Math.sin(i * 0.6) * 0.5;
+      const r = rStart + ((rEnd - rStart) * i) / segments;
+      pathAt(r, p);
+      pathAt(r + 0.3, flow).sub(p).normalize();
+      side.crossVectors(flow, up).normalize();
       const half = width * (0.7 + 0.3 * Math.sin(i * 0.3));
-      const c = p.clone().addScaledVector(side, wob);
-      const left = c.clone().addScaledVector(side, -half);
-      const right = c.clone().addScaledVector(side, half);
+      const left = p.clone().addScaledVector(side, -half);
+      const right = p.clone().addScaledVector(side, half);
       positions.push(left.x, left.y, left.z, right.x, right.y, right.z);
       const v = i / segments;
       uvs.push(0, v, 1, v);
@@ -153,34 +127,34 @@ export class Water {
     geo.setAttribute("uv", new THREE.Float32BufferAttribute(uvs, 2));
     geo.setIndex(indices);
     geo.computeVertexNormals();
-    const mat = this.makeWaterMaterial(1); // modo arroyo: espuma que baja
+    const mat = this.makeWaterMaterial(1);
     const mesh = new THREE.Mesh(geo, mat);
     mesh.renderOrder = 2;
     this.group.add(mesh);
     this.geos.push(geo);
+
+    // Cascada al vacío desde el filo.
+    pathAt(rEnd, p);
+    this.waterfallTop.copy(p);
+    this.buildWaterfall(p);
   }
 
-  // ---- cascada-hilo en la ladera del anfiteatro sobre el arroyo ----
+  // ---- cascada al vacío: lámina vertical larga que cae del filo hacia la niebla ----
 
-  private buildWaterfall(basin: { dir: THREE.Vector3; angle: number }): void {
-    const topAngle = 0.26;
-    const dirTop = this.dirAlongMeridian(basin.dir, topAngle, new THREE.Vector3());
-    const dirBot = this.dirAlongMeridian(basin.dir, 0.34, new THREE.Vector3());
-    const top = this.field.surfacePoint(dirTop).addScaledVector(dirTop, 0.1);
-    const bot = this.field.surfacePoint(dirBot).addScaledVector(dirBot, 0.1);
-    this.waterfallTop.copy(top);
-
-    const height = top.distanceTo(bot) + 1.5;
-    const geo = new THREE.PlaneGeometry(0.9, height);
-    const mat = this.makeWaterMaterial(2); // modo cascada: scroll vertical
+  private buildWaterfall(top: THREE.Vector3): void {
+    const fallHeight = 42; // cae muy por debajo del filo, hacia el mar de niebla
+    const w = 2.4;
+    const geo = new THREE.PlaneGeometry(w, fallHeight);
+    const mat = this.makeWaterMaterial(2);
     const mesh = new THREE.Mesh(geo, mat);
-    const mid = top.clone().add(bot).multiplyScalar(0.5);
+    // Radial hacia afuera (dirección +X en el filo del río) mirando al abismo.
+    const outward = new THREE.Vector3(top.x, 0, top.z).normalize();
+    const mid = top.clone().addScaledVector(new THREE.Vector3(0, 1, 0), -fallHeight / 2 + 0.5);
+    mid.addScaledVector(outward, 0.6);
     mesh.position.copy(mid);
-    // Orienta el plano: up = a lo largo de la caída, cara hacia afuera (dir).
-    const fall = bot.clone().sub(top).normalize();
-    const face = dirTop.clone();
-    const right = new THREE.Vector3().crossVectors(fall, face).normalize();
-    const m = new THREE.Matrix4().makeBasis(right, fall.clone().negate(), face);
+    const fall = new THREE.Vector3(0, -1, 0);
+    const right = new THREE.Vector3().crossVectors(fall, outward).normalize();
+    const m = new THREE.Matrix4().makeBasis(right, fall.clone().negate(), outward);
     mesh.quaternion.setFromRotationMatrix(m);
     mesh.renderOrder = 2;
     this.group.add(mesh);
@@ -224,18 +198,15 @@ export class Water {
           vec3 col = uColor;
           float foam = 0.0;
           if (uMode == 0) {
-            // Laguna: franja de espuma en la orilla (borde del disco) + ondas suaves.
             float edge = smoothstep(0.62, 0.98, length(vUv - 0.5) * 2.0);
             float n = noise(vUv * 9.0 + uTime * 0.25);
             foam = edge * (0.5 + 0.5 * n);
             col += 0.04 * noise(vUv * 6.0 - uTime * 0.15);
           } else if (uMode == 1) {
-            // Arroyo: espuma que baja (scroll en v) con bandas de ruido.
             float n = noise(vec2(vUv.x * 5.0, vUv.y * 10.0 - uTime * 0.9));
             float bank = smoothstep(0.32, 0.0, abs(vUv.x - 0.5));
             foam = smoothstep(0.55, 0.9, n) * 0.8 + (1.0 - bank) * 0.4;
           } else {
-            // Cascada: hilos verticales rápidos.
             float n = noise(vec2(vUv.x * 6.0, vUv.y * 3.0 - uTime * 2.2));
             foam = smoothstep(0.35, 0.9, n);
             col = mix(uColor, uFoam, 0.35);
@@ -249,30 +220,6 @@ export class Water {
     });
     this.mats.push(mat);
     return mat;
-  }
-
-  // ---- utilidades de dirección ----
-
-  /** Interpola por slerp entre dos direcciones (t en [0,1]). */
-  private slerpDir(a: THREE.Vector3, b: THREE.Vector3, t: number): THREE.Vector3 {
-    const qa = new THREE.Quaternion();
-    const out = a.clone();
-    const ang = a.angleTo(b);
-    if (ang < 1e-5) return out;
-    const axis = new THREE.Vector3().crossVectors(a, b).normalize();
-    qa.setFromAxisAngle(axis, ang * t);
-    return out.applyQuaternion(qa).normalize();
-  }
-
-  /** Dirección sobre el meridiano polo→cuenca a un ángulo dado desde el polo. */
-  private dirAlongMeridian(basinDir: THREE.Vector3, angle: number, out: THREE.Vector3): THREE.Vector3 {
-    const totalAng = this.axis.angleTo(basinDir);
-    if (totalAng < 1e-5) return out.copy(this.axis);
-    const axis = new THREE.Vector3().crossVectors(this.axis, basinDir).normalize();
-    return out
-      .copy(this.axis)
-      .applyQuaternion(new THREE.Quaternion().setFromAxisAngle(axis, angle))
-      .normalize();
   }
 
   dispose(): void {

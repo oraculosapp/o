@@ -1,7 +1,7 @@
 import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { DRACOLoader } from "three/examples/jsm/loaders/DRACOLoader.js";
-import type { PlanetField } from "../planet/PlanetField";
+import type { IslandField } from "../island/IslandField";
 import { makeToonRamp } from "../util/toon";
 
 /**
@@ -18,7 +18,7 @@ export class Totem {
   private materials: THREE.Material[] = [];
 
   constructor(
-    private field: PlanetField,
+    private field: IslandField,
     private opts: { url?: string; dracoPath?: string; targetHeight?: number } = {},
   ) {}
 
@@ -68,13 +68,11 @@ export class Totem {
       const scale = targetHeight / nativeH;
       model.scale.setScalar(scale);
 
-      // Posa la base en el suelo del claro (+Y) y alinea su up a la normal (=+Y).
-      const dir = new THREE.Vector3(0, 1, 0);
-      const ground = this.field.surfacePoint(dir);
+      // Posa la base en el suelo del claro (origen), up = +Y mundial.
+      const ground = this.field.surfacePoint(0, 0);
       // Tras escalar, el mínimo Y del modelo local queda en box.min.y*scale.
       const baseOffset = -box.min.y * scale;
-      this.group.position.copy(ground).addScaledVector(dir, baseOffset - 0.15);
-      // El polo +Y ya es el up mundial; sin rotación de alineación.
+      this.group.position.copy(ground).add(new THREE.Vector3(0, baseOffset - 0.15, 0));
       this.group.add(model);
       scene.add(this.group);
     } catch (err) {
