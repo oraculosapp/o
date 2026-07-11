@@ -22,6 +22,13 @@ export class FollowCamera {
 
   /** +1 = "vuelo" (arrastrar abajo mira arriba) · -1 = clásico. (S2.5, dirección.) */
   private static readonly PITCH_DIR = 1;
+  /**
+   * Dirección del arrastre horizontal — feedback del director jugando la isla:
+   * el eje también va invertido respecto al clásico (mismo criterio "vuelo" que
+   * PITCH_DIR). +1 = invertido · -1 = clásico (el `yaw -=` original). Mouse y
+   * táctil pasan ambos por orbit() → consistentes. Setting de usuario a futuro.
+   */
+  private static readonly YAW_DIR = 1;
 
   private idleTime = 0;
   private readonly returnDelay = 2.0;
@@ -54,7 +61,7 @@ export class FollowCamera {
   }
 
   orbit(dx: number, dy: number): void {
-    this.yaw -= dx * 0.005;
+    this.yaw += FollowCamera.YAW_DIR * dx * 0.005;
     this.pitch = THREE.MathUtils.clamp(
       this.pitch + FollowCamera.PITCH_DIR * dy * 0.005,
       this.minPitch,

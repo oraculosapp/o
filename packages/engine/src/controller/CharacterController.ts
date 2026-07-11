@@ -19,9 +19,7 @@ const TMP = {
   move: new THREE.Vector3(),
   next: new THREE.Vector3(),
   q: new THREE.Quaternion(),
-  m: new THREE.Matrix4(),
   fwd: new THREE.Vector3(),
-  right: new THREE.Vector3(),
   normal: new THREE.Vector3(),
   surf: new THREE.Vector3(),
   tangent: new THREE.Vector3(),
@@ -222,19 +220,20 @@ export class CharacterController {
     }
 
     // --- 5. Orientación: up = +Y, frente = dirección de avance ---
+    // Estilo Messenger: mientras camina, slerp suave hacia SU dirección de
+    // movimiento; en reposo conserva la orientación (no sigue a la cámara).
+    // El yaw se calcula DIRECTO alrededor de +Y desde la velocidad horizontal.
+    // (El makeBasis heredado de la esfera construía right = up×fwd — que es el
+    // vector IZQUIERDO → matriz reflejo (det -1); con up = +Y exacto su
+    // quaternion degeneraba a identidad para cualquier rumbo y el avatar nunca
+    // giraba. En la esfera el up variable enmascaraba el defecto.)
     if (this.horizVel.lengthSq() > 0.04) {
-      TMP.fwd.set(this.horizVel.x, 0, this.horizVel.z).normalize();
-    } else {
-      this.getForward(TMP.fwd);
-      TMP.fwd.y = 0;
-      if (TMP.fwd.lengthSq() < 1e-6) TMP.fwd.set(0, 0, -1);
-      TMP.fwd.normalize();
+      // El frente local es -Z: R_y(yaw)·(0,0,-1) = (-sin yaw, 0, -cos yaw).
+      const yaw = Math.atan2(-this.horizVel.x, -this.horizVel.z);
+      TMP.q.setFromAxisAngle(UP, yaw);
+      const tSlerp = 1 - Math.exp(-this.turnRate * dt);
+      this.facing.slerp(TMP.q, tSlerp);
     }
-    TMP.right.crossVectors(UP, TMP.fwd).normalize();
-    TMP.m.makeBasis(TMP.right, UP, TMP.fwd.clone().negate());
-    TMP.q.setFromRotationMatrix(TMP.m);
-    const tSlerp = 1 - Math.exp(-this.turnRate * dt);
-    this.facing.slerp(TMP.q, tSlerp);
     this.object.quaternion.copy(this.facing);
 
     // --- 6. Conducción del rig de avatar ---
@@ -305,18 +304,14 @@ export class CharacterController {
     TMP.fwd.copy(worldPoint).sub(this.position);
     TMP.fwd.y = 0;
     if (TMP.fwd.lengthSq() < 1e-5) return;
-    TMP.fwd.normalize();
-    TMP.right.crossVectors(UP, TMP.fwd).normalize();
-    TMP.m.makeBasis(TMP.right, UP, TMP.fwd.clone().negate());
-    this.facing.setFromRotationMatrix(TMP.m);
+    // Frente local -Z → yaw = atan2(-fx, -fz) (mismo marco que update §5).
+    this.facing.setFromAxisAngle(UP, Math.atan2(-TMP.fwd.x, -TMP.fwd.z));
     this.object.quaternion.copy(this.facing);
   }
 
   private alignInitial(): void {
-    TMP.fwd.set(0, 0, -1);
-    TMP.right.crossVectors(UP, TMP.fwd).normalize();
-    TMP.m.makeBasis(TMP.right, UP, TMP.fwd.clone().negate());
-    this.facing.setFromRotationMatrix(TMP.m);
+    // Frente inicial -Z global = yaw 0 (identidad).
+    this.facing.identity();
     this.object.quaternion.copy(this.facing);
   }
 

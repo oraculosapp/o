@@ -302,3 +302,52 @@ export interface BiospherePreset {
   props: Prop[];
   postFx: PostFx;
 }
+
+// ---------------------------------------------------------------------------
+// Oráculos (voces / system prompts)
+// ---------------------------------------------------------------------------
+
+/**
+ * Los 11 Oráculos de la constelación (Eme y Uru es uno doble). Los 6
+ * primeros son los prioritarios de la beta (PLAN-MAESTRO §6); los otros 5
+ * llegan en fases posteriores. Ver `docs/investigacion/01-lore-phygitalia.md`.
+ */
+export type OracleId =
+  | "paqo"
+  | "cosmogenes"
+  | "eme-y-uru"
+  | "espinosito"
+  | "nin"
+  | "brangulio"
+  | "mavea"
+  | "chemajo"
+  | "tecnomancio"
+  | "baba-totik"
+  | "personage";
+
+/**
+ * Ficha declarativa de un Oráculo: su identidad, su voz (system prompt que
+ * alimenta al modelo de la API `/api/oracle`) y los textos diegéticos que el
+ * mundo 3D usa para presentarlo (saludo público y mensajes-pista).
+ */
+export interface OracleDefinition {
+  /** Identificador estable, usado en rutas, registry y biósferas. */
+  id: OracleId;
+  /** Nombre mostrado, p.ej. "Paqo", "Eme y Uru". */
+  name: string;
+  /** Color de acento de marca del Oráculo (hex). */
+  color: HexColor;
+  /**
+   * System prompt COMPLETO en español mexicano que encarna su voz. Se
+   * inyecta tal cual como mensaje de sistema del modelo por conversación.
+   */
+  systemPrompt: string;
+  /** Saludo corto para el canal público de su Biósfera. */
+  publicGreeting: string;
+  /**
+   * Mensajes-pista diegéticos que el Oráculo "susurra" a quien deambula por
+   * su Biósfera buscándolo (toasts por proximidad/tiempo). Cortos (<120
+   * chars), misteriosos, en su voz.
+   */
+  hints: string[];
+}
