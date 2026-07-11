@@ -1,5 +1,13 @@
 import paqoJson from "../biospheres/paqo.json";
-import type { BiospherePreset } from "./types";
+import type { BiospherePreset, OracleDefinition, OracleId } from "./types";
+import { paqo } from "./oracles/paqo";
+import { cosmogenes } from "./oracles/cosmogenes";
+import { emeYUru } from "./oracles/eme-y-uru";
+import { espinosito } from "./oracles/espinosito";
+import { nin } from "./oracles/nin";
+import { brangulio } from "./oracles/brangulio";
+
+export type { OracleDefinition, OracleId } from "./types";
 
 export type {
   BiospherePreset,
@@ -101,4 +109,49 @@ export function getBiosphere(id: string): BiospherePreset {
   }
   assertBiospherePreset(preset, id);
   return preset;
+}
+
+// ---------------------------------------------------------------------------
+// Oráculos (voces / system prompts)
+// ---------------------------------------------------------------------------
+
+/**
+ * Registro de los Oráculos con voz escrita. Hoy los 6 prioritarios de la beta
+ * (PLAN-MAESTRO §6); los otros 5 (Mavea, Chemajo, Tecnomancio, Baba-Totik,
+ * Personage) se suman aquí a medida que se escriben. El orden define el orden
+ * de `listOracles()`.
+ */
+const oracleRegistry: Record<string, OracleDefinition> = {
+  paqo,
+  cosmogenes,
+  "eme-y-uru": emeYUru,
+  espinosito,
+  nin,
+  brangulio,
+};
+
+/**
+ * Resuelve la ficha completa de un Oráculo por id. Lanza si no existe (o si
+ * aún no se ha escrito su voz).
+ */
+export function getOracle(id: OracleId | string): OracleDefinition {
+  const oracle = oracleRegistry[id];
+  if (!oracle) {
+    const available = Object.keys(oracleRegistry).join(", ");
+    throw new Error(`Unknown oracle "${id}". Available: ${available}`);
+  }
+  return oracle;
+}
+
+/**
+ * Devuelve sólo el system prompt de un Oráculo, listo para inyectarse como
+ * mensaje de sistema en `/api/oracle`.
+ */
+export function getOracleSystemPrompt(id: OracleId | string): string {
+  return getOracle(id).systemPrompt;
+}
+
+/** Lista todos los Oráculos con voz escrita, en orden de prioridad. */
+export function listOracles(): OracleDefinition[] {
+  return Object.values(oracleRegistry);
 }
