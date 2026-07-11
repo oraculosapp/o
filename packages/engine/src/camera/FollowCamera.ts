@@ -18,6 +18,13 @@ export class FollowCamera {
   private readonly minPitch = 0.06;
   private readonly maxPitch = 1.15;
 
+  /**
+   * Dirección del eje vertical de órbita — preferencia de dirección (S2.5):
+   * el director pidió "estilo vuelo": arrastrar hacia abajo mira hacia arriba.
+   * +1 = vuelo (invertido) · -1 = clásico. Será un setting de usuario a futuro.
+   */
+  private static readonly PITCH_DIR = 1;
+
   private idleTime = 0;
   private readonly returnDelay = 2.0; // s sin input → vuelve detrás
   private manualYaw = false;
@@ -44,7 +51,12 @@ export class FollowCamera {
 
   orbit(dx: number, dy: number): void {
     this.yaw -= dx * 0.005;
-    this.pitch = THREE.MathUtils.clamp(this.pitch - dy * 0.005, this.minPitch, this.maxPitch);
+    // Mouse y táctil (drag mitad derecha) pasan ambos por aquí → consistentes.
+    this.pitch = THREE.MathUtils.clamp(
+      this.pitch + FollowCamera.PITCH_DIR * dy * 0.005,
+      this.minPitch,
+      this.maxPitch,
+    );
     this.idleTime = 0;
     this.manualYaw = true;
   }

@@ -28,6 +28,8 @@ export class Vegetation {
   private readonly axis = new THREE.Vector3(0, 1, 0);
   private readonly excludeRadius = 5; // u libres alrededor del tótem
   private readonly R: number;
+  /** Pendiente máxima (rad) donde aún se planta pasto alto (~40°). */
+  private static readonly MAX_GRASS_SLOPE = THREE.MathUtils.degToRad(40);
 
   // Trabajo reutilizable.
   private _dir = new THREE.Vector3();
@@ -75,16 +77,80 @@ export class Vegetation {
     return this.excludeRadius / this.R;
   }
 
-  /** Matriz de instancia: posa `dir` en el suelo, up=normal, yaw y escala dados. */
+  // Scratch para la normal del terreno (solo build-time).
+  private _nrm = new THREE.Vector3();
+  private _tU = new THREE.Vector3();
+  private _tV = new THREE.Vector3();
+  private _pA = new THREE.Vector3();
+  private _pB = new THREE.Vector3();
+  private _eU = new THREE.Vector3();
+  private _eV = new THREE.Vector3();
+
+  /**
+   * Normal REAL del terreno en `dir` por diferencias centrales: 4 muestras de
+   * superficie (±ε tangente) → cross de las dos secantes. Orientada hacia
+   * afuera (dot con el radial > 0). Solo se usa al construir, no por frame.
+   */
+  private terrainNormal(dir: THREE.Vector3, out = new THREE.Vector3()): THREE.Vector3 {
+    const eps = 0.3 / this.R; // paso angular ~0.3 u de arco
+    this.tangentBasis(dir, this._tU, this._tV);
+    this.field.surfacePoint(this._pA.copy(dir).addScaledVector(this._tU, eps).normalize(), this._pA);
+    this.field.surfacePoint(this._pB.copy(dir).addScaledVector(this._tU, -eps).normalize(), this._pB);
+    this._eU.subVectors(this._pA, this._pB);
+    this.field.surfacePoint(this._pA.copy(dir).addScaledVector(this._tV, eps).normalize(), this._pA);
+    this.field.surfacePoint(this._pB.copy(dir).addScaledVector(this._tV, -eps).normalize(), this._pB);
+    this._eV.subVectors(this._pA, this._pB);
+    out.crossVectors(this._eU, this._eV).normalize();
+    if (out.dot(dir) < 0) out.negate();
+    return out;
+  }
+
+  /** Pendiente (rad) del terreno en `dir`: ángulo entre la normal real y el radial. */
+  private slopeAt(dir: THREE.Vector3): number {
+    this.terrainNormal(dir, this._nrm);
+    return Math.acos(THREE.MathUtils.clamp(this._nrm.dot(dir), -1, 1));
+  }
+
+  /**
+   * Excedente máximo (u) con que la huella de la base (±halfW local en X/Z)
+   * queda POR ENCIMA del terreno tras aplicar `m`. Las crestas del ruido
+   * ridged pueden dejar una esquina en voladizo aunque la planta esté
+   * alineada — este probe lo detecta para hundirla ese extra. Solo build-time.
+   */
+  private footprintOverhang(m: THREE.Matrix4, halfW: number): number {
+    let worst = 0;
+    for (let k = 0; k < 4; k++) {
+      this._pA.set(k === 0 ? halfW : k === 1 ? -halfW : 0, 0, k === 2 ? halfW : k === 3 ? -halfW : 0);
+      this._pA.applyMatrix4(m);
+      this._pB.copy(this._pA).normalize();
+      const above = this._pA.length() - (this.R + this.field.heightAt(this._pB));
+      if (above > worst) worst = above;
+    }
+    return worst;
+  }
+
+  /**
+   * Matriz de instancia: posa `dir` en el suelo con yaw y escala dados.
+   * `align` mezcla el up entre radial puro (0) y la normal real del terreno
+   * (1): con ~0.6-0.7 las plantas acompañan la cuesta y su base muerde la
+   * ladera en vez de quedar en voladizo cuesta abajo. `sink` hunde la base a
+   * lo largo del up resultante. Árboles y rocas siguen radiales (se ven bien).
+   */
   private placeMatrix(
     dir: THREE.Vector3,
     yaw: number,
     scale: THREE.Vector3,
     sink = 0,
     out = new THREE.Matrix4(),
+    align = 0,
   ): THREE.Matrix4 {
     this.field.surfacePoint(dir, this._pos);
-    this._up.copy(dir); // normal ~ radial (terreno suave); barato y estable
+    if (align > 0) {
+      this.terrainNormal(dir, this._nrm);
+      this._up.copy(dir).multiplyScalar(1 - align).addScaledVector(this._nrm, align).normalize();
+    } else {
+      this._up.copy(dir); // radial puro (terreno suave); barato y estable
+    }
     this._pos.addScaledVector(this._up, -sink);
     this._q.setFromUnitVectors(new THREE.Vector3(0, 1, 0), this._up);
     this._yaw.setFromAxisAngle(this._up, yaw);
@@ -359,10 +425,21 @@ export class Vegetation {
       const mask = this.field.clearingMask(this._dir);
       const inClearing = mask > 0.4;
       if (inClearing && rand() > 0.3) continue; // adelgaza la pradera
+      // Umbral de pendiente: en cuestas muy fuertes (>40°) NADA de pasto —
+      // ahí es donde más flota y menos aporta; la ladera queda limpia (roca).
+      if (this.slopeAt(this._dir) > Vegetation.MAX_GRASS_SLOPE) continue;
       const sc = 0.7 + rand() * 0.6;
       const ySc = inClearing ? 0.22 + rand() * 0.07 : 0.85 + rand() * 0.4;
       this._s.set(sc, ySc, sc);
-      mesh.setMatrixAt(placed, this.placeMatrix(this._dir, yaw, this._s, 0.06, this._m));
+      // Base hundida proporcional al tamaño + alineada ~70% a la pendiente:
+      // la base siempre muerde el terreno cuesta arriba/abajo.
+      const sink = 0.06 + 0.05 * sc;
+      this.placeMatrix(this._dir, yaw, this._s, sink, this._m, 0.7);
+      // Garantía anti-flote: si aun así alguna esquina de la huella queda en
+      // voladizo (crestas afiladas del ruido ridged), se DESCARTA el punto y
+      // el bucle reintenta en otro lado — toda base colocada muerde terreno.
+      if (this.footprintOverhang(this._m, 0.08) > 0.001) continue;
+      mesh.setMatrixAt(placed, this._m);
       // Variación de color: base salvia→ácida, algunas más profundas; la
       // pradera corta del claro tira más a ácida (pradera de la ficha).
       col.copy(cSage).lerp(cAccent, inClearing ? 0.45 + rand() * 0.4 : rand() * 0.7);
@@ -414,7 +491,9 @@ export class Vegetation {
         const yaw = rand() * Math.PI * 2;
         const sc = 0.85 + rand() * 0.7;
         this._s.set(sc, sc * (0.85 + rand() * 0.35), sc);
-        mesh.setMatrixAt(placed, this.placeMatrix(this._dir, yaw, this._s, 0.04, this._m));
+        // Hundido proporcional + alineado a la pendiente: el rosetón muerde la ladera.
+        const sink = 0.05 + 0.05 * sc;
+        mesh.setMatrixAt(placed, this.placeMatrix(this._dir, yaw, this._s, sink, this._m, 0.65));
         col.copy(cSage).lerp(cAccent, 0.2 + rand() * 0.45);
         mesh.setColorAt(placed, col);
         placed++;
@@ -460,8 +539,8 @@ export class Vegetation {
         const base = sizes[(rand() * sizes.length) | 0];
         const yaw = rand() * Math.PI * 2;
         this._s.set(base * (0.9 + rand() * 0.2), base * (0.85 + rand() * 0.3), base * (0.9 + rand() * 0.2));
-        // Nestle: hunde ~mitad del blob para que asiente en el suelo.
-        mesh.setMatrixAt(placed, this.placeMatrix(this._dir, yaw, this._s, base * 0.24, this._m));
+        // Nestle: hunde ~mitad del blob y alinea a la pendiente — asienta en la ladera.
+        mesh.setMatrixAt(placed, this.placeMatrix(this._dir, yaw, this._s, base * 0.26, this._m, 0.6));
         col.copy(cDeep).lerp(cSage, 0.35 + rand() * 0.4);
         mesh.setColorAt(placed, col);
         placed++;
@@ -526,7 +605,8 @@ export class Vegetation {
         const yaw = rand() * Math.PI * 2;
         const sc = 0.75 + rand() * 0.5;
         this._s.set(sc, sc, sc);
-        this.placeMatrix(this._dir, yaw, this._s, 0.02, this._m);
+        // Hundido proporcional + alineado: el tallo nace DEL suelo, no del aire.
+        this.placeMatrix(this._dir, yaw, this._s, 0.025 + 0.025 * sc, this._m, 0.65);
         stems.setMatrixAt(placed, this._m);
         corollas.setMatrixAt(placed, this._m);
         // 2 tonos por mata: base / aclarada hacia blanco → mancha con volumen.

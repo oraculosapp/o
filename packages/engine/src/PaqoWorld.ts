@@ -64,6 +64,9 @@ export class PaqoWorld {
   ) {}
 
   start(): void {
+    // Handle de depuración para QA/harness (consola: __PAQO__). Coste cero;
+    // se limpia en dispose().
+    (globalThis as { __PAQO__?: PaqoWorld }).__PAQO__ = this;
     this.initRenderer();
     this.initScene();
 
@@ -382,6 +385,8 @@ export class PaqoWorld {
 
   dispose(): void {
     this.disposed = true;
+    const g = globalThis as { __PAQO__?: PaqoWorld };
+    if (g.__PAQO__ === this) delete g.__PAQO__;
     cancelAnimationFrame(this.rafId);
     this.resizeObs?.disconnect();
     window.removeEventListener("resize", this.onResize);

@@ -23,12 +23,16 @@ const TMP = {
   m: new THREE.Matrix4(),
   fwd: new THREE.Vector3(),
   right: new THREE.Vector3(),
+  normal: new THREE.Vector3(),
+  surf: new THREE.Vector3(),
 };
 
 /**
  * Character controller esférico: camina por toda la esfera con gravedad radial.
  * Aceleración/desaceleración suaves, rotación por slerp, salto con coyote-time
- * y jump-buffer, y colisión con el suelo vía raycast al hitmesh BVH.
+ * y jump-buffer. El anclaje al suelo es ANALÍTICO (PlanetField.heightAt, la
+ * misma fórmula que desplaza la malla visual) — el raycast BVH del hitmesh
+ * queda solo para tap-to-move y queries puntuales.
  */
 export class CharacterController {
   readonly object = new THREE.Group(); // pivote: +Y = up local, -Z = frente
@@ -142,35 +146,48 @@ export class CharacterController {
     }
     this.vertVel -= this.gravity * dt;
 
+    // --- 2.5 Muro de pendiente (slide suave, ANTES de integrar) ---
+    // En pendiente >50° se corta SOLO la componente cuesta-arriba de la
+    // velocidad: caminar a lo largo de una ladera empinada fluye sin tirones
+    // (el viejo freno *0.2 parpadeaba), pero subirla no — las paredes del
+    // valle de Paqo son "casi verticales" por dirección de arte y son muro.
+    if (this.grounded) {
+      const nrmHere = this.planet.field.surfaceNormal(up, TMP.normal);
+      if (nrmHere.dot(up) < this.slopeLimitCos) {
+        // Cuesta-arriba tangente = -(componente tangencial de la normal).
+        TMP.tangent.copy(nrmHere).addScaledVector(up, -nrmHere.dot(up));
+        if (TMP.tangent.lengthSq() > 1e-8) {
+          TMP.tangent.negate().normalize();
+          const vUphill = this.horizVel.dot(TMP.tangent);
+          if (vUphill > 0) this.horizVel.addScaledVector(TMP.tangent, -vUphill);
+        }
+      }
+    }
+
     // --- 3. Integración ---
     TMP.next.copy(this.position);
     TMP.next.addScaledVector(this.horizVel, dt);
     TMP.next.addScaledVector(up, this.vertVel * dt);
 
-    // --- 4. Colisión con el suelo (raycast al hitmesh BVH) ---
+    // --- 4. Colisión con el suelo: altura ANALÍTICA del terreno ---
+    // heightAt es la MISMA fórmula que desplaza la malla visual, así que el
+    // avatar queda clavado a la superficie que se VE. (El raycast al hitmesh
+    // low-poly cortaba esquinas en las cuestas y hundía al personaje hasta
+    // ~2.4 u; queda reservado para tap-to-move.)
     const nextUp = TMP.next.clone().normalize();
-    const hit = this.planet.sampleGround(TMP.next, nextUp, 14);
-    if (hit) {
-      const groundY = hit.point.clone().sub(TMP.next).dot(nextUp); // <0 si suelo debajo
-      const feetTarget = this.eyeHeight; // centro debe quedar a eyeHeight del suelo
-      const centerAboveGround = -groundY; // altura del centro sobre el suelo
+    const surfaceR = this.planet.field.radius + this.planet.field.heightAt(nextUp);
+    const centerAboveGround = TMP.next.length() - surfaceR;
 
-      // Pendiente no caminable: si es demasiado empinada, frena el avance.
-      const walkable = hit.normal.dot(nextUp) >= this.slopeLimitCos;
-      if (!walkable && this.grounded) {
-        this.horizVel.multiplyScalar(0.2);
-      }
-      this.groundNormal.copy(hit.normal);
+    // Normal analítica en la posición nueva (para el blob y consumidores).
+    const normal = this.planet.field.surfaceNormal(nextUp, TMP.normal);
+    this.groundNormal.copy(normal);
 
-      if (this.vertVel <= 0 && centerAboveGround <= feetTarget + 0.35) {
-        // Pegar al suelo.
-        TMP.next.copy(hit.point).addScaledVector(nextUp, feetTarget);
-        this.vertVel = 0;
-        this.grounded = true;
-        this.timeSinceGround = 0;
-      } else {
-        this.grounded = false;
-      }
+    if (this.vertVel <= 0 && centerAboveGround <= this.eyeHeight + 0.35) {
+      // Pegar al suelo (centro a eyeHeight sobre la superficie).
+      TMP.next.copy(nextUp).multiplyScalar(surfaceR + this.eyeHeight);
+      this.vertVel = 0;
+      this.grounded = true;
+      this.timeSinceGround = 0;
     } else {
       this.grounded = false;
     }
@@ -249,10 +266,10 @@ export class CharacterController {
   }
 
   private updateBlob(up: THREE.Vector3): void {
-    // Proyecta el blob al suelo bajo el personaje, orientado a la normal.
-    const hit = this.planet.sampleGround(this.position, up, 14);
-    const surface = hit ? hit.point : this.position.clone().addScaledVector(up, -this.eyeHeight);
-    const nrm = hit ? hit.normal : up;
+    // Proyecta el blob al suelo bajo el personaje (superficie analítica),
+    // orientado a la normal — cero raycasts por frame.
+    const surface = this.planet.field.surfacePoint(up, TMP.surf);
+    const nrm = this.planet.field.surfaceNormal(up, TMP.normal);
     this.blob.position.copy(surface).addScaledVector(nrm, 0.05);
     this.blob.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), nrm);
     // El blob se encoge un poco al saltar (aire = sombra más chica y tenue).
