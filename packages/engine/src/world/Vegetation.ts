@@ -50,7 +50,11 @@ export class Vegetation {
   build(): void {
     const rand = mulberry32(0x9a3c1);
     this.buildGrass(rand);
-    this.buildFerns(rand);
+    // Anclas de agrupación: puntos en el anillo de bordes (donde viven árboles y
+    // rocas). Helechos y matas se aglomeran ahí — nada de dispersión uniforme.
+    const clumps = this.clumpAnchors(rand, 16);
+    this.buildShrubs(rand, clumps);
+    this.buildFerns(rand, clumps);
     this.buildFlowers(rand);
     this.buildTrees(rand);
     this.buildRocks(rand);
@@ -89,16 +93,156 @@ export class Vegetation {
     return out;
   }
 
-  /** Cara plana cruzada (2 quads) de ancho w y alto h, base en y=0. */
-  private crossedCard(w: number, h: number): THREE.BufferGeometry {
-    const p1 = new THREE.PlaneGeometry(w, h);
-    p1.translate(0, h / 2, 0);
-    const p2 = p1.clone();
-    p2.rotateY(Math.PI / 2);
-    const merged = mergeGeometries([p1, p2], false)!;
-    p1.dispose();
-    p2.dispose();
+  /**
+   * Anclas de agrupación en el anillo de bordes del claro (donde se agolpan
+   * árboles guardianes y rocas-menhir): 14..22 u de arco, fuera del claro. Los
+   * helechos y matas cuelgan de estas anclas → masa vegetal intencional al pie
+   * de la arboleda, no confeti disperso por todo el casquete.
+   */
+  private clumpAnchors(rand: () => number, n: number): THREE.Vector3[] {
+    const anchors: THREE.Vector3[] = [];
+    const excl = this.excludeAngle();
+    const minA = Math.max(13 / this.R, excl);
+    let guard = 0;
+    while (anchors.length < n && guard++ < n * 12) {
+      randomDirInCap(rand, 22 / this.R, this.axis, minA, this._dir);
+      if (this.field.clearingMask(this._dir) > 0.25) continue; // bordes, no el centro
+      anchors.push(this._dir.clone());
+    }
+    return anchors;
+  }
+
+  /** Base ortonormal tangente a una dirección (para esparcir matas/clusters). */
+  private tangentBasis(dir: THREE.Vector3, u: THREE.Vector3, v: THREE.Vector3): void {
+    const t = Math.abs(dir.y) < 0.99 ? new THREE.Vector3(0, 1, 0) : new THREE.Vector3(1, 0, 0);
+    u.crossVectors(t, dir).normalize();
+    v.crossVectors(dir, u);
+  }
+
+  /**
+   * Una fronda de helecho: listón arqueado que sube desde el centro y se dobla
+   * hacia afuera-abajo (arco de curvatura constante). Sección transversal en ∧
+   * (tienda) con cresta central alzada → sus normales miran arriba/afuera y se
+   * ilumina como el suelo (nada de caras negras). Taper hacia la punta.
+   */
+  private fernFrond(seed: number): THREE.BufferGeometry {
+    const S = 2; // segmentos → hasta 8 tris
+    const Ls = 0.82 + seed * 0.28; // largo de arco
+    const maxBend = 2.05 + seed * 0.5; // >π/2: la punta sobrepasa la horizontal y cae
+    const r = Ls / maxBend;
+    const w0 = 0.09; // media anchura en la base
+    const secC: THREE.Vector3[] = [];
+    const secL: THREE.Vector3[] = [];
+    const secR: THREE.Vector3[] = [];
+    for (let i = 0; i <= S; i++) {
+      const t = i / S;
+      const ang = t * maxBend;
+      const x = r * (1 - Math.cos(ang));
+      const y = r * Math.sin(ang);
+      const w = w0 * Math.pow(1 - t, 0.6);
+      const dip = w * 0.55; // los bordes bajan respecto a la cresta → tienda ∧
+      secC.push(new THREE.Vector3(x, y, 0));
+      secL.push(new THREE.Vector3(x, y - dip, w));
+      secR.push(new THREE.Vector3(x, y - dip, -w));
+    }
+    const pos: number[] = [];
+    const push = (a: THREE.Vector3, b: THREE.Vector3, c: THREE.Vector3) =>
+      pos.push(a.x, a.y, a.z, b.x, b.y, b.z, c.x, c.y, c.z);
+    for (let i = 0; i < S; i++) {
+      // Ala izquierda (cresta↔borde izq) y ala derecha (cresta↔borde der).
+      push(secC[i], secL[i], secL[i + 1]);
+      push(secC[i], secL[i + 1], secC[i + 1]);
+      push(secC[i], secC[i + 1], secR[i + 1]);
+      push(secC[i], secR[i + 1], secR[i]);
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+    return geo;
+  }
+
+  /** Planta de helecho: 6 frondas radiales arqueadas, malla 3D chunky. */
+  private fernPlant(): THREE.BufferGeometry {
+    const fronds = 6;
+    const parts: THREE.BufferGeometry[] = [];
+    for (let i = 0; i < fronds; i++) {
+      const f = this.fernFrond((i * 0.618) % 1);
+      f.rotateY((i / fronds) * Math.PI * 2 + i * 0.4);
+      parts.push(f);
+    }
+    const merged = mergeGeometries(parts, false)!;
+    parts.forEach((p) => p.dispose());
+    merged.computeVertexNormals(); // facetado (per-vértice sobre non-indexed)
     return merged;
+  }
+
+  /** Tallo de flor: prisma triangular finito facetado, base en y=0. */
+  private flowerStem(h: number): THREE.BufferGeometry {
+    const geo = new THREE.CylinderGeometry(0.012, 0.02, h, 3, 1).toNonIndexed();
+    geo.translate(0, h / 2, 0);
+    geo.computeVertexNormals();
+    return geo;
+  }
+
+  /**
+   * Corola facetada como gema achatada (pirámide hexagonal baja): 6 tris, punto
+   * de color CON volumen. Anclada sobre el tallo (base del anillo en y=`atY`).
+   */
+  private flowerCorolla(atY: number): THREE.BufferGeometry {
+    const petals = 6;
+    const rad = 0.085;
+    const rise = 0.075;
+    const apex = new THREE.Vector3(0, atY + rise, 0);
+    const pos: number[] = [];
+    for (let i = 0; i < petals; i++) {
+      const a0 = (i / petals) * Math.PI * 2;
+      const a1 = ((i + 1) / petals) * Math.PI * 2;
+      const p0 = new THREE.Vector3(Math.cos(a0) * rad, atY, Math.sin(a0) * rad);
+      const p1 = new THREE.Vector3(Math.cos(a1) * rad, atY, Math.sin(a1) * rad);
+      pos.push(apex.x, apex.y, apex.z, p0.x, p0.y, p0.z, p1.x, p1.y, p1.z);
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+    geo.computeVertexNormals();
+    return geo;
+  }
+
+  /** Blob facetado low-poly (icosfera deformada y achatada) para matas/arbustos. */
+  private shrubBlob(): THREE.BufferGeometry {
+    // IcosahedronGeometry ya es non-indexed (una tripleta por cara) → deformar
+    // por posición no abre grietas y computeVertexNormals da facetas planas.
+    const geo = new THREE.IcosahedronGeometry(0.6, 1);
+    const pos = geo.attributes.position as THREE.BufferAttribute;
+    const n = new THREE.Vector3();
+    // Deformación determinista: achatada en Y + protuberancias irregulares.
+    for (let i = 0; i < pos.count; i++) {
+      n.fromBufferAttribute(pos, i);
+      const bump = 0.82 + 0.32 * Math.sin(n.x * 5.1 + n.y * 3.3) * Math.cos(n.z * 4.7 + 1.2);
+      pos.setXYZ(i, n.x * bump, n.y * bump * 0.62, n.z * bump);
+    }
+    pos.needsUpdate = true;
+    geo.computeVertexNormals(); // facetas planas chunky
+    return geo;
+  }
+
+  /**
+   * Cortina de musgo colgante (Old Man's Beard): cono alargado irregular con la
+   * base ancha arriba (rama) afinando a la punta abajo. La instancia se orienta
+   * con +Y hacia abajo → cuelga hacia el suelo; el viento mece la punta.
+   */
+  private mossCone(): THREE.BufferGeometry {
+    const geo = new THREE.ConeGeometry(0.22, 1.0, 5, 2, true).toNonIndexed();
+    geo.translate(0, 0.5, 0); // base en y=0, punta en y=+1 (la instancia lo cuelga)
+    const pos = geo.attributes.position as THREE.BufferAttribute;
+    const v = new THREE.Vector3();
+    for (let i = 0; i < pos.count; i++) {
+      v.fromBufferAttribute(pos, i);
+      const k = 1 - v.y; // más ancho arriba (rama), afinado abajo
+      const j = 0.14 * Math.sin(v.y * 7.3 + i * 1.1);
+      pos.setXYZ(i, v.x * (0.7 + 0.5 * k) + j, v.y, v.z * (0.7 + 0.5 * k) - j);
+    }
+    pos.needsUpdate = true;
+    geo.computeVertexNormals();
+    return geo;
   }
 
   /**
@@ -233,34 +377,95 @@ export class Vegetation {
 
   // ---- helechos / matas ----
 
-  private buildFerns(rand: () => number): void {
+  private buildFerns(rand: () => number, clumps: THREE.Vector3[]): void {
     const s = this.preset.vegetation?.shrubs;
-    const count = Math.round(320 * (s?.density ?? 0.4));
-    // Normales hacia arriba: se iluminan como el suelo (nada de placas negras).
-    const geo = this.upNormals(this.crossedCard(1.1, 0.8));
+    // ~40% menos elementos de plano medio que el sistema de cards anterior.
+    const count = Math.round(200 * (s?.density ?? 0.4));
+    const geo = this.fernPlant(); // malla 3D (6 frondas arqueadas)
     const mat = new THREE.MeshToonMaterial({
       gradientMap: this.ramp,
-      side: THREE.DoubleSide,
+      side: THREE.DoubleSide, // fronda vista por cualquier lado: nunca hueco/negro
     });
-    this.windShader(mat, 0.8, 0.35);
+    // Vaivén suave: la punta de la fronda (~0.4 u) ondea, base quieta.
+    this.windShader(mat, 0.4, 0.28);
     const mesh = new THREE.InstancedMesh(geo, mat, count);
     // Verde helecho legible: salvia→ácida (no la banda oscura del primary).
     const cSage = new THREE.Color(this.preset.palette.secondary);
     const cAccent = new THREE.Color(this.preset.palette.accent);
     const col = new THREE.Color();
-    const excl = this.excludeAngle();
+    const u = new THREE.Vector3();
+    const v = new THREE.Vector3();
 
     let placed = 0;
-    let guard = 0;
-    while (placed < count && guard++ < count * 6) {
-      randomDirInCap(rand, 20 / this.R, this.axis, excl, this._dir);
-      const yaw = rand() * Math.PI * 2;
-      const sc = 0.8 + rand() * 0.7;
-      this._s.set(sc, sc * (0.8 + rand() * 0.4), sc);
-      mesh.setMatrixAt(placed, this.placeMatrix(this._dir, yaw, this._s, 0.1, this._m));
-      col.copy(cSage).lerp(cAccent, 0.2 + rand() * 0.4);
-      mesh.setColorAt(placed, col);
-      placed++;
+    for (let a = 0; a < clumps.length && placed < count; a++) {
+      const anchor = clumps[a];
+      this.tangentBasis(anchor, u, v);
+      // Mata de 2-4 helechos al pie de la arboleda/roca (radio ~1.8 u).
+      const per = 2 + ((rand() * 3) | 0);
+      for (let k = 0; k < per && placed < count; k++) {
+        const r = (rand() * 1.8) / this.R;
+        const ang = rand() * Math.PI * 2;
+        this._dir
+          .copy(anchor)
+          .addScaledVector(u, Math.cos(ang) * r)
+          .addScaledVector(v, Math.sin(ang) * r)
+          .normalize();
+        if (this.field.clearingMask(this._dir) > 0.3) continue; // claro limpio
+        const yaw = rand() * Math.PI * 2;
+        const sc = 0.85 + rand() * 0.7;
+        this._s.set(sc, sc * (0.85 + rand() * 0.35), sc);
+        mesh.setMatrixAt(placed, this.placeMatrix(this._dir, yaw, this._s, 0.04, this._m));
+        col.copy(cSage).lerp(cAccent, 0.2 + rand() * 0.45);
+        mesh.setColorAt(placed, col);
+        placed++;
+      }
+    }
+    mesh.count = placed;
+    if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+    this.registerMesh(mesh);
+  }
+
+  // ---- matas / arbustos (blobs facetados low-poly) ----
+
+  private buildShrubs(rand: () => number, clumps: THREE.Vector3[]): void {
+    const s = this.preset.vegetation?.shrubs;
+    const count = Math.round(130 * (s?.density ?? 0.4)); // masa vegetal intermedia
+    const geo = this.shrubBlob();
+    const mat = new THREE.MeshToonMaterial({ gradientMap: this.ramp });
+    this.windShader(mat, 0.5, 0.12); // masa casi rígida, apenas respira
+    const mesh = new THREE.InstancedMesh(geo, mat, count);
+    // Verde vegetal apagado: musgo profundo→salvia (masa, no acento brillante).
+    const cDeep = new THREE.Color(this.preset.palette.primary);
+    const cSage = new THREE.Color(this.preset.palette.secondary);
+    const col = new THREE.Color();
+    const u = new THREE.Vector3();
+    const v = new THREE.Vector3();
+    // 3 tamaños discretos → matas chunky intencionales, no ruido continuo.
+    const sizes = [0.75, 1.05, 1.5];
+
+    let placed = 0;
+    for (let a = 0; a < clumps.length && placed < count; a++) {
+      const anchor = clumps[a];
+      this.tangentBasis(anchor, u, v);
+      const per = 1 + ((rand() * 2) | 0); // 1-2 matas por ancla
+      for (let k = 0; k < per && placed < count; k++) {
+        const r = (rand() * 2.2) / this.R;
+        const ang = rand() * Math.PI * 2;
+        this._dir
+          .copy(anchor)
+          .addScaledVector(u, Math.cos(ang) * r)
+          .addScaledVector(v, Math.sin(ang) * r)
+          .normalize();
+        if (this.field.clearingMask(this._dir) > 0.25) continue;
+        const base = sizes[(rand() * sizes.length) | 0];
+        const yaw = rand() * Math.PI * 2;
+        this._s.set(base * (0.9 + rand() * 0.2), base * (0.85 + rand() * 0.3), base * (0.9 + rand() * 0.2));
+        // Nestle: hunde ~mitad del blob para que asiente en el suelo.
+        mesh.setMatrixAt(placed, this.placeMatrix(this._dir, yaw, this._s, base * 0.24, this._m));
+        col.copy(cDeep).lerp(cSage, 0.35 + rand() * 0.4);
+        mesh.setColorAt(placed, col);
+        placed++;
+      }
     }
     mesh.count = placed;
     if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
@@ -271,16 +476,24 @@ export class Vegetation {
 
   private buildFlowers(rand: () => number): void {
     const f = this.preset.vegetation?.flowers;
-    const count = Math.round(1400 * (f?.density ?? 0.15));
-    // Flores pequeñas (nada de confeti): card chica y matas de 3-5.
-    const geo = this.upNormals(this.crossedCard(0.22, 0.34));
-    const mat = new THREE.MeshToonMaterial({
+    // Menos flores que el confeti anterior (~40% menos), en los BORDES del claro.
+    const count = Math.round(850 * (f?.density ?? 0.15));
+    const stemH = 0.22;
+    // Dos mallas que comparten matriz por flor: tallo verde + corola de color.
+    const stemGeo = this.flowerStem(stemH);
+    const corGeo = this.flowerCorolla(stemH);
+    const stemMat = new THREE.MeshToonMaterial({
       gradientMap: this.ramp,
-      side: THREE.DoubleSide,
+      color: new THREE.Color(this.preset.palette.primary).lerp(
+        new THREE.Color(this.preset.palette.secondary),
+        0.4,
+      ),
     });
-    // Vaivén muy leve para que no queden rígidas.
-    this.windShader(mat, 0.26, 0.2);
-    const mesh = new THREE.InstancedMesh(geo, mat, count);
+    const corMat = new THREE.MeshToonMaterial({ gradientMap: this.ramp, side: THREE.DoubleSide });
+    this.windShader(stemMat, stemH + 0.075, 0.22);
+    this.windShader(corMat, stemH + 0.075, 0.22);
+    const stems = new THREE.InstancedMesh(stemGeo, stemMat, count);
+    const corollas = new THREE.InstancedMesh(corGeo, corMat, count);
     const palette = (f?.colors?.length ? f.colors : ["#E8ECEA", "#E67E22"]).map(
       (c) => new THREE.Color(c),
     );
@@ -289,22 +502,21 @@ export class Vegetation {
     const center = new THREE.Vector3();
     const tanU = new THREE.Vector3();
     const tanV = new THREE.Vector3();
-    const tmp = new THREE.Vector3(1, 0, 0);
 
     let placed = 0;
     let guard = 0;
-    while (placed < count && guard++ < count * 6) {
-      // Centro de mata en el claro florido (hasta ~16 u).
-      randomDirInCap(rand, 16 / this.R, this.axis, excl, center);
-      // Base tangente para esparcir la mata (~0.6 u de radio).
-      tanU.crossVectors(tmp, center).normalize();
-      tanV.crossVectors(center, tanU);
-      // Color de la mata: blanca o naranja; algunas matas mezcladas.
+    while (placed < count && guard++ < count * 8) {
+      // Centro de mata en el ANILLO del borde del claro (arco ~9..16 u): la
+      // pradera central queda limpia, las flores orlan el claro.
+      randomDirInCap(rand, 16 / this.R, this.axis, Math.max(9 / this.R, excl), center);
+      const mask = this.field.clearingMask(center);
+      if (mask < 0.08 || mask > 0.9) continue; // solo el borde, ni centro ni fuera
+      this.tangentBasis(center, tanU, tanV);
       const clusterColor = palette[(rand() * palette.length) | 0];
       const mixed = rand() < 0.3;
-      const clusterSize = 3 + ((rand() * 3) | 0); // 3-5 flores
+      const clusterSize = 3 + ((rand() * 3) | 0); // matas de 3-5
       for (let k = 0; k < clusterSize && placed < count; k++) {
-        const r = (rand() * 0.6) / this.R;
+        const r = (rand() * 0.5) / this.R;
         const a = rand() * Math.PI * 2;
         this._dir
           .copy(center)
@@ -312,20 +524,23 @@ export class Vegetation {
           .addScaledVector(tanV, Math.sin(a) * r)
           .normalize();
         const yaw = rand() * Math.PI * 2;
-        const sc = 0.6 + rand() * 0.5;
+        const sc = 0.75 + rand() * 0.5;
         this._s.set(sc, sc, sc);
-        mesh.setMatrixAt(placed, this.placeMatrix(this._dir, yaw, this._s, 0.03, this._m));
-        // 2 tonos por mata: alternar flor base / flor aclarada hacia blanco
-        // (la mata se lee como mancha con volumen, no puntito suelto).
+        this.placeMatrix(this._dir, yaw, this._s, 0.02, this._m);
+        stems.setMatrixAt(placed, this._m);
+        corollas.setMatrixAt(placed, this._m);
+        // 2 tonos por mata: base / aclarada hacia blanco → mancha con volumen.
         col.copy(mixed ? palette[(rand() * palette.length) | 0] : clusterColor);
-        if (k % 2 === 1) col.lerp(new THREE.Color(0xffffff), 0.35);
-        mesh.setColorAt(placed, col);
+        if (k % 2 === 1) col.lerp(new THREE.Color(0xffffff), 0.3);
+        corollas.setColorAt(placed, col);
         placed++;
       }
     }
-    mesh.count = placed;
-    if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
-    this.registerMesh(mesh);
+    stems.count = placed;
+    corollas.count = placed;
+    if (corollas.instanceColor) corollas.instanceColor.needsUpdate = true;
+    this.registerMesh(stems);
+    this.registerMesh(corollas);
   }
 
   // ---- árboles guardianes retorcidos + musgo colgante ----
@@ -352,13 +567,13 @@ export class Vegetation {
       transparent: true,
       opacity: 0.85,
     });
-    this.windShader(mossMat, 1.4, 0.4);
+    this.windShader(mossMat, 1.0, 0.45); // la punta (y=1) del cono se mece
 
     const blobsPerTree = 3;
     const trunks = new THREE.InstancedMesh(trunkGeo, trunkMat, treeCount);
     const canopy = new THREE.InstancedMesh(blobGeo, canopyMat, treeCount * blobsPerTree);
-    // Normales hacia arriba: el musgo se lee verde pálido, no placa negra.
-    const mossGeo = this.upNormals(this.crossedCard(0.5, 1.4));
+    // Cortina cónica 3D (Old Man's Beard) que cuelga de la copa.
+    const mossGeo = this.mossCone();
     const moss = new THREE.InstancedMesh(mossGeo, mossMat, treeCount * 2);
 
     const cBark = new THREE.Color(this.preset.palette.ground).multiplyScalar(0.75);
@@ -429,13 +644,25 @@ export class Vegetation {
         void topLocal;
       }
 
-      // Musgo colgante en ~60% de los árboles (cornisas).
+      // Musgo colgante en ~60% de los árboles (cornisas): cuelga de la copa.
       if (tp?.mossHang !== false && rand() < 0.6 && mi < moss.count) {
-        const mOff = new THREE.Vector3((rand() - 0.5) * 1.2, 1.6 + rand() * 0.8, (rand() - 0.5) * 1.2)
+        // Se ancla arriba en el tronco/copa, con leve desplazamiento lateral.
+        const lateral = new THREE.Vector3((rand() - 0.5) * 1.4, 0, (rand() - 0.5) * 1.4)
           .applyQuaternion(this._q)
           .multiplyScalar(scale * 0.6);
-        this._s.set(scale * 0.9, scale * (1.1 + rand() * 0.6), scale * 0.9);
-        this._m.compose(this._pos.clone().add(mOff), this._q, this._s);
+        const attach = this._pos
+          .clone()
+          .addScaledVector(this._up, scale * 1.7)
+          .add(lateral);
+        // Orientación con +Y local hacia ABAJO → la cortina cuelga al suelo.
+        const down = this._up.clone().negate();
+        const qMoss = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), down);
+        qMoss.multiply(
+          new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), rand() * Math.PI * 2),
+        );
+        const len = scale * (0.8 + rand() * 0.5); // punta por encima del suelo
+        this._s.set(scale * 0.7, len, scale * 0.7);
+        this._m.compose(attach, qMoss, this._s);
         moss.setMatrixAt(mi, this._m);
         moss.setColorAt(mi, cMoss);
         mi++;
