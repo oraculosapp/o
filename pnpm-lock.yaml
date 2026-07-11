@@ -52,9 +52,17 @@ importers:
         specifier: ^5.6.0
         version: 5.9.3
 
-  packages/content: {}
+  packages/content:
+    devDependencies:
+      typescript:
+        specifier: ^5.6.0
+        version: 5.9.3
 
   packages/engine:
+    dependencies:
+      three-mesh-bvh:
+        specifier: ^0.9.1
+        version: 0.9.11(three@0.180.0)
     devDependencies:
       '@types/three':
         specifier: ^0.180.0
@@ -433,6 +441,11 @@ packages:
       babel-plugin-macros:
         optional: true
 
+  three-mesh-bvh@0.9.11:
+    resolution: {integrity: sha512-PtGT02vWRQiP6szrcorR1GEClhHSr/+O45pyH/cQ8sY+UOlicecuUVjAHmIsbIri3ZO/8WTWBq3h7227F/TVBw==}
+    peerDependencies:
+      three: '>= 0.159.0'
+
   three@0.180.0:
     resolution: {integrity: sha512-o+qycAMZrh+TsE01GqWUxUIKR1AL0S8pq7zDkYOQw8GqfX8b8VoCKYUoHbhiX5j+7hr8XsuHDVU6+gkQJQKg9w==}
 
@@ -731,6 +744,10 @@ snapshots:
     dependencies:
       client-only: 0.0.1
       react: 19.2.7
+
+  three-mesh-bvh@0.9.11(three@0.180.0):
+    dependencies:
+      three: 0.180.0
 
   three@0.180.0: {}
 

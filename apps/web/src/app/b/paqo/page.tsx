@@ -1,8 +1,9 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { HolaPlaneta, type PlanetPreset } from "@phygitalia/engine";
+import { PaqoWorld, type BiospherePreset } from "@phygitalia/engine";
 import paqo from "@phygitalia/content/biospheres/paqo.json";
+import { PerfOverlay } from "@/components/dev/PerfOverlay";
 import styles from "./paqo.module.css";
 
 export default function PaqoBiosphere() {
@@ -13,16 +14,17 @@ export default function PaqoBiosphere() {
     const el = mountRef.current;
     if (!el) return;
 
-    // El JSON completo del preset satisface el subconjunto PlanetPreset.
-    const planet = new HolaPlaneta(el, paqo as unknown as PlanetPreset, () => setReady(true));
-    planet.start();
+    // El JSON completo del preset satisface el subconjunto BiospherePreset.
+    const world = new PaqoWorld(el, paqo as unknown as BiospherePreset, () => setReady(true));
+    world.start();
 
-    return () => planet.dispose();
+    return () => world.dispose();
   }, []);
 
   return (
     <main className={styles.stage}>
       <div ref={mountRef} className={styles.canvas} />
+      <PerfOverlay />
       {!ready && (
         <div className={styles.loader} role="status" aria-live="polite">
           <div className={styles.rune} aria-hidden />

@@ -1,0 +1,12 @@
+# Normaliza line endings a LF para todo lo que Git detecte como texto.
+* text=auto eol=lf
+
+# Binarios: nunca normalizar, nunca diff de texto.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.ktx2 binary
+*.glb binary
+*.ogg binary
+*.woff2 binary
+*.ttf binary
