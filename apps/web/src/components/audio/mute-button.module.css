@@ -1,0 +1,57 @@
+/* Botón mute del HUD — side-button glass (mismo lenguaje que campanita/perfil),
+   anclado arriba-derecha a la izquierda del clúster de HudControls. */
+
+.button {
+  position: fixed;
+  top: 16px;
+  /* Deja sitio al clúster (2 botones de 40px + gap + margen derecho). */
+  right: 112px;
+  z-index: 35;
+  display: inline-grid;
+  place-content: center;
+  width: 40px;
+  height: 40px;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  background: var(--panel);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  box-shadow: var(--shadow);
+  color: var(--text);
+  cursor: pointer;
+  transition:
+    transform var(--dur-fast) var(--ease-brand),
+    border-color var(--dur-fast) var(--ease-brand),
+    box-shadow var(--dur-fast) var(--ease-brand),
+    color var(--dur-fast) var(--ease-brand);
+}
+.button:hover {
+  transform: translateY(-2px);
+  color: var(--gold-bright);
+  border-color: var(--gold-dim);
+  box-shadow:
+    var(--shadow),
+    0 0 20px var(--glow);
+}
+.button:focus-visible {
+  outline: none;
+  border-color: var(--gold-dim);
+  box-shadow: 0 0 0 2px var(--glow);
+}
+/* Silenciado: apagado, sin resaltar. */
+.button[aria-pressed="true"] {
+  color: var(--text-faint);
+}
+
+@media (max-width: 640px) {
+  .button {
+    top: 12px;
+    right: 104px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .button {
+    transition: none;
+  }
+}

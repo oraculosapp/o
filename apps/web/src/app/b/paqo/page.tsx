@@ -7,6 +7,8 @@ import { PerfOverlay } from "@/components/dev/PerfOverlay";
 import { ChatDock } from "@/components/chat/ChatDock";
 import { HintToasts } from "@/components/hints/HintToasts";
 import { HudControls } from "@/components/notifications/HudControls";
+import { MuteButton } from "@/components/audio/MuteButton";
+import { InstallButton } from "@/components/pwa/InstallButton";
 import type { WorldNetHooks } from "@/lib/realtime";
 import styles from "./paqo.module.css";
 
@@ -51,6 +53,12 @@ export default function PaqoBiosphere() {
 
       {/* Campanita de notificaciones + enlace al perfil (arriba-derecha). */}
       <HudControls />
+
+      {/* Botón mute del soundscape (arriba-derecha, a la izq. del clúster). */}
+      <MuteButton />
+
+      {/* Píldora "Instalar app" (arriba-izquierda); se autooculta si no aplica. */}
+      <InstallButton placement="hud" />
 
       {!ready && (
         <div className={styles.loader} role="status" aria-live="polite">

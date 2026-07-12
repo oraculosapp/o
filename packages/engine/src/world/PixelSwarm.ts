@@ -52,9 +52,10 @@ export class PixelSwarm {
     const sizes = new Float32Array(count);
     const colors = new Float32Array(count * 3);
 
-    // Paleta oro / rosa / lila (del preset si viene, con fallback místico).
+    // Paleta oro / rosa / púrpura / turquesa / naranja (del preset si viene,
+    // con fallback místico). El oro sigue siendo el rey de los emisivos.
     const pixelEntry = preset.particles?.find((p) => (p.colors?.length ?? 0) > 0);
-    const hexes = pixelEntry?.colors ?? ["#E3B063", "#F2A6B8", "#C9A8D4"];
+    const hexes = pixelEntry?.colors ?? ["#E3B063", "#F2A6B8", "#B18BC9", "#37D6C4", "#FF9E6B"];
     const palette = hexes.map((h) => new THREE.Color(h));
     const clear = field.clearLevel;
 

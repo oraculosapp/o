@@ -39,6 +39,23 @@ export class Water {
     for (const m of this.mats) m.uniforms.uTime.value = t;
   }
 
+  /**
+   * Proximidad 0..1 al cuerpo de agua más cercano (laguna / río / cascada) en el
+   * plano XZ, para que el audio mezcle la capa de agua por cercanía. 1 = sobre el
+   * agua, 0 = a ≥9 u. Aproxima el río como el corredor +X con su meandro.
+   */
+  proximityAt(x: number, z: number): number {
+    const dLagoon = Math.hypot(x - this.basinPos.x, z - this.basinPos.z) - 5.5;
+    let dRiver = Infinity;
+    if (x > 4) {
+      const meander = Math.sin((x - 6) * 0.16) * 2.2; // mismo trazo que buildRiver
+      dRiver = Math.abs(z - meander) - 0.8;
+    }
+    const dFall = Math.hypot(x - this.waterfallTop.x, z - this.waterfallTop.z) - 1.2;
+    const d = Math.max(0, Math.min(dLagoon, dRiver, dFall));
+    return Math.max(0, 1 - d / 9);
+  }
+
   // ---- cuenca más baja (banda del anfiteatro exterior, fuera del paso +X) ----
 
   private findBasin(): { x: number; z: number } {
@@ -171,8 +188,9 @@ export class Water {
       uniforms: {
         uTime: { value: 0 },
         uColor: { value: new THREE.Color(this.preset.water?.color ?? "#C9D2CE") },
-        // Espuma en blanco rosado: el agua refleja el rosa del cielo flamingo.
-        uFoam: { value: new THREE.Color(0xffe9ef) },
+        // Espuma blanca apenas turquesa: acento frío que chispea sobre el agua
+        // malva que refleja el cielo flamingo.
+        uFoam: { value: new THREE.Color(0xdcf5ee) },
         uOpacity: { value: mode === 2 ? 0.85 : 0.72 },
         uMode: { value: mode },
         uFoamAmt: { value: this.preset.water?.foam ?? 0.7 },

@@ -1,5 +1,7 @@
 import Link from "next/link";
 import SplashCanvas from "./splash-canvas";
+import { InstallButton } from "@/components/pwa/InstallButton";
+import { Footer } from "@/components/legal/Footer";
 import styles from "./page.module.css";
 
 // Splash de o.oraculos.app — la puerta al mundo. Todo el texto es SSR (SEO);
@@ -35,9 +37,13 @@ export default function Home() {
             PHYGITALIA · El mundo de los Oráculos Telúrico&#8209;Sintéticos
           </p>
         </div>
-        <Link href="/b/paqo" className={styles.enter}>
-          ENTRAR
-        </Link>
+        <div className={styles.tail}>
+          <Link href="/b/paqo" className={styles.enter}>
+            ENTRAR
+          </Link>
+          <InstallButton />
+          <Footer />
+        </div>
       </div>
 
       {/* Viñeta superior para asentar el logo sobre la escena. */}

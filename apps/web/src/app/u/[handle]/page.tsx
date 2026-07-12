@@ -17,9 +17,9 @@ export async function generateMetadata({ params }: PageParams): Promise<Metadata
   const { handle } = await params;
   const profile = await fetchPublicProfile(handle);
   if (!profile) {
-    return { title: "Perfil no encontrado — Phygitalia" };
+    return { title: "Perfil no encontrado" };
   }
-  const title = `@${profile.handle} — Phygitalia`;
+  const title = `@${profile.handle}`;
   const description = profile.bio?.trim()
     ? profile.bio.trim().slice(0, 160)
     : `El perfil de @${profile.handle} en el mundo de los Oráculos Telúrico-Sintéticos.`;

@@ -19,6 +19,19 @@ export { AnimationDriver, type Locomotion } from "./avatar/AnimationDriver";
 export { TintController, toToonMaterial, avatarToonRamp, type HueBand } from "./avatar/tint";
 export type { IAvatarRig, AvatarDriveState, TintZone, PropSocket } from "./avatar/types";
 
+// --- Audio procedural (equipo Audio S4): WebAudio 100% sintético, cero archivos ---
+export { Soundscape } from "./audio/Soundscape";
+export { SoundscapeEngine } from "./audio/SoundscapeEngine";
+export { AmbientBed } from "./audio/AmbientBed";
+export { Foley } from "./audio/Foley";
+export { uiSound, type UiSoundKind } from "./audio/UiBlips";
+export {
+  AUDIO_MUTE_KEY,
+  getAudioMuted,
+  setAudioMuted,
+  subscribeAudioMuted,
+} from "./audio/muteStore";
+
 // --- Multijugador: hooks del mundo (equipo Engine-Net S3b) ---
 export { WorldNet } from "./net/WorldNet";
 export { RemotePlayers } from "./net/RemotePlayers";

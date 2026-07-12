@@ -1,0 +1,256 @@
+/* Páginas legales + footer + banner de cookies — design system Phygitalia. */
+
+.main {
+  position: relative;
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: clamp(1rem, 4vw, 2.5rem) 1rem 0;
+}
+
+.nebula {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  background:
+    radial-gradient(60% 80% at 20% 12%, rgba(201, 138, 94, 0.16), transparent 60%),
+    radial-gradient(70% 90% at 84% 22%, rgba(80, 96, 150, 0.18), transparent 65%),
+    radial-gradient(55% 60% at 50% 82%, rgba(227, 176, 99, 0.08), transparent 60%),
+    linear-gradient(160deg, #0a0c16, #0b0d18 40%, #0d0e19 70%, #0a0b13);
+}
+
+/* --- Panel glass ------------------------------------------------------------ */
+.card {
+  width: 100%;
+  max-width: 720px;
+  padding: clamp(1.4rem, 4vw, 2.6rem);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  box-shadow: var(--shadow);
+}
+
+.head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1.4rem;
+}
+.back {
+  font-family: var(--font-display);
+  font-size: 0.72rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--gold);
+  transition: color var(--dur-fast) var(--ease-brand);
+}
+.back:hover {
+  color: var(--gold-bright);
+}
+.updated {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 0.62rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+.title {
+  margin: 0 0 0.8rem;
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: clamp(1.5rem, 5vw, 2.1rem);
+  letter-spacing: 0.02em;
+  color: var(--gold-bright);
+}
+.intro {
+  margin-bottom: 1.6rem;
+  color: var(--text-dim);
+  font-size: 1rem;
+  line-height: 1.65;
+}
+.intro b {
+  color: var(--text);
+}
+
+/* --- Cuerpo de texto legal (humano, legible) -------------------------------- */
+.body {
+  color: var(--text);
+  font-size: 0.96rem;
+  line-height: 1.7;
+}
+.body :global(h2) {
+  margin: 2rem 0 0.7rem;
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 0.82rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--gold);
+}
+.body :global(h2:first-child) {
+  margin-top: 0;
+}
+.body :global(p) {
+  margin: 0 0 1rem;
+  color: var(--text-dim);
+}
+.body :global(strong) {
+  color: var(--text);
+  font-weight: 600;
+}
+.body :global(ul) {
+  margin: 0 0 1rem;
+  padding-left: 1.2rem;
+}
+.body :global(li) {
+  margin-bottom: 0.5rem;
+  color: var(--text-dim);
+}
+.body :global(li)::marker {
+  color: var(--gold-dim);
+}
+.body :global(a) {
+  color: var(--gold);
+  text-decoration: underline;
+  text-decoration-color: var(--line);
+  text-underline-offset: 3px;
+  transition: color var(--dur-fast) var(--ease-brand);
+}
+.body :global(a:hover) {
+  color: var(--gold-bright);
+}
+.body :global(.note) {
+  margin: 1.4rem 0;
+  padding: 0.9rem 1.1rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: linear-gradient(180deg, rgba(227, 176, 99, 0.06), rgba(227, 176, 99, 0.01));
+  color: var(--text);
+  font-size: 0.9rem;
+}
+
+/* --- Footer ----------------------------------------------------------------- */
+.footer {
+  width: 100%;
+  max-width: 720px;
+  margin-top: auto;
+  padding: 2rem 0 1.6rem;
+  text-align: center;
+}
+.footerLinks {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.55rem;
+  flex-wrap: wrap;
+}
+.footerLink {
+  font-family: var(--font-display);
+  font-size: 0.7rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  transition: color var(--dur-fast) var(--ease-brand);
+}
+.footerLink:hover {
+  color: var(--gold-bright);
+}
+.dot {
+  color: var(--text-faint);
+}
+.credits {
+  margin: 0.9rem 0 0;
+  font-size: 0.76rem;
+  line-height: 1.5;
+  color: var(--text-faint);
+}
+
+/* --- Banner de cookies (selbar) --------------------------------------------- */
+.cookieBar {
+  position: fixed;
+  left: 50%;
+  bottom: 18px;
+  transform: translateX(-50%);
+  z-index: 80;
+  display: flex;
+  align-items: center;
+  gap: 0.9rem;
+  width: max-content;
+  max-width: min(92vw, 640px);
+  padding: 0.7rem 0.8rem 0.7rem 1.2rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-pill);
+  background: var(--panel-hi);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  box-shadow: var(--shadow);
+  animation: cookieIn var(--dur-slow) var(--ease-brand);
+}
+.cookieText {
+  margin: 0;
+  font-size: 0.82rem;
+  line-height: 1.45;
+  color: var(--text-dim);
+}
+.cookieLink {
+  color: var(--gold);
+  white-space: nowrap;
+  transition: color var(--dur-fast) var(--ease-brand);
+}
+.cookieLink:hover {
+  color: var(--gold-bright);
+}
+.cookieBtn {
+  flex: 0 0 auto;
+  padding: 0.55rem 1.2rem;
+  border: none;
+  border-radius: var(--radius-pill);
+  background: linear-gradient(180deg, var(--gold-bright), var(--gold));
+  color: var(--bg-0);
+  font-family: var(--font-display);
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition:
+    transform var(--dur-fast) var(--ease-brand),
+    filter var(--dur-fast) var(--ease-brand);
+}
+.cookieBtn:hover {
+  transform: translateY(-1px);
+  filter: brightness(1.06);
+}
+.cookieBtn:focus-visible {
+  outline: 2px solid var(--gold-bright);
+  outline-offset: 2px;
+}
+
+@keyframes cookieIn {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 10px);
+  }
+}
+
+@media (max-width: 560px) {
+  .cookieBar {
+    flex-direction: column;
+    gap: 0.6rem;
+    border-radius: var(--radius);
+    text-align: center;
+    padding: 0.9rem 1rem;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cookieBar {
+    animation: none;
+  }
+}

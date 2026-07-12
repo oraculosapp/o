@@ -1,0 +1,109 @@
+/* Píldora "Instalar app" — glass discreto del design system. */
+
+.wrap {
+  position: relative;
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+/* Variante HUD: fija arriba-izquierda del mundo 3D (lejos del chat/joystick
+   abajo-izquierda y de los controles arriba-derecha). */
+.hud {
+  position: fixed;
+  top: 16px;
+  left: 16px;
+  z-index: 35;
+}
+
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.55rem 1.1rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-pill);
+  background: var(--panel);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  box-shadow: var(--shadow);
+  color: var(--text);
+  cursor: pointer;
+  font-family: var(--font-display);
+  font-size: 0.72rem;
+  font-weight: 500;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  transition:
+    transform var(--dur-fast) var(--ease-brand),
+    color var(--dur-fast) var(--ease-brand),
+    border-color var(--dur-fast) var(--ease-brand),
+    box-shadow var(--dur-fast) var(--ease-brand);
+}
+.pill:hover {
+  transform: translateY(-2px);
+  color: var(--gold-bright);
+  border-color: var(--gold-dim);
+  box-shadow:
+    var(--shadow),
+    0 0 22px var(--glow);
+}
+.pill:focus-visible {
+  outline: none;
+  border-color: var(--gold-dim);
+  box-shadow: 0 0 0 2px var(--glow);
+}
+.pill svg {
+  color: var(--gold);
+}
+
+/* Instrucciones iOS: tarjeta glass bajo la píldora. */
+.iosHint {
+  position: absolute;
+  top: calc(100% + 0.5rem);
+  left: 50%;
+  transform: translateX(-50%);
+  width: max-content;
+  max-width: 82vw;
+  padding: 0.7rem 0.95rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--panel-hi);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  box-shadow: var(--shadow);
+  z-index: 2;
+  animation: hintIn var(--dur-slow) var(--ease-brand);
+}
+.hud .iosHint {
+  left: 0;
+  transform: none;
+}
+.iosText {
+  margin: 0;
+  color: var(--text);
+  font-size: 0.82rem;
+  line-height: 1.5;
+}
+.iosText b {
+  color: var(--gold-bright);
+}
+.iosText svg {
+  color: var(--gold);
+}
+
+@keyframes hintIn {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -6px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pill {
+    transition: none;
+  }
+  .iosHint {
+    animation: none;
+  }
+}

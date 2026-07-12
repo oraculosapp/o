@@ -12,7 +12,9 @@ import { PixelSwarm } from "./world/PixelSwarm";
 import { Totem } from "./world/Totem";
 import { BloomComposer } from "./postfx/BloomComposer";
 import { WorldNet } from "./net/WorldNet";
+import { Soundscape } from "./audio/Soundscape";
 import type { BiospherePreset } from "./planet/types";
+import type { BallState } from "./net/types";
 
 /**
  * PaqoWorld — escena jugable de la Biósfera Paqo, ahora sobre una ISLA FLOTANTE.
@@ -49,6 +51,9 @@ export class PaqoWorld {
   private totem!: Totem;
   private bloom!: BloomComposer;
 
+  /** Audio procedural (WebAudio 100% sintético). Disponible tras start(). */
+  private soundscape!: Soundscape;
+
   // Fundido de caída al vacío → respawn contemplativo.
   private fade!: HTMLDivElement;
   private fadePhase: "none" | "in" | "out" = "none";
@@ -67,6 +72,7 @@ export class PaqoWorld {
   private _ndc = new THREE.Vector2();
   private _pointerNdc = new THREE.Vector2();
   private _pointerWorld = new THREE.Vector3();
+  private _hvel = new THREE.Vector3();
   private static readonly UP = new THREE.Vector3(0, 1, 0);
 
   /** Spawn a ~7 u del tótem (origen), mirándolo; laderas del anfiteatro de fondo. */
@@ -132,6 +138,17 @@ export class PaqoWorld {
     });
     this.net.start();
 
+    // Audio procedural: cama ambiental generativa + foley + blips de UI. El
+    // contexto WebAudio nace en el primer gesto (política de autoplay). Se
+    // alimenta de las señales de zona (densidad de campanillas / "found") y de
+    // las patadas de pelota; la locomoción se conecta cada frame en el loop.
+    this.soundscape = new Soundscape();
+    this.net.onZoneSignal((signal) => this.soundscape.onZoneSignal(signal));
+    this.net.onBallKick((ballId: number, s: BallState) => {
+      const strength = Math.min(1, Math.hypot(s.vel[0], s.vel[2]) / 8);
+      this.soundscape.onBallKick(ballId, strength);
+    });
+
     this.bloom = new BloomComposer(
       this.renderer,
       this.scene,
@@ -158,6 +175,15 @@ export class PaqoWorld {
   /** Error de anclaje al suelo (m): |pies − heightAt|. Para la métrica de QA. */
   groundError(): number {
     return this.controller.groundError();
+  }
+
+  /**
+   * Estado del audio para el smoke test (handle __PAQO__): sin gesto reporta
+   * `{ created:false, state:"idle" }`; tras un gesto sintético, `created:true`,
+   * `state:"running"` y `persistentNodes>0`.
+   */
+  audioStats(): ReturnType<Soundscape["getStats"]> {
+    return this.soundscape.getStats();
   }
 
   private size(): { w: number; h: number } {
@@ -227,8 +253,8 @@ export class PaqoWorld {
     // bañe el valle SIN lavar el alma verde del terreno.
     this.scene.add(
       new THREE.HemisphereLight(
-        new THREE.Color(lg.skyBounceColor ?? "#EFC5BC"),
-        new THREE.Color(lg.ambientColor ?? "#433A6B"),
+        new THREE.Color(lg.skyBounceColor ?? "#F2BFC4"),
+        new THREE.Color(lg.ambientColor ?? "#4A3874"),
         lg.ambientIntensity ?? 0.78,
       ),
     );
@@ -371,6 +397,15 @@ export class PaqoWorld {
     // Multijugador: interpola remotos, integra pelotas, evalúa zonas.
     this.net.update(dt);
 
+    // Audio: cadencia de pasos/salto/aterrizaje atada a la velocidad REAL del
+    // controller, proximidad al agua para mezclar su capa, y avance de la cama
+    // generativa. Todo es no-op silencioso mientras no haya habido gesto.
+    const pos = this.controller.position;
+    const hSpeed = this.controller.getHorizVelocity(this._hvel).length();
+    this.soundscape.setWaterProximity(this.water.proximityAt(pos.x, pos.z));
+    this.soundscape.setMotion(hSpeed, 7, this.controller.isGrounded(), dt);
+    this.soundscape.update(dt);
+
     this.updateFade(dt);
 
     const runeMat = this.rune.material as THREE.MeshToonMaterial;
@@ -426,6 +461,7 @@ export class PaqoWorld {
     this.resizeObs?.disconnect();
     window.removeEventListener("resize", this.onResize);
     this.net?.dispose();
+    this.soundscape?.dispose();
     this.input?.dispose();
     this.controller?.dispose();
     this.rig?.dispose();

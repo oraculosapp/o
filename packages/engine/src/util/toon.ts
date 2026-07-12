@@ -5,10 +5,11 @@ import * as THREE from "three";
  * Compartida por terreno, avatar, runa y props — un solo look cel-shading.
  */
 export function makeToonRamp(): THREE.DataTexture {
-  // Rampa 3 bandas con LIFT MORADO en sombras y calidez ámbar en luces (multiplica
-  // el color lit del material → toon global morado/ámbar barato, sin pass de post):
-  //   sombra = malva profundo · medio = cálido neutro · luz = crema ámbar.
-  const data = new Uint8Array([74, 66, 98, 255, 172, 165, 150, 255, 255, 252, 245, 255]);
+  // Rampa 3 bandas con LIFT MORADO en sombras y calidez ámbar-rosa en luces
+  // (multiplica el color lit del material → grade toon global barato, sin pass):
+  //   sombra = púrpura profundo · medio = cálido con subtono rosa · luz = crema rosada.
+  // Un puntito más morado/rosa que la v1 (sutil, no teatral).
+  const data = new Uint8Array([78, 62, 104, 255, 174, 162, 156, 255, 255, 249, 247, 255]);
   const tex = new THREE.DataTexture(data, 3, 1, THREE.RGBAFormat);
   tex.minFilter = THREE.NearestFilter;
   tex.magFilter = THREE.NearestFilter;
