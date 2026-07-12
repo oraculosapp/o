@@ -50,6 +50,12 @@ const BALL_COLORS = [
   0x6b7bd7, // índigo
   0xe3b063, // ★ dorada (acento de Paqo)
 ];
+/** Índice de la pelota dorada en la paleta (acento de Paqo). */
+const GOLD_INDEX = BALL_COLORS.length - 1;
+/** Emisivo base de las pelotas normales (suave, que "canten" en su color). */
+const EMISSIVE_BASE = 0.22;
+/** Emisivo de la pelota dorada (marcado, combina con el anillo-runa y el bloom). */
+const EMISSIVE_GOLD = 0.85;
 
 interface Ball {
   pos: THREE.Vector3;
@@ -85,7 +91,11 @@ export class Balls {
   /** Construye la malla instanciada y esparce las pelotas por el claro. */
   build(): void {
     const geo = new THREE.IcosahedronGeometry(RADIUS, 1); // low-poly toon (~80 tris)
-    const mat = new THREE.MeshToonMaterial({ gradientMap: makeToonRamp() });
+    // Emisivo/rim por instancia: cada pelota "canta" suave en su propio color;
+    // la dorada más marcada (combina con el anillo-runa y el bloom del claro).
+    const emis = new Float32Array(BALL_COUNT);
+    geo.setAttribute("aEmis", new THREE.InstancedBufferAttribute(emis, 1));
+    const mat = this.buildMaterial();
     this.mesh = new THREE.InstancedMesh(geo, mat, BALL_COUNT);
     this.mesh.name = "net-balls";
     this.mesh.frustumCulled = false;
@@ -105,10 +115,59 @@ export class Balls {
         kickCd: 0,
         recTimer: 0,
       });
-      this.mesh.setColorAt(i, new THREE.Color(BALL_COLORS[i % BALL_COLORS.length]));
+      const ci = i % BALL_COLORS.length;
+      this.mesh.setColorAt(i, new THREE.Color(BALL_COLORS[ci]));
+      // Dorada marcada; el resto suave con una variación sutil por posición.
+      emis[i] = ci === GOLD_INDEX ? EMISSIVE_GOLD : EMISSIVE_BASE + (i % 3) * 0.05;
     }
     this.syncInstances();
     if (this.mesh.instanceColor) this.mesh.instanceColor.needsUpdate = true;
+  }
+
+  /**
+   * Material toon instanciado con emisivo + rim inyectados por `onBeforeCompile`.
+   * El emisivo tiñe cada pelota en su PROPIO color (leído de `instanceColor`) con
+   * intensidad por instancia (`aEmis`), y un rim-light barato (borde que capta el
+   * atardecer) la integra a la estética. No toca cielo/fog/paleta del mundo.
+   */
+  private buildMaterial(): THREE.MeshToonMaterial {
+    const mat = new THREE.MeshToonMaterial({ gradientMap: makeToonRamp() });
+    mat.onBeforeCompile = (shader) => {
+      shader.vertexShader = shader.vertexShader
+        .replace(
+          "#include <common>",
+          "#include <common>\nattribute float aEmis;\nvarying float vEmis;\nvarying vec3 vBallColor;",
+        )
+        .replace(
+          "#include <begin_vertex>",
+          [
+            "#include <begin_vertex>",
+            "vEmis = aEmis;",
+            "#ifdef USE_INSTANCING_COLOR",
+            "  vBallColor = instanceColor;",
+            "#else",
+            "  vBallColor = vec3(1.0);",
+            "#endif",
+          ].join("\n"),
+        );
+      shader.fragmentShader = shader.fragmentShader
+        .replace(
+          "#include <common>",
+          "#include <common>\nvarying float vEmis;\nvarying vec3 vBallColor;",
+        )
+        .replace(
+          "#include <emissivemap_fragment>",
+          [
+            "#include <emissivemap_fragment>",
+            "// Emisivo tenue en el color propio de la pelota (la dorada canta más).",
+            "totalEmissiveRadiance += vBallColor * vEmis;",
+            "// Rim-light barato en espacio de vista: el borde capta el atardecer.",
+            "float _rim = pow(1.0 - abs(normalize(vNormal).z), 3.0);",
+            "totalEmissiveRadiance += vBallColor * _rim * (0.28 + vEmis * 0.5);",
+          ].join("\n"),
+        );
+    };
+    return mat;
   }
 
   addTo(scene: THREE.Scene): void {

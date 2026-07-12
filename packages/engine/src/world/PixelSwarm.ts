@@ -41,6 +41,13 @@ export class PixelSwarm {
 
   private _p = new THREE.Vector3();
 
+  /**
+   * Modo movimiento reducido (accesibilidad): apaga la deriva orgánica y el campo
+   * magnético del puntero. Las motas quedan casi quietas (posadas en su ancla, con
+   * el resorte residual disolviéndose) manteniendo sólo el twinkle tenue de brillo.
+   */
+  private reduced = false;
+
   constructor(field: HeightField, preset: BiospherePreset, count = 560) {
     this.count = count;
     this.base = new Float32Array(count * 3);
@@ -149,6 +156,11 @@ export class PixelSwarm {
     scene.add(this.points);
   }
 
+  /** Activa/desactiva el modo movimiento reducido (deriva + campo del puntero). */
+  setReducedMotion(enabled: boolean): void {
+    this.reduced = enabled;
+  }
+
   /**
    * Integra deriva + campo del puntero (si `pointer` no es null) + resorte de
    * retorno. `pointer` es el punto 3D proyectado del cursor/dedo en el área de
@@ -157,16 +169,19 @@ export class PixelSwarm {
   update(dt: number, t: number, pointer: THREE.Vector3 | null): void {
     this.mat.uniforms.uTime.value = t;
     const R = PixelSwarm.RADIUS;
+    const reduced = this.reduced;
+    // Con movimiento reducido ignoramos el puntero (motas quietas, sin remolino).
+    if (reduced) pointer = null;
     const damp = Math.exp(-PixelSwarm.DAMP * dt); // amortiguación estable con dt variable
     const arr = this.live.array as Float32Array;
 
     for (let i = 0; i < this.count; i++) {
       const k = i * 3;
       const ph = this.phase[i];
-      // Deriva lenta orgánica.
-      const dx = Math.sin(t * 0.3 + ph) * 0.6;
-      const dy = Math.sin(t * 0.22 + ph * 1.3) * 0.4;
-      const dz = Math.cos(t * 0.27 + ph) * 0.6;
+      // Deriva lenta orgánica (apagada en movimiento reducido → quedan en su ancla).
+      const dx = reduced ? 0 : Math.sin(t * 0.3 + ph) * 0.6;
+      const dy = reduced ? 0 : Math.sin(t * 0.22 + ph * 1.3) * 0.4;
+      const dz = reduced ? 0 : Math.cos(t * 0.27 + ph) * 0.6;
       const driftX = this.base[k] + dx;
       const driftY = this.base[k + 1] + dy;
       const driftZ = this.base[k + 2] + dz;

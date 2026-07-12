@@ -38,4 +38,11 @@ declare module "@phygitalia/content" {
 
   /** Resuelve la ficha completa de un Oráculo por id (lanza si no existe). */
   export function getOracle(id: string): OracleDefinition;
+
+  /**
+   * Lista todos los Oráculos con voz escrita (en orden de prioridad). La
+   * Plataforma la usa como LISTA BLANCA de oracleId válidos en `/api/oracle`
+   * (validate.ts, fix de seguridad A-1).
+   */
+  export function listOracles(): OracleDefinition[];
 }

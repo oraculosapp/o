@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { Bell } from "./Bell";
 import styles from "./hud-controls.module.css";
@@ -14,47 +15,80 @@ import styles from "./hud-controls.module.css";
 export interface HudControlsProps {
   /** Si se pasa, muestra el botón “Cambiar avatar” junto al clúster. */
   onChangeAvatar?: () => void;
+  /** Miniatura del avatar actual (retrato) para el botón "Cambiar avatar". */
+  avatarThumbUrl?: string | null;
+  /** Color de tinte del avatar (disco dummy si aún no hay retrato). */
+  avatarTint?: string | null;
 }
 
-export function HudControls({ onChangeAvatar }: HudControlsProps = {}) {
+export function HudControls({
+  onChangeAvatar,
+  avatarThumbUrl,
+  avatarTint,
+}: HudControlsProps = {}) {
   return (
     <>
       <div className={styles.cluster}>
         <Bell />
-        <Link href="/usuario" className={styles.profileLink} aria-label="Tu perfil" title="Tu perfil">
+        {/* "Perfil": silueta genérica de persona. */}
+        <Link
+          href="/usuario"
+          className={`${styles.profileLink} ${styles.tip}`}
+          aria-label="Tu perfil"
+          data-tip="Tu perfil"
+        >
           <ProfileGlyph />
         </Link>
       </div>
       {/* “Cambiar avatar” en su propio slot fijo, a la IZQUIERDA del botón de
-          mute (que vive anclado en right:112px y pertenece a audio/). */}
+          mute (que vive anclado en right:112px y pertenece a audio/). Muestra el
+          RETRATO del avatar actual (o su tinte) para distinguirlo del "Perfil". */}
       {onChangeAvatar && (
         <button
           type="button"
-          className={`${styles.profileLink} ${styles.avatarSlot}`}
+          className={`${styles.profileLink} ${styles.avatarSlot} ${styles.tip} ${styles.avatarButton}`}
           onClick={onChangeAvatar}
           aria-label="Cambiar avatar"
-          title="Cambiar avatar"
+          data-tip="Cambiar avatar"
         >
-          <AvatarGlyph />
+          <AvatarPortrait thumbUrl={avatarThumbUrl} tint={avatarTint} />
         </button>
       )}
     </>
   );
 }
 
-/** Glifo de máscara/avatar (busto con antifaz — “cambiar de piel”). */
-function AvatarGlyph() {
-  return (
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden>
-      <path
-        d="M4 20c0-3.6 3.2-6 8-6s8 2.4 8 6"
-        stroke="currentColor"
-        strokeWidth="1.6"
-        strokeLinecap="round"
+/**
+ * Retrato circular del avatar actual: la miniatura del arquetipo elegido; si no
+ * carga (o aún no hay elección), un disco con el tinte del viajero (dummy). Así
+ * este botón NO se confunde con la silueta genérica de "Perfil".
+ */
+function AvatarPortrait({ thumbUrl, tint }: { thumbUrl?: string | null; tint?: string | null }) {
+  const [broken, setBroken] = useState(false);
+
+  // Si cambia la miniatura, reintenta cargarla.
+  useEffect(() => {
+    setBroken(false);
+  }, [thumbUrl]);
+
+  if (thumbUrl && !broken) {
+    return (
+      // eslint-disable-next-line @next/next/no-img-element
+      <img
+        src={thumbUrl}
+        alt=""
+        aria-hidden
+        className={styles.avatarPortrait}
+        onError={() => setBroken(true)}
       />
-      <circle cx="12" cy="8" r="4" stroke="currentColor" strokeWidth="1.6" />
-      <path d="M9.4 7.6h5.2" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
-    </svg>
+    );
+  }
+  return (
+    <span
+      className={styles.avatarDummy}
+      aria-hidden
+      style={tint ? { background: tint } : undefined}
+    />
   );
 }
 

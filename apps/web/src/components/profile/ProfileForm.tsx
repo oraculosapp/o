@@ -283,9 +283,12 @@ export function ProfileForm({ userId, initial, progress }: ProfileFormProps) {
           </p>
 
           <div className={styles.field}>
-            <span className={styles.label}>Fecha de nacimiento</span>
+            <label className={styles.label} htmlFor="profile-birthdate">
+              Fecha de nacimiento
+            </label>
             <div className={styles.sensitiveRow}>
               <input
+                id="profile-birthdate"
                 className={styles.input}
                 type="date"
                 value={data.birthdate}
@@ -300,9 +303,12 @@ export function ProfileForm({ userId, initial, progress }: ProfileFormProps) {
           </div>
 
           <div className={styles.field}>
-            <span className={styles.label}>Ubicación</span>
+            <label className={styles.label} htmlFor="profile-location">
+              Ubicación
+            </label>
             <div className={styles.sensitiveRow}>
               <input
+                id="profile-location"
                 className={styles.input}
                 type="text"
                 value={data.location}

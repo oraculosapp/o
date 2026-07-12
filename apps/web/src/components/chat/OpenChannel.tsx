@@ -71,7 +71,13 @@ export function OpenChannel({ messages, name, sessionId, onSetName, onSend }: Op
           </p>
         </div>
       ) : (
-        <ul className={styles.list} ref={listRef} onScroll={onScroll}>
+        <ul
+          className={styles.list}
+          ref={listRef}
+          onScroll={onScroll}
+          aria-live="polite"
+          aria-label="Mensajes del canal abierto"
+        >
           {messages.map((m) => (
             <MessageRow
               key={m.id}

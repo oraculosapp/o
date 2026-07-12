@@ -21,7 +21,7 @@
   padding: 0.6rem 1rem;
   border: 1px solid var(--line);
   border-radius: var(--radius-pill);
-  background: var(--panel);
+  background: var(--panel-hud);
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
   box-shadow: var(--shadow);
@@ -69,7 +69,7 @@
   border-color: var(--gold);
   background:
     radial-gradient(120% 140% at 50% 0%, rgba(246, 220, 160, 0.22), transparent 70%),
-    var(--panel);
+    var(--panel-hud);
   box-shadow:
     var(--shadow),
     0 0 30px var(--glow);

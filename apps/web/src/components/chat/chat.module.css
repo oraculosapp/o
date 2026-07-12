@@ -13,7 +13,7 @@
   padding: 0.6rem 0.95rem;
   border: 1px solid var(--line);
   border-radius: var(--radius-pill);
-  background: var(--panel);
+  background: var(--panel-hud);
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
   box-shadow: var(--shadow);
@@ -79,7 +79,7 @@
   flex-direction: column;
   border: 1px solid var(--line);
   border-radius: var(--radius);
-  background: var(--panel);
+  background: var(--panel-hud);
   backdrop-filter: blur(14px);
   -webkit-backdrop-filter: blur(14px);
   box-shadow: var(--shadow);
@@ -165,6 +165,19 @@
 .collapseBtn:hover {
   color: var(--gold-bright);
   border-color: var(--gold-dim);
+}
+
+/* Sólo para lectores de pantalla (fuera de vista, sin ocupar espacio). */
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
 }
 
 .body {
@@ -524,6 +537,14 @@
     width: auto;
     height: min(56vh, 460px);
     border-radius: var(--radius);
+  }
+  /* Áreas táctiles ≥44px (WCAG 2.5.5) en el HUD de chat. */
+  .collapseBtn {
+    width: 44px;
+    height: 44px;
+  }
+  .sendBtn {
+    min-height: 44px;
   }
 }
 

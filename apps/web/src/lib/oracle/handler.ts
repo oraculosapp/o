@@ -14,7 +14,12 @@
  * evita que una ráfaga de menciones inunde el chat.
  */
 import { ChatModelError, type ChatModel } from "./chat-model";
-import { validateOracleRequest, buildChatMessages, type OracleRequest } from "./validate";
+import {
+  validateOracleRequest,
+  buildChatMessages,
+  publicWireMessages,
+  type OracleRequest,
+} from "./validate";
 import type { RateLimiter } from "./rate-limit";
 import type { Cooldown } from "./cooldown";
 import { resolveRegisteredUserId, ensureConversation, persistPrivateTurn } from "./persistence";
@@ -26,7 +31,16 @@ export interface OracleRouteDeps {
   createChatModel: () => ChatModel | null;
   /** Cliente service-role, o null si faltan sus env vars. */
   getServiceClient: () => SupabaseClient | null;
+  /** Rate-limit PRIMARIO por IP fiable (clave = IP; ver `reliableIp`). */
   rateLimiter: RateLimiter;
+  /**
+   * Rate-limit SECUNDARIO opcional por (IP + x-session-id). Sólo ENDURECE el
+   * límite por IP: un cliente que rota u omite `x-session-id` únicamente pierde
+   * esta restricción extra, nunca abre un bucket que afloje la cuota por IP
+   * (esa es la clave primaria). Si no se inyecta, no hay endurecimiento por
+   * sesión (útil en tests).
+   */
+  sessionLimiter?: RateLimiter;
   /**
    * Cooldown del chat público por canal (1 respuesta cada N s). Opcional: si no
    * se inyecta, no se aplica cooldown (útil en tests). En producción la ruta
@@ -59,11 +73,30 @@ function json(status: number, body: Record<string, unknown>, headers?: HeadersIn
   });
 }
 
-function clientKey(req: Request): string {
+/**
+ * IP fiable del cliente (A-2). En Vercel `x-real-ip` lo fija la plataforma con la
+ * IP real del cliente y NO es falsificable. `x-forwarded-for` SÍ es inyectable:
+ * el cliente puede anteponer valores, así que NUNCA usamos su PRIMER valor. Como
+ * último recurso tomamos el ÚLTIMO salto de x-forwarded-for (el que añade la
+ * plataforma, más difícil de falsear). Es la clave PRIMARIA del rate-limit.
+ */
+function reliableIp(req: Request): string {
+  const real = req.headers.get("x-real-ip")?.trim();
+  if (real) return real;
   const fwd = req.headers.get("x-forwarded-for");
-  const ip = (fwd ? fwd.split(",")[0] : req.headers.get("x-real-ip"))?.trim() || "unknown-ip";
-  const session = req.headers.get("x-session-id")?.trim() || "no-session";
-  return `${ip}::${session}`;
+  if (fwd) {
+    const parts = fwd
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
+    if (parts.length > 0) return parts[parts.length - 1];
+  }
+  return "unknown-ip";
+}
+
+/** id de sesión de cliente (sólo para ENDURECER el límite, nunca para aflojarlo). */
+function sessionId(req: Request): string | null {
+  return req.headers.get("x-session-id")?.trim() || null;
 }
 
 function bearer(req: Request): string | null {
@@ -128,13 +161,30 @@ async function publishPublicAnswer(
 export function createOracleRoute(deps: OracleRouteDeps) {
   return async function POST(req: Request): Promise<Response> {
     // 1) Rate-limit -----------------------------------------------------------
-    const rl = deps.rateLimiter.check(clientKey(req));
+    // Clave PRIMARIA = IP fiable (A-2). Rotar/omitir x-session-id no puede crear
+    // un bucket nuevo que afloje esta cuota.
+    const ip = reliableIp(req);
+    const rl = deps.rateLimiter.check(ip);
     if (!rl.allowed) {
       return json(
         429,
         { error: "Demasiadas peticiones. Espera un momento.", retryAfter: rl.retryAfter },
         { "retry-after": String(rl.retryAfter) }
       );
+    }
+    // Endurecimiento OPCIONAL por sesión: un cap más estricto por (IP+sesión).
+    // Sólo puede restringir más; si el cliente no manda sesión, sólo aplica el
+    // límite por IP de arriba.
+    const session = sessionId(req);
+    if (session && deps.sessionLimiter) {
+      const rs = deps.sessionLimiter.check(`${ip}::${session}`);
+      if (!rs.allowed) {
+        return json(
+          429,
+          { error: "Demasiadas peticiones. Espera un momento.", retryAfter: rs.retryAfter },
+          { "retry-after": String(rs.retryAfter) }
+        );
+      }
     }
 
     // 2) Parseo + validación --------------------------------------------------
@@ -164,7 +214,12 @@ export function createOracleRoute(deps: OracleRouteDeps) {
 
     // 3b) Cooldown del chat público por canal --------------------------------
     // Se comprueba tras confirmar el modelo (no consumir el turno en balde) y
-    // ANTES de generar (ahorra la llamada a OpenAI si estamos en cooldown).
+    // ANTES de generar (ahorra la llamada a OpenAI si estamos en cooldown). El
+    // canal ya está en la lista blanca (A-1), así que no se puede esquivar el
+    // cooldown inventando biosphereId's distintos.
+    // NOTA (A-2): este cooldown, como el rate-limit, es en memoria y POR
+    // INSTANCIA (best-effort serverless). Una cuota DURA cross-instancia queda
+    // pendiente para Postgres/Upstash (fuera del alcance de la beta).
     if (isPublic && deps.publicCooldown && !deps.publicCooldown.tryAcquire(channelId)) {
       return json(200, { skipped: "cooldown" });
     }
@@ -201,7 +256,12 @@ export function createOracleRoute(deps: OracleRouteDeps) {
       service = deps.getServiceClient();
     }
 
-    const chatMessages = buildChatMessages(systemParts.join("\n\n"), request.messages);
+    // En PÚBLICO reconstruimos el contexto server-side (sólo el último mensaje
+    // del usuario): NO pasamos al modelo los turnos entrantes con role:"oracle",
+    // que el cliente puede falsificar (A-1). En privado la memoria la controla el
+    // servidor (summary), así que el historial cliente es aceptable.
+    const wireForModel = isPublic ? publicWireMessages(request.messages) : request.messages;
+    const chatMessages = buildChatMessages(systemParts.join("\n\n"), wireForModel);
     const lastUserContent = request.messages[request.messages.length - 1].content;
 
     // 5) Streaming ------------------------------------------------------------
@@ -216,8 +276,11 @@ export function createOracleRoute(deps: OracleRouteDeps) {
     try {
       first = await iterator.next();
     } catch (err) {
+      // B-1: NO reflejamos el detalle (body de OpenAI, rutas internas) al cliente.
+      // El detalle sólo va al log del servidor; el cliente recibe algo genérico.
       const status = err instanceof ChatModelError && err.status ? err.status : 502;
-      return json(status, { error: err instanceof Error ? err.message : "Fallo del modelo." });
+      console.error("[oracle] fallo del modelo al iniciar el stream:", err);
+      return json(status, { error: "El oráculo no pudo responder ahora." });
     }
 
     const shouldPersist =
@@ -241,8 +304,10 @@ export function createOracleRoute(deps: OracleRouteDeps) {
             next = await iterator.next();
           }
         } catch (err) {
+          // B-1: detalle sólo al log del servidor; al cliente, mensaje genérico.
+          console.error("[oracle] error a mitad del stream:", err);
           controller.enqueue(
-            sse({ type: "error", message: err instanceof Error ? err.message : "Error de streaming." })
+            sse({ type: "error", message: "El oráculo no pudo responder ahora." })
           );
         }
 

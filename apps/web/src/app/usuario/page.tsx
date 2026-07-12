@@ -13,7 +13,13 @@ export const metadata: Metadata = {
 
 export default function UsuarioPage() {
   return (
-    <main>
+    <main style={{ position: "relative", minHeight: "100dvh", display: "flex", flexDirection: "column" }}>
+      {/* Fondo cósmico como en las páginas legales / 404. */}
+      <div
+        aria-hidden
+        className="phy-cosmos-bg"
+        style={{ position: "fixed", inset: 0, zIndex: -1 }}
+      />
       <UsuarioClient />
       <div style={{ display: "grid", placeItems: "center", gap: "1.2rem", padding: "0 1rem 2rem" }}>
         <InstallButton />

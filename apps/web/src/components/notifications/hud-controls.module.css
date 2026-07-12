@@ -39,9 +39,9 @@
     0 0 20px var(--glow);
 }
 .profileLink:focus-visible {
-  outline: none;
+  outline: 2px solid var(--gold-bright);
+  outline-offset: 2px;
   border-color: var(--gold-dim);
-  box-shadow: 0 0 0 2px var(--glow);
 }
 
 /* Slot del botón “Cambiar avatar”: fijo a la IZQUIERDA del mute (right:112px). */
@@ -52,6 +52,60 @@
   z-index: 35;
 }
 
+/* El botón de avatar aloja un retrato circular a sangre; recorta el contenido. */
+.avatarButton {
+  padding: 0;
+  overflow: hidden;
+}
+.avatarPortrait {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: 50%;
+  display: block;
+}
+.avatarDummy {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  background:
+    radial-gradient(circle at 35% 30%, var(--gold-bright), var(--gold-dim));
+}
+
+/* --- Tooltip de marca (glass), no sólo el title nativo --------------------- */
+.tip {
+  position: relative;
+}
+.tip::after {
+  content: attr(data-tip);
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  padding: 0.3rem 0.55rem;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--line);
+  background: var(--panel-hud);
+  box-shadow: var(--shadow);
+  color: var(--text);
+  font-family: var(--font-display);
+  font-size: 0.58rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  opacity: 0;
+  transform: translateY(-4px);
+  pointer-events: none;
+  transition:
+    opacity var(--dur-fast) var(--ease-brand),
+    transform var(--dur-fast) var(--ease-brand);
+}
+.tip:hover::after,
+.tip:focus-visible::after {
+  opacity: 1;
+  transform: none;
+}
+
 @media (max-width: 640px) {
   .cluster {
     top: 12px;
@@ -60,5 +114,17 @@
   .avatarSlot {
     top: 12px;
     right: 152px;
+  }
+  /* Área táctil ≥44px (WCAG 2.5.5) — glifo intacto a ~20px. */
+  .profileLink {
+    width: 44px;
+    height: 44px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .profileLink,
+  .tip::after {
+    transition: none;
   }
 }

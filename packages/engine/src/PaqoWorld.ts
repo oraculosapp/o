@@ -67,6 +67,10 @@ export class PaqoWorld {
   private lastW = 0;
   private lastH = 0;
 
+  // Accesibilidad: movimiento reducido (media query + override de UI).
+  private reducedMotion = false;
+  private reducedMq?: MediaQueryList;
+
   private _fwd = new THREE.Vector3();
   private _right = new THREE.Vector3();
   private _worldDir = new THREE.Vector3();
@@ -128,6 +132,10 @@ export class PaqoWorld {
 
     this.follow = new FollowCamera(this.camera, this.controller);
     this.follow.snapBehind();
+
+    // Accesibilidad: respeta prefers-reduced-motion (y el override de UI por
+    // localStorage). Reevalúa en caliente si cambia el media query o la clave.
+    this.initReducedMotion();
 
     this.input = new InputManager(this.container);
     this.input.onTap = (x, y) => this.handleTap(x, y);
@@ -359,6 +367,58 @@ export class PaqoWorld {
     if (this.fadePhase === "none") this.fadePhase = "in";
   }
 
+  // ---- accesibilidad: movimiento reducido ----
+
+  /**
+   * Configura la detección de movimiento reducido y aplica el estado inicial.
+   * Escucha el media query `prefers-reduced-motion` y el evento `storage` (por si
+   * un toggle de UI escribe la clave `phy:reduced-motion` desde otra pestaña).
+   */
+  private initReducedMotion(): void {
+    if (typeof window !== "undefined" && typeof window.matchMedia === "function") {
+      this.reducedMq = window.matchMedia("(prefers-reduced-motion: reduce)");
+      this.reducedMq.addEventListener?.("change", this.onReducedMotionChange);
+    }
+    if (typeof window !== "undefined") {
+      window.addEventListener("storage", this.onReducedMotionChange);
+    }
+    this.applyReducedMotion();
+  }
+
+  private onReducedMotionChange = (): void => {
+    if (!this.disposed) this.applyReducedMotion();
+  };
+
+  /**
+   * Override del equipo de UI por localStorage. Si la clave `phy:reduced-motion`
+   * existe, GANA sobre el media query (permite forzar on/off desde un toggle).
+   * Devuelve null si la clave no existe (→ manda el media query).
+   */
+  private reducedMotionOverride(): boolean | null {
+    try {
+      const v = window.localStorage?.getItem("phy:reduced-motion");
+      if (v == null) return null;
+      const s = v.trim().toLowerCase();
+      return !(s === "0" || s === "false" || s === "off" || s === "no" || s === "");
+    } catch {
+      return null;
+    }
+  }
+
+  /** Resuelve el estado efectivo: override de UI si existe, si no el media query. */
+  private resolveReducedMotion(): boolean {
+    const ov = this.reducedMotionOverride();
+    if (ov != null) return ov;
+    return this.reducedMq?.matches ?? false;
+  }
+
+  /** Propaga el estado a cámara (auto-retorno) y enjambre (deriva/puntero). */
+  private applyReducedMotion(): void {
+    this.reducedMotion = this.resolveReducedMotion();
+    this.follow?.setAutoReturn(!this.reducedMotion);
+    this.pixels?.setReducedMotion(this.reducedMotion);
+  }
+
   // ---- tap-to-move ----
 
   private handleTap(ndcX: number, ndcY: number): void {
@@ -516,6 +576,10 @@ export class PaqoWorld {
     cancelAnimationFrame(this.rafId);
     this.resizeObs?.disconnect();
     window.removeEventListener("resize", this.onResize);
+    this.reducedMq?.removeEventListener?.("change", this.onReducedMotionChange);
+    if (typeof window !== "undefined") {
+      window.removeEventListener("storage", this.onReducedMotionChange);
+    }
     this.net?.dispose();
     this.soundscape?.dispose();
     this.input?.dispose();

@@ -110,16 +110,20 @@ export function createOpenAiChatModel(config: OpenAiChatModelConfig): ChatModel 
       });
     } catch (err) {
       done();
+      // B-1: el detalle (mensaje de red) SÓLO al log del servidor; nunca al
+      // cliente (evita filtrar hosts/rutas internas). El mensaje del error es
+      // genérico y lo mapea el handler.
       const reason = err instanceof Error ? err.message : String(err);
-      throw new ChatModelError(`Fallo de red hacia OpenAI: ${reason}`);
+      console.error(`[oracle] fallo de red hacia OpenAI: ${reason}`);
+      throw new ChatModelError("El oráculo no pudo responder ahora.");
     }
     if (!res.ok) {
       done();
       const body = await res.text().catch(() => "");
-      throw new ChatModelError(
-        `OpenAI respondió ${res.status}: ${body.slice(0, 300)}`,
-        res.status
-      );
+      // B-1: no reflejamos el body de error de OpenAI al cliente. Se registra en
+      // el servidor y se propaga sólo el status (para el mapeo 4xx/5xx del handler).
+      console.error(`[oracle] OpenAI respondió ${res.status}: ${body.slice(0, 500)}`);
+      throw new ChatModelError("El oráculo no pudo responder ahora.", res.status);
     }
     // El caller cierra el timer al terminar de consumir el body.
     (res as Response & { __done?: () => void }).__done = done;

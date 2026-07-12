@@ -52,6 +52,27 @@ export function HintToasts({ oracleId = "paqo", getWorldNet }: HintToastsProps) 
     }
   }, [oracleId]);
 
+  // Pista inicial de onboarding (t=0): al entrar al mundo, antes de cualquier
+  // señal de zona, una sola pista con los controles. Una vez por dispositivo.
+  useEffect(() => {
+    const KEY = "phy:onboarded";
+    try {
+      if (localStorage.getItem(KEY)) return;
+    } catch {
+      return; // sin localStorage: no insistimos.
+    }
+    const t = setTimeout(() => {
+      show("Muévete con WASD o toca el suelo · arrastra para mirar · busca el tótem.");
+      try {
+        localStorage.setItem(KEY, "1");
+      } catch {
+        /* noop */
+      }
+    }, 900); // deja respirar tras la carga del mundo
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const show = (text: string, special = false) => {
     if (hideTimer.current) clearTimeout(hideTimer.current);
     if (leaveTimer.current) clearTimeout(leaveTimer.current);

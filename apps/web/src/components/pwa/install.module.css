@@ -15,6 +15,26 @@
   left: 16px;
   z-index: 35;
 }
+/* En el HUD la píldora es un icono redondo discreto (mismo lenguaje que los
+   demás icon-buttons del HUD), para no competir con el resto de controles. */
+.hud .pill {
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  justify-content: center;
+  border-radius: 50%;
+}
+@media (max-width: 640px) {
+  .hud {
+    top: 12px;
+    left: 12px;
+  }
+  /* Área táctil ≥44px (WCAG 2.5.5). */
+  .hud .pill {
+    width: 44px;
+    height: 44px;
+  }
+}
 
 .pill {
   display: inline-flex;
@@ -49,9 +69,9 @@
     0 0 22px var(--glow);
 }
 .pill:focus-visible {
-  outline: none;
+  outline: 2px solid var(--gold-bright);
+  outline-offset: 2px;
   border-color: var(--gold-dim);
-  box-shadow: 0 0 0 2px var(--glow);
 }
 .pill svg {
   color: var(--gold);

@@ -10,6 +10,10 @@
   --panel: rgba(20, 23, 38, 0.66);
   --panel-solid: #12141f;
   --panel-hi: rgba(31, 35, 54, 0.9);
+  /* Panel del HUD que lleva texto y flota SOBRE el mundo (que puede ser claro):
+     casi opaco para garantizar contraste AA (≥4.5:1) del texto sobre cualquier
+     fondo. Conserva un punto de translucidez para no perder del todo el glass. */
+  --panel-hud: rgba(16, 18, 29, 0.92);
 
   /* Acento dorado (único acento interactivo) */
   --gold: #e3b063;
@@ -62,4 +66,11 @@
 ::selection {
   background: var(--gold);
   color: var(--bg-0);
+}
+
+/* Foco visible global (design system): anillo dorado en TODO lo enfocable por
+   teclado. Los módulos que ponían `outline: none` sin sustituto lo heredan. */
+:focus-visible {
+  outline: 2px solid var(--gold-bright);
+  outline-offset: 2px;
 }

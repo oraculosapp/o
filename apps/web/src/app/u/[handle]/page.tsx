@@ -42,7 +42,13 @@ export default async function PublicProfilePage({ params }: PageParams) {
   const profile = await fetchPublicProfile(handle);
   if (!profile) notFound();
 
-  const social = normalizeSocial(profile);
+  // Defensa en profundidad anti-XSS (C-1): aunque profile.ts ya sanea al guardar,
+  // este es un Server Component y el `href` se emite crudo en el SSR. Revalidamos
+  // el esquema aquí y descartamos cualquier enlace que no sea http/https.
+  const website = profile.website ? safeHref(profile.website) : null;
+  const social = normalizeSocial(profile)
+    .map(({ label, url }) => ({ label, href: safeHref(url) }))
+    .filter((s): s is { label: string; href: string } => s.href !== null);
   const initial = profile.handle.charAt(0).toUpperCase();
 
   return (
@@ -78,23 +84,23 @@ export default async function PublicProfilePage({ params }: PageParams) {
           </div>
         </dl>
 
-        {(profile.website || social.length > 0) && (
+        {(website || social.length > 0) && (
           <div className={styles.links}>
-            {profile.website && (
+            {website && (
               <a
                 className={styles.link}
-                href={profile.website}
+                href={website}
                 target="_blank"
                 rel="noopener noreferrer nofollow ugc"
               >
                 Sitio web
               </a>
             )}
-            {social.map(({ label, url }) => (
+            {social.map(({ label, href }) => (
               <a
                 key={label}
                 className={styles.link}
-                href={url}
+                href={href}
                 target="_blank"
                 rel="noopener noreferrer nofollow ugc"
               >
@@ -112,6 +118,24 @@ export default async function PublicProfilePage({ params }: PageParams) {
       </article>
     </main>
   );
+}
+
+/**
+ * Revalida un `href` de perfil (C-1). Sólo devuelve http/https; cualquier otro
+ * esquema (javascript:, data:, vbscript:, …) o URL inválida → null (no se
+ * renderiza). Si no trae esquema, asume https:// (mismo criterio que profile.ts).
+ */
+function safeHref(raw: string): string | null {
+  const trimmed = raw?.trim();
+  if (!trimmed) return null;
+  const hasScheme = /^[a-z][a-z0-9+.-]*:/i.test(trimmed);
+  const candidate = hasScheme ? trimmed : `https://${trimmed}`;
+  try {
+    const proto = new URL(candidate).protocol.toLowerCase();
+    return proto === "http:" || proto === "https:" ? candidate : null;
+  } catch {
+    return null;
+  }
 }
 
 function normalizeSocial(profile: PublicProfile): Array<{ label: string; url: string }> {

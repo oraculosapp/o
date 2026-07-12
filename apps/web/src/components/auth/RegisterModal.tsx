@@ -2,6 +2,8 @@
 
 import { useEffect, useRef, useState } from "react";
 import { getSupabaseBrowserClient } from "@/lib/supabase";
+import { useFocusTrap } from "@/components/useFocusTrap";
+import { useModalLock } from "@/components/modal-lock";
 import styles from "./auth.module.css";
 
 export interface RegisterModalProps {
@@ -27,6 +29,8 @@ export function RegisterModal({ onClose }: RegisterModalProps) {
   const [busy, setBusy] = useState(false);
   const [captchaToken, setCaptchaToken] = useState<string | null>(null);
   const widgetRef = useRef<HTMLDivElement>(null);
+  const modalRef = useRef<HTMLDivElement>(null);
+  const emailRef = useRef<HTMLInputElement>(null);
 
   // Cierre con Escape.
   useEffect(() => {
@@ -36,6 +40,11 @@ export function RegisterModal({ onClose }: RegisterModalProps) {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
+
+  // Foco inicial en el correo, atrapado dentro del modal; restaura al cerrar.
+  useFocusTrap(true, modalRef, emailRef);
+  // Oculta el banner de cookies mientras el modal esté abierto.
+  useModalLock(true);
 
   // Carga perezosa del script de Turnstile SÓLO si hay site key.
   useEffect(() => {
@@ -115,6 +124,7 @@ export function RegisterModal({ onClose }: RegisterModalProps) {
         role="dialog"
         aria-modal="true"
         aria-label="Registro"
+        ref={modalRef}
         onClick={(e) => e.stopPropagation()}
       >
         <button type="button" className={styles.close} onClick={onClose} aria-label="Cerrar">
@@ -142,25 +152,20 @@ export function RegisterModal({ onClose }: RegisterModalProps) {
               Deja tu correo y te mandamos un enlace para entrar. Sin contraseñas.
             </p>
             <input
+              ref={emailRef}
               className={styles.email}
               type="email"
               inputMode="email"
               autoComplete="email"
               placeholder="tu@correo.com"
               value={email}
-              autoFocus
               onChange={(e) => setEmail(e.target.value)}
               aria-label="Tu correo electrónico"
             />
 
-            {TURNSTILE_SITE_KEY ? (
-              <div ref={widgetRef} className={styles.captcha} />
-            ) : (
-              <p className={styles.captchaTodo}>
-                {/* Sin captcha configurado: registro abierto en la beta. */}
-                Verificación anti-robots desactivada (beta).
-              </p>
-            )}
+            {/* Turnstile sólo si está configurado; si no, no mostramos nada
+                (sin filtrar detalles internos de la beta al usuario). */}
+            {TURNSTILE_SITE_KEY && <div ref={widgetRef} className={styles.captcha} />}
 
             {message && (
               <p className={styles.errorMsg} role="alert">

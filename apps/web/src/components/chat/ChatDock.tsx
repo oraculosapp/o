@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import type { WorldNetHooks } from "@/lib/realtime";
 import { isSupabaseConfigured } from "@/lib/realtime";
 import { RegisterModal } from "@/components/auth/RegisterModal";
@@ -27,6 +27,22 @@ export function ChatDock({ biosphereId, getWorldNet }: ChatDockProps) {
   const [open, setOpen] = useState(false);
   const [tab, setTab] = useState<Tab>("open");
   const [showRegister, setShowRegister] = useState(false);
+  const tabRefs = useRef<Record<Tab, HTMLButtonElement | null>>({ open: null, paqo: null });
+
+  // Roving tabindex + flechas entre pestañas (patrón WAI-ARIA tabs).
+  const onTabsKey = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    const order: Tab[] = ["open", "paqo"];
+    const idx = order.indexOf(tab);
+    let next = idx;
+    if (e.key === "ArrowRight") next = (idx + 1) % order.length;
+    else if (e.key === "ArrowLeft") next = (idx - 1 + order.length) % order.length;
+    else if (e.key === "Home") next = 0;
+    else if (e.key === "End") next = order.length - 1;
+    else return;
+    e.preventDefault();
+    setTab(order[next]);
+    tabRefs.current[order[next]]?.focus();
+  };
 
   // El hook siempre se llama (regla de hooks); si no hay Supabase, no conecta.
   const bio = useBiosphere({ biosphereId, getWorldNet });
@@ -73,10 +89,16 @@ export function ChatDock({ biosphereId, getWorldNet }: ChatDockProps) {
         aria-label={`Chat de la Biósfera ${biosphereId}`}
       >
         <header className={styles.header}>
-          <div className={styles.tabs} role="tablist">
+          <div className={styles.tabs} role="tablist" aria-label="Canales de chat" onKeyDown={onTabsKey}>
             <button
+              id="chat-tab-open"
               role="tab"
               aria-selected={tab === "open"}
+              aria-controls="chat-panel-open"
+              tabIndex={tab === "open" ? 0 : -1}
+              ref={(el) => {
+                tabRefs.current.open = el;
+              }}
               className={`${styles.tab} ${tab === "open" ? styles.tabActive : ""}`}
               onClick={() => setTab("open")}
             >
@@ -84,8 +106,14 @@ export function ChatDock({ biosphereId, getWorldNet }: ChatDockProps) {
               {bio.roster.length > 0 && <span className={styles.tabCount}>{bio.roster.length}</span>}
             </button>
             <button
+              id="chat-tab-paqo"
               role="tab"
               aria-selected={tab === "paqo"}
+              aria-controls="chat-panel-paqo"
+              tabIndex={tab === "paqo" ? 0 : -1}
+              ref={(el) => {
+                tabRefs.current.paqo = el;
+              }}
               className={`${styles.tab} ${tab === "paqo" ? styles.tabActive : ""}`}
               onClick={() => setTab("paqo")}
             >
@@ -106,7 +134,12 @@ export function ChatDock({ biosphereId, getWorldNet }: ChatDockProps) {
           </div>
         </header>
 
-        <div className={styles.body}>
+        <div
+          className={styles.body}
+          role="tabpanel"
+          id={tab === "open" ? "chat-panel-open" : "chat-panel-paqo"}
+          aria-labelledby={tab === "open" ? "chat-tab-open" : "chat-tab-paqo"}
+        >
           {tab === "open" ? (
             <OpenChannel
               messages={bio.messages}

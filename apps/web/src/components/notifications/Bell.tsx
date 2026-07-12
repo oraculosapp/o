@@ -112,38 +112,62 @@ export function Bell() {
       </button>
 
       {open && (
-        <div className={styles.panel} role="dialog" aria-label="Notificaciones">
+        <div className={styles.panel}>
           <header className={styles.panelHead}>
             <span className={styles.panelTitle}>Notificaciones</span>
             {unread > 0 && <span className={styles.panelCount}>{unread}</span>}
           </header>
 
-          <ul className={styles.list}>
+          {/* aria-live: las notificaciones que entran en vivo se anuncian. */}
+          <ul className={styles.list} aria-live="polite">
             {items.length === 0 ? (
               <li className={styles.empty}>
                 {ready ? "Todo tranquilo por ahora." : "Cargando…"}
               </li>
             ) : (
-              items.map((n) => (
-                <li
-                  key={n.id}
-                  className={`${styles.item} ${n.read_at ? styles.itemRead : styles.itemUnread}`}
-                  onMouseEnter={() => markRead(n)}
-                  onClick={() => {
-                    markRead(n);
-                    if (n.link) window.location.assign(n.link);
-                  }}
-                >
-                  {!n.read_at && <span className={styles.itemDot} aria-hidden />}
-                  <div className={styles.itemBody}>
-                    <p className={styles.itemTitle}>{n.title}</p>
-                    {n.body && <p className={styles.itemText}>{n.body}</p>}
-                    <time className={styles.itemTime} dateTime={n.created_at}>
-                      {formatWhen(n.created_at)}
-                    </time>
-                  </div>
-                </li>
-              ))
+              items.map((n) => {
+                // Cada notificación es un control enfocable por teclado: <a> si
+                // lleva enlace, <button> si no. Se marca leída al ACTIVARLA
+                // (click/Enter/Space), al recibir FOCO (teclado) y al hover (ratón).
+                const inner = (
+                  <>
+                    {!n.read_at && <span className={styles.itemDot} aria-hidden />}
+                    <span className={styles.itemBody}>
+                      <span className={styles.itemTitle}>{n.title}</span>
+                      {n.body && <span className={styles.itemText}>{n.body}</span>}
+                      <time className={styles.itemTime} dateTime={n.created_at}>
+                        {formatWhen(n.created_at)}
+                      </time>
+                    </span>
+                  </>
+                );
+                const cls = `${styles.item} ${n.read_at ? styles.itemRead : styles.itemUnread}`;
+                return (
+                  <li key={n.id} className={styles.itemRow}>
+                    {n.link ? (
+                      <a
+                        href={n.link}
+                        className={cls}
+                        onMouseEnter={() => markRead(n)}
+                        onFocus={() => markRead(n)}
+                        onClick={() => markRead(n)}
+                      >
+                        {inner}
+                      </a>
+                    ) : (
+                      <button
+                        type="button"
+                        className={cls}
+                        onMouseEnter={() => markRead(n)}
+                        onFocus={() => markRead(n)}
+                        onClick={() => markRead(n)}
+                      >
+                        {inner}
+                      </button>
+                    )}
+                  </li>
+                );
+              })
             )}
           </ul>
         </div>

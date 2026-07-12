@@ -7,6 +7,7 @@
  * decide EXCLUSIVAMENTE el servidor vía getOracleSystemPrompt.
  */
 import type { ChatMessage } from "./chat-model";
+import { listOracles } from "@phygitalia/content";
 
 export type OracleMode = "public" | "private";
 
@@ -45,8 +46,37 @@ export type ValidationResult = ValidationOk | ValidationErr;
 export const MAX_MESSAGE_LEN = 2_000;
 export const MAX_MESSAGES = 40;
 export const MAX_ORACLE_ID_LEN = 64;
+/**
+ * Tope del tamaño TOTAL de entrada por petición (suma de chars de `messages`).
+ * Corta el vector "muchos mensajes casi-máximos" que quemaría presupuesto de
+ * OpenAI aun respetando MAX_MESSAGE_LEN × MAX_MESSAGES (A-2).
+ */
+export const MAX_TOTAL_INPUT_CHARS = 6_000;
 
 const ORACLE_ID_RE = /^[a-z0-9-]{1,64}$/;
+
+/**
+ * LISTA BLANCA de Oráculos (A-1): la lista REAL de voces escritas del paquete de
+ * contenido. Rechazar ids fuera de aquí impide falsificar/enrutar a un "Paqo"
+ * inventado o inyectar un oracleId arbitrario en el chat público.
+ */
+const ALLOWED_ORACLE_IDS: ReadonlySet<string> = new Set(listOracles().map((o) => o.id));
+
+/**
+ * LISTA BLANCA de Biósferas (A-1). Aún no hay export de biósferas en
+ * @phygitalia/content (sólo `getBiosphere` con registro parcial), así que fijamos
+ * los ids conocidos de la beta (coinciden con los 6 Oráculos con voz). Esto
+ * además cierra el bypass del cooldown público variando `biosphereId`: sólo los
+ * canales conocidos pasan.
+ */
+const ALLOWED_BIOSPHERE_IDS: ReadonlySet<string> = new Set([
+  "paqo",
+  "cosmogenes",
+  "eme-y-uru",
+  "espinosito",
+  "nin",
+  "brangulio",
+]);
 
 /** Valida y normaliza el cuerpo POST. No lanza: devuelve ok/err. */
 export function validateOracleRequest(body: unknown): ValidationResult {
@@ -58,6 +88,10 @@ export function validateOracleRequest(body: unknown): ValidationResult {
   const oracleId = b.oracleId;
   if (typeof oracleId !== "string" || !ORACLE_ID_RE.test(oracleId)) {
     return { ok: false, error: "oracleId inválido (usa [a-z0-9-], 1-64 chars)." };
+  }
+  // Lista blanca real (A-1): sólo Oráculos existentes, nunca uno inventado.
+  if (!ALLOWED_ORACLE_IDS.has(oracleId)) {
+    return { ok: false, error: "oracleId desconocido." };
   }
 
   const mode = b.mode;
@@ -73,6 +107,7 @@ export function validateOracleRequest(body: unknown): ValidationResult {
   }
 
   const messages: WireMessage[] = [];
+  let totalChars = 0;
   for (const raw of b.messages) {
     if (typeof raw !== "object" || raw === null) {
       return { ok: false, error: "Cada mensaje debe ser un objeto." };
@@ -91,6 +126,11 @@ export function validateOracleRequest(body: unknown): ValidationResult {
     }
     if (content.length > MAX_MESSAGE_LEN) {
       return { ok: false, error: `Mensaje demasiado largo (máx ${MAX_MESSAGE_LEN} chars).` };
+    }
+    totalChars += content.length;
+    // Tope del total acumulado (A-2): evita el vector "N mensajes casi-máximos".
+    if (totalChars > MAX_TOTAL_INPUT_CHARS) {
+      return { ok: false, error: `Entrada demasiado larga (máx ${MAX_TOTAL_INPUT_CHARS} chars).` };
     }
     messages.push({ role: m.role, content });
   }
@@ -113,10 +153,27 @@ export function validateOracleRequest(body: unknown): ValidationResult {
     if (typeof b.biosphereId !== "string" || !ORACLE_ID_RE.test(b.biosphereId)) {
       return { ok: false, error: "biosphereId inválido (usa [a-z0-9-], 1-64 chars)." };
     }
+    // Lista blanca real (A-1): sólo canales de Biósfera conocidos. Cierra además
+    // el bypass del cooldown público por biosphereId arbitrario.
+    if (!ALLOWED_BIOSPHERE_IDS.has(b.biosphereId)) {
+      return { ok: false, error: "biosphereId desconocido." };
+    }
     biosphereId = b.biosphereId;
   }
 
   return { ok: true, value: { oracleId, mode, messages, conversationId, biosphereId } };
+}
+
+/**
+ * Contexto del modelo en modo PÚBLICO (A-1). El historial de un chat abierto lo
+ * controla el cliente y NO es de fiar: un atacante puede inyectar turnos
+ * `role:"oracle"` para poner palabras en boca del Oráculo (falsificación) o para
+ * inflar el contexto. Reconstruimos el contexto en el servidor: nos quedamos
+ * SÓLO con el último mensaje del usuario (el turno a responder). El system prompt
+ * lo antepone `buildChatMessages`, siempre server-side.
+ */
+export function publicWireMessages(messages: WireMessage[]): WireMessage[] {
+  return [messages[messages.length - 1]];
 }
 
 /**

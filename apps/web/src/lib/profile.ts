@@ -48,6 +48,36 @@ export const HANDLE_MIN = 3;
 export const HANDLE_MAX = 32;
 const HANDLE_RE = /^[a-z0-9_-]+$/;
 
+/**
+ * Saneo anti-XSS de URLs de perfil (C-1). El `website` y cada `social.url` los
+ * escribe el usuario y luego se emiten como `href` en el perfil público
+ * (`/u/[handle]`, Server Component → SSR crudo). Un `href="javascript:…"` (o
+ * `data:` / `vbscript:` …) ejecutaría script al hacer clic. Aquí:
+ *   · normalizamos: si no trae esquema, prefijamos `https://`;
+ *   · validamos el esquema con `new URL()` y RECHAZAMOS todo lo que no sea
+ *     http/https (devolvemos `null` ⇒ el campo se descarta al guardar).
+ * Devolvemos la cadena validada (sin normalizar el resto, para no sorprender al
+ * usuario con barras/host reescritos); `page.tsx` la revalida como defensa en
+ * profundidad.
+ */
+export function sanitizeProfileUrl(raw: string): string | null {
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+  // ¿Trae ya un esquema (scheme:)? Un `javascript:`/`data:` SÍ lo trae, y así el
+  // parser lo caza y lo rechazamos abajo; una cadena sin esquema la prefijamos.
+  const hasScheme = /^[a-z][a-z0-9+.-]*:/i.test(trimmed);
+  const candidate = hasScheme ? trimmed : `https://${trimmed}`;
+  let parsed: URL;
+  try {
+    parsed = new URL(candidate);
+  } catch {
+    return null;
+  }
+  const proto = parsed.protocol.toLowerCase();
+  if (proto !== "http:" && proto !== "https:") return null;
+  return candidate;
+}
+
 /** Normaliza el objeto `social` (jsonb) a la lista ordenada del formulario. */
 function socialFromJson(raw: unknown): SocialLink[] {
   if (!raw || typeof raw !== "object") return [];
@@ -62,9 +92,10 @@ export function socialToJson(links: SocialLink[]): Record<string, string> {
   const out: Record<string, string> = {};
   for (const { label, url } of links) {
     const l = label.trim();
-    const u = url.trim();
-    if (!l || !u) continue;
-    out[l] = u;
+    // Anti-XSS (C-1): descarta enlaces con esquema peligroso o URL inválida.
+    const safe = sanitizeProfileUrl(url);
+    if (!l || !safe) continue;
+    out[l] = safe;
   }
   return out;
 }
@@ -160,7 +191,9 @@ export async function saveProfile(userId: string, data: ProfileData): Promise<Sa
     .update({
       handle,
       bio: bio || null,
-      website: data.website.trim() || null,
+      // Anti-XSS (C-1): sólo persistimos un website http/https válido; cualquier
+      // otro esquema (javascript:, data:, …) o URL inválida se descarta (null).
+      website: sanitizeProfileUrl(data.website),
       social: socialToJson(data.social),
       birthdate: data.birthdate || null,
       location: data.location.trim() || null,

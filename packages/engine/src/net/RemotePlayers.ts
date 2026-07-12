@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import { TestDummy } from "../avatar/TestDummy";
-import { loadAvatarRigShared } from "../avatar/AvatarGLTFCache";
+import { loadAvatarRigShared, isAllowedArchetypeUrl } from "../avatar/AvatarGLTFCache";
 import type { AvatarDriveState, IAvatarRig } from "../avatar/types";
 import { makeSoftCircleTexture } from "../util/toon";
 import type { NetAnim, RemoteState } from "./types";
@@ -106,6 +106,9 @@ class RemoteAvatar {
    */
   setArchetype(url?: string): void {
     if (!url || url === this.curArchetype || this.loadingArchetype) return;
+    // Seguridad (M-5): sólo arquetipos same-origin bajo /assets/avatars/. Un
+    // broadcast malicioso con URL externa se ignora (nos quedamos con el maniquí).
+    if (!isAllowedArchetypeUrl(url)) return;
     this.curArchetype = url;
     this.loadingArchetype = true;
     loadAvatarRigShared(url)

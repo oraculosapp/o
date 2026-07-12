@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ARCHETYPES, thumbUrl, archetypeUrl, type Gender } from "@/lib/avatars";
 import {
   AVATAR_TINTS,
@@ -8,7 +8,12 @@ import {
   defaultSelection,
   type AvatarSelection,
 } from "@/lib/avatar-store";
+import { useFocusTrap } from "@/components/useFocusTrap";
+import { useModalLock } from "@/components/modal-lock";
 import styles from "./avatar-picker.module.css";
+
+/** Columnas lógicas de la cuadrícula (para navegación con flechas ↑↓). */
+const GRID_COLS = 3;
 
 export interface AvatarPickerProps {
   open: boolean;
@@ -33,6 +38,8 @@ export interface AvatarPickerProps {
 export function AvatarPicker({ open, initial, onClose, onApply }: AvatarPickerProps) {
   const [sel, setSel] = useState<AvatarSelection>(initial ?? defaultSelection());
   const [applying, setApplying] = useState(false);
+  const panelRef = useRef<HTMLElement>(null);
+  const radioRefs = useRef<(HTMLButtonElement | null)[]>([]);
 
   // Re-sincroniza con `initial` cada vez que se abre (p.ej. desde el HUD).
   useEffect(() => {
@@ -49,11 +56,50 @@ export function AvatarPicker({ open, initial, onClose, onApply }: AvatarPickerPr
     return () => window.removeEventListener("keydown", onKey);
   }, [open, onClose]);
 
+  // Foco atrapado dentro del diálogo + restaura foco al disparador al cerrar.
+  useFocusTrap(open, panelRef);
+  // Oculta el banner de cookies mientras el selector esté abierto.
+  useModalLock(open);
+
   if (!open) return null;
 
   const setGender = (gender: Gender) => setSel((s) => ({ ...s, gender }));
   const setArchetype = (archetype: string) => setSel((s) => ({ ...s, archetype }));
   const setTint = (tint: AvatarSelection["tint"]) => setSel((s) => ({ ...s, tint }));
+
+  // Roving tabindex: la cuadrícula es un único tab-stop; las flechas mueven la
+  // selección y el foco entre arquetipos (patrón radiogroup, WCAG 4.1.2).
+  const onGridKey = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    const ids = ARCHETYPES.map((a) => a.id);
+    const idx = ids.indexOf(sel.archetype);
+    if (idx < 0) return;
+    let next = idx;
+    switch (e.key) {
+      case "ArrowRight":
+        next = (idx + 1) % ids.length;
+        break;
+      case "ArrowLeft":
+        next = (idx - 1 + ids.length) % ids.length;
+        break;
+      case "ArrowDown":
+        next = Math.min(idx + GRID_COLS, ids.length - 1);
+        break;
+      case "ArrowUp":
+        next = Math.max(idx - GRID_COLS, 0);
+        break;
+      case "Home":
+        next = 0;
+        break;
+      case "End":
+        next = ids.length - 1;
+        break;
+      default:
+        return;
+    }
+    e.preventDefault();
+    setArchetype(ids[next]);
+    radioRefs.current[next]?.focus();
+  };
 
   const confirm = async () => {
     if (applying) return;
@@ -67,7 +113,7 @@ export function AvatarPicker({ open, initial, onClose, onApply }: AvatarPickerPr
 
   return (
     <div className={styles.overlay} role="dialog" aria-modal="true" aria-label="Elige tu arquetipo">
-      <section className={styles.panel}>
+      <section className={styles.panel} ref={panelRef}>
         <button type="button" className={styles.close} onClick={onClose} aria-label="Cerrar">
           ✕
         </button>
@@ -81,9 +127,9 @@ export function AvatarPicker({ open, initial, onClose, onApply }: AvatarPickerPr
           </p>
         </header>
 
-        {/* Cuadrícula de arquetipos */}
-        <div className={styles.grid} role="radiogroup" aria-label="Arquetipo">
-          {ARCHETYPES.map((a) => {
+        {/* Cuadrícula de arquetipos (roving tabindex + flechas) */}
+        <div className={styles.grid} role="radiogroup" aria-label="Arquetipo" onKeyDown={onGridKey}>
+          {ARCHETYPES.map((a, i) => {
             const active = a.id === sel.archetype;
             return (
               <button
@@ -91,6 +137,10 @@ export function AvatarPicker({ open, initial, onClose, onApply }: AvatarPickerPr
                 type="button"
                 role="radio"
                 aria-checked={active}
+                tabIndex={active ? 0 : -1}
+                ref={(el) => {
+                  radioRefs.current[i] = el;
+                }}
                 className={`${styles.card} ${active ? styles.cardActive : ""}`}
                 onClick={() => setArchetype(a.id)}
                 title={a.name}
@@ -154,6 +204,8 @@ export function AvatarPicker({ open, initial, onClose, onApply }: AvatarPickerPr
                 );
               })}
             </div>
+            {/* Mini-label: aclara qué cambia cada tinte del avatar. */}
+            <span className={styles.swatchHint}>Cambia tu color: principal · secundario · cabello</span>
           </div>
         </div>
 

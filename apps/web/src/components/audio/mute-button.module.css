@@ -34,9 +34,9 @@
     0 0 20px var(--glow);
 }
 .button:focus-visible {
-  outline: none;
+  outline: 2px solid var(--gold-bright);
+  outline-offset: 2px;
   border-color: var(--gold-dim);
-  box-shadow: 0 0 0 2px var(--glow);
 }
 /* Silenciado: apagado, sin resaltar. */
 .button[aria-pressed="true"] {
@@ -47,6 +47,9 @@
   .button {
     top: 12px;
     right: 104px;
+    /* Área táctil ≥44px (WCAG 2.5.5) — glifo intacto a ~20px. */
+    width: 44px;
+    height: 44px;
   }
 }
 

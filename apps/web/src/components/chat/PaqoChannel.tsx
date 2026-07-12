@@ -37,6 +37,10 @@ export function PaqoChannel({
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Anuncio para lectores de pantalla: el turno de Paqo se lee COMPLETO al
+  // terminar el stream (no token a token). Región visualmente oculta.
+  const [announce, setAnnounce] = useState("");
+  const streamRef = useRef("");
   const listRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
 
@@ -61,6 +65,7 @@ export function PaqoChannel({
 
     setTurns((prev) => [...prev, { role: "user", content: text }, { role: "oracle", content: "", pending: true }]);
     setBusy(true);
+    streamRef.current = "";
 
     const controller = new AbortController();
     abortRef.current = controller;
@@ -82,6 +87,7 @@ export function PaqoChannel({
           if (registered && meta.conversationId) storeConversationId(biosphereId, meta.conversationId);
         },
         onDelta: (chunk) => {
+          streamRef.current += chunk;
           setTurns((prev) => {
             const next = [...prev];
             const last = next[next.length - 1];
@@ -97,6 +103,8 @@ export function PaqoChannel({
             if (last && last.role === "oracle") next[next.length - 1] = { ...last, pending: false };
             return next;
           });
+          // Anuncia el turno completo una sola vez, al terminar.
+          if (streamRef.current.trim()) setAnnounce(streamRef.current);
         },
       }
     );
@@ -126,6 +134,11 @@ export function PaqoChannel({
           </p>
         )}
       </div>
+
+      {/* Región viva oculta: lee el turno completo de Paqo al terminar el stream. */}
+      <p className={styles.srOnly} aria-live="polite" role="status">
+        {announce}
+      </p>
 
       {!registered && (
         <button type="button" className={styles.invite} onClick={onRegisterClick}>

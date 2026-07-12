@@ -3,8 +3,12 @@
 .page {
   position: relative;
   min-height: 100dvh;
-  display: grid;
-  place-content: center;
+  /* Flex centrado en ambos ejes: `grid + place-content` dejaba la tarjeta
+     descentrada a la izquierda (P2-11). Flex la centra de forma fiable. */
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
   padding: 2rem 1rem;
   overflow: hidden;
 }

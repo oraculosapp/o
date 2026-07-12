@@ -55,6 +55,13 @@ export class FollowCamera {
   private awayTime = 0;
   private stillTime = 0;
 
+  /**
+   * Auto-retorno activo. Con `prefers-reduced-motion` (o el override de UI) el
+   * mundo apaga el recentrado automático: la cámara sólo se mueve con input del
+   * usuario (órbita/zoom). No afecta al seguimiento de posición ni a la órbita.
+   */
+  private autoReturn = true;
+
   private smoothPos = new THREE.Vector3();
   private smoothTarget = new THREE.Vector3();
   private initialized = false;
@@ -102,6 +109,15 @@ export class FollowCamera {
     this.distance = THREE.MathUtils.clamp(this.distance + delta, this.minDist, this.maxDist);
   }
 
+  /** Activa/desactiva el auto-retorno (lo apaga el modo movimiento reducido). */
+  setAutoReturn(enabled: boolean): void {
+    this.autoReturn = enabled;
+    if (!enabled) {
+      this.awayTime = 0;
+      this.stillTime = 0;
+    }
+  }
+
   update(dt: number, force = false): void {
     const up = FollowCamera.UP;
     const charPos = this.target.position;
@@ -123,7 +139,8 @@ export class FollowCamera {
     }
 
     const mayReturn =
-      this.awayTime > FollowCamera.AWAY_DELAY || this.stillTime > FollowCamera.STILL_DELAY;
+      this.autoReturn &&
+      (this.awayTime > FollowCamera.AWAY_DELAY || this.stillTime > FollowCamera.STILL_DELAY);
     if (mayReturn && dt > 0) {
       // Recentra suavemente detrás del avatar (por el camino angular corto).
       this.target.getForward(this._fwd);

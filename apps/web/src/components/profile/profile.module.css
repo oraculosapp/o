@@ -405,9 +405,9 @@
   color: var(--text-faint);
 }
 .toggle:focus-visible {
-  outline: none;
+  outline: 2px solid var(--gold-bright);
+  outline-offset: 2px;
   border-color: var(--gold-dim);
-  box-shadow: 0 0 0 2px var(--glow);
 }
 
 /* --- Tu viaje: runas -------------------------------------------------------- */

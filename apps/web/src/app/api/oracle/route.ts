@@ -39,8 +39,13 @@ import { createOracleRoute, type OracleRouteDeps } from "../../../lib/oracle/han
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-// Rate-limit singleton por instancia (ver limitación serverless en rate-limit.ts).
+// Rate-limit PRIMARIO por IP fiable, singleton por instancia (ver limitación
+// serverless en rate-limit.ts).
 const rateLimiter = createRateLimiter({ limit: 20, windowMs: 60_000 });
+
+// Rate-limit SECUNDARIO por (IP + x-session-id): cap más estricto que sólo puede
+// ENDURECER el límite por IP, nunca aflojarlo (ver handler.ts). 12 < 20.
+const sessionLimiter = createRateLimiter({ limit: 12, windowMs: 60_000 });
 
 // Cooldown del chat público: 1 respuesta de Paqo cada 10 s por canal de Biósfera.
 const publicCooldown = createCooldown({ windowMs: 10_000 });
@@ -55,6 +60,7 @@ const deps: OracleRouteDeps = {
   },
   getServiceClient,
   rateLimiter,
+  sessionLimiter,
   publicCooldown,
 };
 

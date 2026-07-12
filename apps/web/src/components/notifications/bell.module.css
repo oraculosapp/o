@@ -35,9 +35,9 @@
     0 0 20px var(--glow);
 }
 .bell:focus-visible {
-  outline: none;
+  outline: 2px solid var(--gold-bright);
+  outline-offset: 2px;
   border-color: var(--gold-dim);
-  box-shadow: 0 0 0 2px var(--glow);
 }
 
 /* Badge numérico dorado de no-leídas. */
@@ -72,7 +72,7 @@
   flex-direction: column;
   border: 1px solid var(--line);
   border-radius: var(--radius);
-  background: var(--panel);
+  background: var(--panel-hud);
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
   box-shadow: var(--shadow);
@@ -133,16 +133,28 @@
   font-size: 0.85rem;
 }
 
+.itemRow {
+  display: flex;
+}
+
 .item {
+  flex: 1 1 auto;
   display: flex;
   gap: 0.55rem;
   align-items: flex-start;
+  width: 100%;
   padding: 0.6rem 0.65rem;
+  border: none;
   border-radius: var(--radius-sm);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
   cursor: pointer;
   transition: background var(--dur-fast) var(--ease-brand);
 }
-.item:hover {
+.item:hover,
+.item:focus-visible {
   background: var(--panel-hi);
 }
 .itemUnread {
@@ -181,7 +193,7 @@
 .itemText {
   margin: 0;
   font-size: 0.8rem;
-  color: var(--text-dim);
+  color: var(--text);
   line-height: 1.35;
   overflow-wrap: anywhere;
 }
@@ -197,6 +209,11 @@
 @media (max-width: 640px) {
   .panel {
     width: min(300px, calc(100vw - 24px));
+  }
+  /* Área táctil ≥44px (WCAG 2.5.5) — el glifo se mantiene en ~20px. */
+  .bell {
+    width: 44px;
+    height: 44px;
   }
 }
 

@@ -453,3 +453,95 @@ create trigger on_auth_user_created after insert on auth.users
 
 > La versión compacta de arriba produce el mismo efecto que
 > `supabase/migrations/0002_notifications.sql` (que incluye todos los comentarios).
+
+---
+
+## 7. Migración 0003 — Endurecimiento de identidad (seguridad)
+
+Correcciones de seguridad del magno ejercicio (M-1 + M-4). Endurece la identidad
+en la base de datos, de modo que la BD deje de confiar en lo que manda el cliente:
+
+### 7.1 Qué hace
+
+- **(a) CHECK en `profiles`** (defensa en profundidad; la app ya valida):
+  - `handle ~ '^[a-z0-9_-]{3,32}$'`
+  - `char_length(bio) <= 280`, `char_length(location) <= 120`, `char_length(website) <= 200`
+- **(b) Trigger `enforce_biosphere_message_identity` (BEFORE INSERT) en
+  `biosphere_messages`**: para usuarios **registrados** (con `user_id`, que la RLS
+  de 0001 garantiza `= auth.uid()`) SOBREESCRIBE `display_name` con el `handle` del
+  perfil — el cliente ya no puede firmar con el nombre que quiera. Añade la columna
+  `is_anon` (la fija el trigger) para que la UI distinga a los anónimos; los
+  anónimos conservan su `display_name` libre.
+- **(c) Anti-suplantación barata**: un anónimo cuyo `display_name` empiece por el
+  nombre de un Oráculo (Paqo, Cosmogenes, Eme y Uru, Espinosito, Nin, Brangulio)
+  se reescribe a `Viajero anónimo`.
+
+### 7.2 Qué debe hacer el humano
+
+1. Abre el **SQL Editor** del proyecto Supabase (`kfgpxbwuyksrwzxuggif`).
+2. Pega el contenido **completo** de `supabase/migrations/0003_hardening.sql`
+   (o el SQL de §7.3) y pulsa **Run**. Debe terminar sin error.
+   - Es idempotente: si ya lo aplicaste, re-correrlo no rompe nada.
+   - Si algún perfil existente violara un CHECK (no debería: los handles se generan
+     en minúsculas), el `ALTER TABLE … ADD CONSTRAINT` fallaría — sanea esa fila y
+     re-ejecuta.
+3. Verifica en **Table editor → biosphere_messages** que aparece la columna
+   `is_anon`, y en **Database → Triggers** que existe `trg_biosphere_message_identity`.
+
+> **M-6 (captcha) — NO es SQL**: mitigar el registro/anon-abuse con captcha se
+> configura en el **dashboard** de Supabase (Authentication → Attack Protection /
+> CAPTCHA, proveedor hCaptcha/Turnstile). No lo cubre esta migración.
+
+Sin esta migración la plataforma **sigue funcionando** (la app valida en cliente y
+servidor), pero se pierde la red de seguridad de la BD y el `is_anon` que la UI usa
+para marcar anónimos degradará a "sin bandera".
+
+### 7.3 SQL completo (copiar y pegar)
+
+> Fuente canónica: `supabase/migrations/0003_hardening.sql` (incluye todos los
+> comentarios). Pega ese archivo tal cual; el bloque de abajo es la referencia rápida.
+
+```sql
+-- (a) CHECK de forma/longitud en profiles (idempotente)
+do $$
+begin
+  if not exists (select 1 from pg_constraint where conname = 'profiles_handle_format') then
+    alter table public.profiles add constraint profiles_handle_format
+      check (handle ~ '^[a-z0-9_-]{3,32}$');
+  end if;
+  if not exists (select 1 from pg_constraint where conname = 'profiles_bio_len') then
+    alter table public.profiles add constraint profiles_bio_len check (char_length(bio) <= 280);
+  end if;
+  if not exists (select 1 from pg_constraint where conname = 'profiles_location_len') then
+    alter table public.profiles add constraint profiles_location_len check (char_length(location) <= 120);
+  end if;
+  if not exists (select 1 from pg_constraint where conname = 'profiles_website_len') then
+    alter table public.profiles add constraint profiles_website_len check (char_length(website) <= 200);
+  end if;
+end$$;
+
+-- (b+c) is_anon + trigger de identidad en biosphere_messages
+alter table public.biosphere_messages add column if not exists is_anon boolean not null default true;
+update public.biosphere_messages set is_anon = false where is_oracle = true or user_id is not null;
+
+create or replace function public.enforce_biosphere_message_identity()
+returns trigger language plpgsql security definer set search_path = public as $$
+declare h citext;
+begin
+  if new.is_oracle then new.is_anon := false; return new; end if;
+  if new.user_id is not null then
+    select handle into h from public.profiles where id = new.user_id;
+    if h is not null then new.display_name := h::text; new.is_anon := false; return new; end if;
+  end if;
+  new.is_anon := true;
+  if new.display_name ~* '^\s*(paqo|cosmogenes|eme[ -]?y[ -]?uru|espinosito|nin|brangulio)\M' then
+    new.display_name := 'Viajero anónimo';
+  end if;
+  return new;
+end;$$;
+
+drop trigger if exists trg_biosphere_message_identity on public.biosphere_messages;
+create trigger trg_biosphere_message_identity
+  before insert on public.biosphere_messages
+  for each row execute function public.enforce_biosphere_message_identity();
+```

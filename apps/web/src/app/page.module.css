@@ -109,9 +109,12 @@
   font-size: clamp(0.8rem, 2.2vw, 1.05rem);
   letter-spacing: 0.14em;
   line-height: 1.7;
-  /* Contraste AA sobre la nebulosa: sand claro + sombra de asiento. */
+  /* Contraste AA sobre la nebulosa: sand claro + doble sombra de asiento para
+     que el texto se lea sobre las zonas más claras del diorama. */
   color: #efe7d7;
-  text-shadow: 0 1px 14px rgba(6, 7, 12, 0.85);
+  text-shadow:
+    0 1px 3px rgba(6, 7, 12, 0.95),
+    0 2px 18px rgba(6, 7, 12, 0.9);
 }
 
 /* Cola inferior: ENTRAR + píldora de instalación + footer, apilados y centrados.

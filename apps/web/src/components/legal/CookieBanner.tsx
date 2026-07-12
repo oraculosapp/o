@@ -2,13 +2,14 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { isModalOpen, subscribeModalLock } from "@/components/modal-lock";
 import styles from "./legal.module.css";
 
 const ACK_KEY = "phy-cookie-ack";
 
 /**
  * Banner de cookies mínimo, estilo "selbar" (píldora glass flotante). Hoy solo
- * usamos almacenamiento esencial (sesión Supabase + preferencias en
+ * usamos almacenamiento esencial (tu sesión de acceso + preferencias en
  * localStorage), así que es INFORMATIVO: un único botón "Entendido", sin muro y
  * sin toggles de consentimiento que no aplican. Enlaza a /cookies.
  *
@@ -16,6 +17,7 @@ const ACK_KEY = "phy-cookie-ack";
  */
 export function CookieBanner() {
   const [visible, setVisible] = useState(false);
+  const [modalOpen, setModalOpen] = useState(false);
 
   useEffect(() => {
     try {
@@ -25,7 +27,13 @@ export function CookieBanner() {
     }
   }, []);
 
-  if (!visible) return null;
+  // Se oculta mientras haya un modal/picker abierto para no colisionar con él.
+  useEffect(() => {
+    setModalOpen(isModalOpen());
+    return subscribeModalLock(setModalOpen);
+  }, []);
+
+  if (!visible || modalOpen) return null;
 
   const accept = () => {
     try {

@@ -10,6 +10,7 @@ import { HudControls } from "@/components/notifications/HudControls";
 import { MuteButton } from "@/components/audio/MuteButton";
 import { InstallButton } from "@/components/pwa/InstallButton";
 import { AvatarPicker } from "@/components/avatar-picker/AvatarPicker";
+import { thumbUrl } from "@/lib/avatars";
 import {
   getStoredAvatar,
   saveAvatarToProfile,
@@ -67,6 +68,28 @@ export default function PaqoBiosphere() {
     return () => clearTimeout(t);
   }, [toast]);
 
+  // Expone la preferencia de MOVIMIENTO REDUCIDO al engine (que congela
+  // cámara/parallax/swarm). Contrato para el agente de engine:
+  //   · <html data-reduced-motion="1|0">
+  //   · localStorage["phy:reduced-motion"] = "1|0"
+  // El engine debe leer cualquiera de los dos al iniciar y reaccionar al evento
+  // "change" del media query si quiere aplicarlo en caliente.
+  useEffect(() => {
+    const mq = window.matchMedia("(prefers-reduced-motion: reduce)");
+    const apply = () => {
+      const on = mq.matches;
+      document.documentElement.dataset.reducedMotion = on ? "1" : "0";
+      try {
+        localStorage.setItem("phy:reduced-motion", on ? "1" : "0");
+      } catch {
+        /* noop */
+      }
+    };
+    apply();
+    mq.addEventListener("change", apply);
+    return () => mq.removeEventListener("change", apply);
+  }, []);
+
   // Getter perezoso del contrato multijugador que el engine adjunta a world.net
   // tras start(). Puede no existir aún: el chat y las pistas degradan con gracia.
   const getWorldNet = (): WorldNetHooks | null => {
@@ -98,8 +121,13 @@ export default function PaqoBiosphere() {
       <ChatDock biosphereId={BIOSPHERE_ID} getWorldNet={getWorldNet} />
       <HintToasts oracleId={BIOSPHERE_ID} getWorldNet={getWorldNet} />
 
-      {/* Campanita + perfil + “Cambiar avatar” (arriba-derecha). */}
-      <HudControls onChangeAvatar={() => setPickerOpen(true)} />
+      {/* Campanita + perfil + “Cambiar avatar” (arriba-derecha). El botón de
+          avatar muestra el retrato/tinte actual para no confundirse con Perfil. */}
+      <HudControls
+        onChangeAvatar={() => setPickerOpen(true)}
+        avatarThumbUrl={avatarSel ? thumbUrl(avatarSel.archetype) : null}
+        avatarTint={avatarSel?.tint.primary ?? null}
+      />
 
       {/* Botón mute del soundscape (arriba-derecha, a la izq. del clúster). */}
       <MuteButton />

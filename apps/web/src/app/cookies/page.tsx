@@ -28,7 +28,7 @@ export default function CookiesPage() {
       <h2>Qué guardamos y por qué</h2>
       <ul>
         <li>
-          <strong>Sesión de Supabase</strong>: si creas cuenta, mantiene tu acceso iniciado para
+          <strong>Tu sesión de acceso</strong>: si creas cuenta, mantiene tu acceso iniciado para
           que no tengas que entrar una y otra vez. Es esencial para el servicio.
         </li>
         <li>

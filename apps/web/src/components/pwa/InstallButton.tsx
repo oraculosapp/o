@@ -81,7 +81,8 @@ export function InstallButton({ placement = "inline" }: { placement?: "inline" |
     if (choice.outcome === "accepted") setMode("hidden");
   };
 
-  const wrapClass = placement === "hud" ? `${styles.wrap} ${styles.hud}` : styles.wrap;
+  const isHud = placement === "hud";
+  const wrapClass = isHud ? `${styles.wrap} ${styles.hud}` : styles.wrap;
 
   return (
     <div className={wrapClass}>
@@ -90,9 +91,13 @@ export function InstallButton({ placement = "inline" }: { placement?: "inline" |
         className={styles.pill}
         onClick={onClick}
         aria-expanded={mode === "ios" ? iosHintOpen : undefined}
+        aria-label={isHud ? "Instalar app" : undefined}
+        title={isHud ? "Instalar app" : undefined}
       >
         <DownloadGlyph />
-        <span>Instalar app</span>
+        {/* En el HUD del mundo la píldora es un icono discreto (sin texto) para no
+            competir con el resto de controles; en la landing/perfil, con etiqueta. */}
+        {!isHud && <span>Instalar app</span>}
       </button>
 
       {mode === "ios" && iosHintOpen && (

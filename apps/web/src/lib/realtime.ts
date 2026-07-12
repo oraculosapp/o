@@ -64,6 +64,14 @@ export interface BiosphereMessage {
   display_name: string;
   content: string;
   is_oracle: boolean;
+  /**
+   * true si el autor es anónimo (sin perfil registrado). Lo fija el servidor
+   * (trigger de la migración 0003_hardening); para usuarios registrados el
+   * servidor además SOBREESCRIBE display_name con su handle. La UI puede usar
+   * esta bandera para distinguir anónimos (p.ej. un matiz visual). Opcional para
+   * tolerar filas antiguas anteriores a 0003.
+   */
+  is_anon?: boolean;
   created_at: string;
 }
 
@@ -108,6 +116,28 @@ const SWEEP_MS = 1_000;
 const NET_RETRY_MS = 600;
 const NET_RETRY_MAX = 20; // ~12 s intentando enganchar world.net
 
+/** Prefijo same-origin permitido para las URLs de arquetipo (avatar GLB). */
+const AVATAR_PATH_PREFIX = "/assets/avatars/";
+
+/**
+ * Valida que un `archetype` recibido por broadcast sea una ruta same-origin bajo
+ * `/assets/avatars/` (M-5). El broadcast no es de fiar: sin esto, un emisor
+ * malicioso podría enviar una URL externa y hacer que las víctimas descarguen un
+ * GLB de un host arbitrario. Devuelve la URL si es segura, o `undefined`.
+ */
+function safeArchetype(url: string | undefined): string | undefined {
+  if (!url || typeof url !== "string") return undefined;
+  if (url.includes("..") || url.includes("\\")) return undefined;
+  try {
+    const u = new URL(url, window.location.origin);
+    if (u.origin !== window.location.origin) return undefined;
+    if (!u.pathname.startsWith(AVATAR_PATH_PREFIX)) return undefined;
+    return url;
+  } catch {
+    return undefined;
+  }
+}
+
 /** ¿Están las env vars públicas de Supabase presentes? (decide si hay chat). */
 export function isSupabaseConfigured(): boolean {
   return Boolean(process.env.NEXT_PUBLIC_SUPABASE_URL && process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY);
@@ -135,6 +165,13 @@ export class BiosphereRealtime {
   private identity: RealtimeIdentity | null = null;
 
   private readonly lastSeen = new Map<string, number>();
+  /**
+   * Ids de sesión presentes en el canal (roster de presence). Los broadcasts de
+   * pos/ball de un emisor que NO está en presence se ignoran (defensa barata
+   * anti-griefing, M-5): sin esto, cualquiera con la anon-key podría inyectar
+   * movimiento/patadas sin figurar en el roster.
+   */
+  private readonly presentIds = new Set<string>();
   private sweepTimer: ReturnType<typeof setInterval> | null = null;
   private netRetryTimer: ReturnType<typeof setTimeout> | null = null;
   private netUnsubs: Array<() => void> = [];
@@ -193,14 +230,21 @@ export class BiosphereRealtime {
         archetype?: string;
       }>;
       const members: RosterMember[] = [];
+      this.presentIds.clear();
       for (const key of Object.keys(state)) {
         const meta = state[key][0];
         if (!meta) continue;
+        const id = meta.id ?? key;
+        // La presence key es autoritativa (la fija Supabase = uid de la sesión);
+        // registramos AMBOS por si el meta.id difiere, para el guard de pos/ball.
+        this.presentIds.add(id);
+        this.presentIds.add(key);
         members.push({
-          id: meta.id ?? key,
+          id,
           display_name: meta.display_name ?? "Viajero",
           tint: meta.tint,
-          archetype: meta.archetype,
+          // Sólo arquetipos same-origin válidos llegan al engine (M-5).
+          archetype: safeArchetype(meta.archetype),
         });
       }
       this.opts.onRoster?.(members);
@@ -209,6 +253,8 @@ export class BiosphereRealtime {
     // (b) Broadcast "pos" — avatares remotos
     channel.on("broadcast", { event: "pos" }, ({ payload }: { payload: PosPayload }) => {
       if (!payload || payload.id === me.sessionId) return;
+      // Anti-griefing (M-5): ignora a quien no figura en el roster de presence.
+      if (!this.presentIds.has(payload.id)) return;
       const net = this.net();
       this.lastSeen.set(payload.id, Date.now());
       net?.upsertRemote(payload.id, {
@@ -217,13 +263,16 @@ export class BiosphereRealtime {
         anim: payload.anim,
         tint: payload.tint,
         name: payload.name,
-        archetype: payload.archetype,
+        // Sólo URLs de arquetipo same-origin válidas pasan al loader (M-5).
+        archetype: safeArchetype(payload.archetype),
       });
     });
 
     // (c) Broadcast "ball" — autoridad = último que la tocó (el emisor)
     channel.on("broadcast", { event: "ball" }, ({ payload }: { payload: BallPayload }) => {
       if (!payload || payload.by === me.sessionId) return;
+      // Anti-griefing (M-5): sólo aceptamos patadas de emisores presentes.
+      if (!this.presentIds.has(payload.by)) return;
       this.net()?.applyBallState(payload.ballId, { pos: payload.pos, vel: payload.vel });
     });
 

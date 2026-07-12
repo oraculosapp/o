@@ -140,7 +140,9 @@
   width: 100%;
   max-width: 720px;
   margin-top: auto;
-  padding: 2rem 0 1.6rem;
+  /* Reserva inferior para que el banner de cookies (fijo, abajo-centro) NUNCA
+     tape los créditos ni en la landing ni en las páginas legales. */
+  padding: 2rem 0 clamp(4.5rem, 12vh, 6rem);
   text-align: center;
 }
 .footerLinks {
@@ -155,7 +157,8 @@
   font-size: 0.7rem;
   letter-spacing: 0.12em;
   text-transform: uppercase;
-  color: var(--text-dim);
+  /* Contraste AA: enlaces legales legibles sobre la nebulosa (antes --text-dim). */
+  color: var(--text);
   transition: color var(--dur-fast) var(--ease-brand);
 }
 .footerLink:hover {
