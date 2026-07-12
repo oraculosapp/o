@@ -43,6 +43,7 @@ export class WorldNet implements WorldNetHooks {
   private started = false;
 
   private _fwd = new THREE.Vector3();
+  private _holdTarget = new THREE.Vector3();
 
   constructor(private deps: WorldNetDeps) {
     this.remotes = new RemotePlayers(deps.scene);
@@ -94,6 +95,42 @@ export class WorldNet implements WorldNetHooks {
     return this.zones.onSignal(cb);
   }
 
+  // ---- agarrar / lanzar pelota (E) ----
+
+  /** ¿Hay una pelota agarrable al alcance del jugador (y no lleva ninguna)? */
+  canGrab(): boolean {
+    const p = this.deps.playerPosition;
+    return this.balls.canGrab(p.x, p.z);
+  }
+
+  /** ¿El jugador lleva una pelota agarrada? */
+  isHolding(): boolean {
+    return this.balls.isHolding();
+  }
+
+  /** Agarra la pelota agarrable más cercana. Devuelve true si agarró alguna. */
+  grabNearest(): boolean {
+    const p = this.deps.playerPosition;
+    const id = this.balls.nearestGrabbable(p.x, p.z);
+    if (id < 0) return false;
+    return this.balls.grab(id);
+  }
+
+  /** Lanza la pelota agarrada en la dirección de mirada. Devuelve true si lanzó. */
+  throwHeld(): boolean {
+    this.deps.playerForward(this._fwd);
+    return this.balls.throwBall(this._fwd, this.smoothVel);
+  }
+
+  /**
+   * E: si llevas una pelota la lanza; si no, intenta agarrar la más cercana.
+   * Devuelve la acción realizada ("throw" | "grab" | "none").
+   */
+  grabOrThrow(): "throw" | "grab" | "none" {
+    if (this.balls.isHolding()) return this.throwHeld() ? "throw" : "none";
+    return this.grabNearest() ? "grab" : "none";
+  }
+
   // ---- bucle ----
 
   /** Avanza todo el subsistema de red. Lo llama el loop de PaqoWorld. */
@@ -115,8 +152,24 @@ export class WorldNet implements WorldNetHooks {
     else if (horiz < WALK_MAX) this.localAnim = "walk";
     else this.localAnim = "run";
 
+    // Punto de agarre: delante del avatar, a la altura de las manos (solo si lleva
+    // una pelota). Se recalcula cada frame para que la pelota lo siga.
+    let holdTarget: THREE.Vector3 | undefined;
+    if (this.balls.isHolding()) {
+      this.deps.playerForward(this._fwd);
+      this._fwd.y = 0;
+      if (this._fwd.lengthSq() > 1e-6) this._fwd.normalize();
+      else this._fwd.set(0, 0, -1);
+      const feetY = this.deps.playerFeetY?.() ?? p.y - 0.9;
+      holdTarget = this._holdTarget.set(
+        p.x + this._fwd.x * 0.62,
+        feetY + 1.15,
+        p.z + this._fwd.z * 0.62,
+      );
+    }
+
     // Subsistemas.
-    this.balls.update(dt, p, this.smoothVel, this.deps.playerFeetY?.());
+    this.balls.update(dt, p, this.smoothVel, this.deps.playerFeetY?.(), holdTarget);
     this.remotes.update(dt, this.time, this.deps.camera);
     this.zones.update(p);
 

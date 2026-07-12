@@ -46,6 +46,13 @@ export class CharacterController {
   private readonly jumpSpeed = 9.2;
   private readonly coyoteTime = 0.12;
   private readonly jumpBuffer = 0.12;
+  // --- doble salto ---
+  /** Máximo de saltos hasta tocar suelo (1 = suelo/coyote, 2 = aire). */
+  private readonly maxJumps = 2;
+  /** Impulso del segundo salto relativo al primero (un poco menor, eleva más). */
+  private readonly doubleJumpFactor = 0.85;
+  /** Saltos consumidos desde el último contacto con el suelo. */
+  private jumpsUsed = 0;
   // 8/s (antes 12): giros más pausados — feedback del director en S3b.
   private readonly turnRate = 8;
   private readonly slopeLimitCos = Math.cos(THREE.MathUtils.degToRad(50));
@@ -98,6 +105,7 @@ export class CharacterController {
     this.horizVel.set(0, 0, 0);
     this.vertVel = 0;
     this.grounded = true;
+    this.jumpsUsed = 0;
     this.falling = false;
     this.alignInitial();
   }
@@ -166,6 +174,11 @@ export class CharacterController {
     return this.grounded;
   }
 
+  /** ¿Puede encadenar un segundo salto ahora mismo? (en aire, con 1 salto usado). */
+  canDoubleJump(): boolean {
+    return !this.grounded && this.jumpsUsed >= 1 && this.jumpsUsed < this.maxJumps;
+  }
+
   isFalling(): boolean {
     return this.falling;
   }
@@ -216,10 +229,25 @@ export class CharacterController {
 
     const canCoyote = this.timeSinceGround <= this.coyoteTime;
     const wantsJump = this.timeSinceJumpReq <= this.jumpBuffer;
-    if (wantsJump && (this.grounded || canCoyote)) {
+    if (wantsJump && this.jumpsUsed === 0 && (this.grounded || canCoyote)) {
+      // Primer salto: desde suelo o dentro del coyote-time (conserva jump-buffer).
       this.vertVel = this.jumpSpeed;
       this.grounded = false;
+      this.jumpsUsed = 1;
       this.timeSinceGround = 999;
+      this.timeSinceJumpReq = 999;
+    } else if (
+      intent.jump &&
+      !this.grounded &&
+      this.jumpsUsed >= 1 &&
+      this.jumpsUsed < this.maxJumps
+    ) {
+      // Doble salto: NUEVA pulsación de Space en el aire (edge crudo, no el
+      // buffer, para exigir una segunda pulsación real). Impulso 0.85× reiniciado
+      // desde la velocidad actual → desde el ápex eleva por encima de un salto
+      // simple. Máximo 2 saltos hasta volver a tocar suelo.
+      this.vertVel = this.jumpSpeed * this.doubleJumpFactor;
+      this.jumpsUsed += 1;
       this.timeSinceJumpReq = 999;
     }
     this.vertVel -= this.gravity * dt;
@@ -254,6 +282,7 @@ export class CharacterController {
         this.vertVel = 0;
         this.grounded = true;
         this.timeSinceGround = 0;
+        this.jumpsUsed = 0; // al aterrizar se recarga el doble salto
       } else {
         this.grounded = false;
       }

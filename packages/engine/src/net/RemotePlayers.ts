@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import { TestDummy } from "../avatar/TestDummy";
 import { loadAvatarRigShared, isAllowedArchetypeUrl } from "../avatar/AvatarGLTFCache";
+import { buildArchetype, isArchetypeId as isProceduralArchetypeId } from "../avatar/archetypes";
 import type { AvatarDriveState, IAvatarRig } from "../avatar/types";
 import { makeSoftCircleTexture } from "../util/toon";
 import type { NetAnim, RemoteState } from "./types";
@@ -100,18 +101,35 @@ class RemoteAvatar {
   }
 
   /**
-   * Adopta el arquetipo del remoto (URL de GLB). Carga perezosa desde la caché
-   * compartida; al terminar sustituye el maniquí por el AvatarRig. Si falla (404 o
-   * error), se queda con el maniquí — nunca rompe.
+   * Adopta el arquetipo del remoto. El valor que llega por presencia/broadcast es
+   * un ID de arquetipo (string, p.ej. "vampiro"):
+   *   · si es uno de los 9 PROCEDURALES → se construye el rig con `buildArchetype`
+   *     (100% código, instantáneo, SIN fetch) y se hot-swap conservando
+   *     posición/interpolación (viven en `holder`, no en `rig.root`);
+   *   · si no, se conserva el camino de GLB same-origin como fallback (uso futuro):
+   *     carga perezosa desde la caché compartida y sustitución al terminar. Si
+   *     falla (404 o error), se queda con el maniquí — nunca rompe.
    */
-  setArchetype(url?: string): void {
-    if (!url || url === this.curArchetype || this.loadingArchetype) return;
-    // Seguridad (M-5): sólo arquetipos same-origin bajo /assets/avatars/. Un
-    // broadcast malicioso con URL externa se ignora (nos quedamos con el maniquí).
-    if (!isAllowedArchetypeUrl(url)) return;
-    this.curArchetype = url;
+  setArchetype(id?: string): void {
+    if (!id || id === this.curArchetype || this.loadingArchetype) return;
+
+    // Camino preferido (procedurales): construcción local instantánea, sin red.
+    if (isProceduralArchetypeId(id)) {
+      this.curArchetype = id;
+      try {
+        this.swapRig(buildArchetype(id));
+      } catch {
+        // Nunca rompe: si algo fallara al construir, se queda con el rig actual.
+      }
+      return;
+    }
+
+    // Legado: GLB por URL. Seguridad (M-5): sólo arquetipos same-origin bajo
+    // /assets/avatars/. Un broadcast malicioso con URL externa se ignora.
+    if (!isAllowedArchetypeUrl(id)) return;
+    this.curArchetype = id;
     this.loadingArchetype = true;
-    loadAvatarRigShared(url)
+    loadAvatarRigShared(id)
       .then((rig) => {
         this.loadingArchetype = false;
         if (this.dead) {

@@ -69,15 +69,12 @@ export function ProfileForm({ userId, initial, progress }: ProfileFormProps) {
 
   // --- Avatar (arquetipo + tinte) --------------------------------------------
   const onApplyAvatar = useCallback(
-    (sel: AvatarSelection, available: boolean) => {
+    (sel: AvatarSelection) => {
       storeAvatar(sel);
       void saveAvatarToProfile(sel);
       setAvatarSel(sel);
       setPickerOpen(false);
-      pushToast(
-        "success",
-        available ? "Avatar actualizado ✦" : "Guardado — este arquetipo aún duerme",
-      );
+      pushToast("success", "Avatar actualizado ✦");
     },
     [pushToast],
   );
@@ -212,7 +209,7 @@ export function ProfileForm({ userId, initial, progress }: ProfileFormProps) {
             <div className={styles.avatarMeta}>
               <span className={styles.avatarName}>
                 {avatarSel
-                  ? `${ARCHETYPES.find((a) => a.id === avatarSel.archetype)?.name ?? avatarSel.archetype} · ${avatarSel.gender === "f" ? "Femenino" : "Masculino"}`
+                  ? (ARCHETYPES.find((a) => a.id === avatarSel.archetype)?.name ?? avatarSel.archetype)
                   : "Sin elegir todavía"}
               </span>
               {avatarSel && (

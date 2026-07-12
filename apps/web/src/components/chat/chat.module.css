@@ -1,10 +1,11 @@
-/* HUD de chat — dock glass inferior-izquierdo (design system Phygitalia).
+/* HUD de chat — dock glass inferior-DERECHO (design system Phygitalia).
    Panel --panel + blur, borde --line, radios 16px, nombres en Chakra Petch,
-   entrada píldora. Móvil: hoja inferior; colapsado deja libre el joystick. */
+   entrada píldora. Se puede expandir a columna de todo lo alto pegada a la
+   derecha. Móvil: a la derecha (el joystick ocupa la mitad izquierda). */
 
 .launcher {
   position: fixed;
-  left: 16px;
+  right: 16px;
   bottom: 16px;
   z-index: 30;
   display: inline-flex;
@@ -67,18 +68,13 @@
   background: var(--terra);
 }
 
-/* --- Dock expandido --------------------------------------------------------- */
+/* --- Dock abierto: base común (columna o flotante) -------------------------- */
 .dock {
   position: fixed;
-  left: 16px;
-  bottom: 16px;
   z-index: 30;
-  width: min(370px, calc(100vw - 32px));
-  height: min(460px, calc(100vh - 32px));
   display: flex;
   flex-direction: column;
   border: 1px solid var(--line);
-  border-radius: var(--radius);
   background: var(--panel-hud);
   backdrop-filter: blur(14px);
   -webkit-backdrop-filter: blur(14px);
@@ -86,6 +82,30 @@
   overflow: hidden;
   color: var(--text);
   animation: dockIn var(--dur-slow) var(--ease-brand);
+}
+
+/* COLUMNA lateral derecha (por defecto): full-height, ~360px. Reserva una franja
+   superior para que el clúster del HUD (mute/campanita/FAB, top-right, z-35) no se
+   solape con los controles de la cabecera del chat. */
+.dockColumn {
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: min(360px, 92vw);
+  padding-top: 52px;
+  border-top: none;
+  border-right: none;
+  border-bottom: none;
+  border-radius: 0;
+}
+
+/* FLOTANTE: posición por inline-style (left/top), arrastrable por la cabecera. */
+.dockFloating {
+  top: 72px;
+  right: 16px;
+  width: min(370px, calc(100vw - 32px));
+  height: min(460px, calc(100vh - 96px));
+  border-radius: var(--radius);
 }
 @keyframes dockIn {
   from {
@@ -102,6 +122,7 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: wrap;
   gap: 0.5rem;
   padding: 0.5rem 0.5rem 0.5rem 0.65rem;
   border-bottom: 1px solid var(--line-soft);
@@ -151,7 +172,7 @@
   gap: 0.5rem;
   padding-right: 0.25rem;
 }
-.collapseBtn {
+.iconBtn {
   width: 28px;
   height: 28px;
   border: 1px solid var(--line);
@@ -160,11 +181,60 @@
   color: var(--text-dim);
   cursor: pointer;
   line-height: 1;
-  transition: color var(--dur-fast) var(--ease-brand);
+  font-size: 0.9rem;
+  transition:
+    color var(--dur-fast) var(--ease-brand),
+    border-color var(--dur-fast) var(--ease-brand);
 }
-.collapseBtn:hover {
+.iconBtn:hover {
   color: var(--gold-bright);
   border-color: var(--gold-dim);
+}
+.iconBtn:focus-visible {
+  outline: 2px solid var(--gold-bright);
+  outline-offset: 2px;
+  color: var(--gold-bright);
+}
+.iconBtn[aria-pressed="true"] {
+  color: var(--gold-bright);
+  border-color: var(--gold);
+}
+
+/* Cabecera como asa de arrastre en modo flotante. */
+.headerDraggable {
+  cursor: grab;
+  touch-action: none;
+}
+.headerDraggable:active {
+  cursor: grabbing;
+}
+
+/* Slot de los controles de VOZ en la cabecera (VoiceControls o aviso). */
+.voiceSlot {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  min-width: 0;
+}
+
+/* Aviso deshabilitado cuando aún no hay sesión (viajero sin nombre): la voz sólo
+   se une si el usuario se identificó. Mismo vocabulario glass del HUD. */
+.voiceHint {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  min-height: 32px;
+  padding: 0 0.7rem;
+  border: 1px dashed var(--line);
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--text-faint);
+  font-family: var(--font-display);
+  font-size: 0.6rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  cursor: not-allowed;
 }
 
 /* Sólo para lectores de pantalla (fuera de vista, sin ocupar espacio). */
@@ -498,7 +568,7 @@
 /* Aviso discreto cuando Supabase no está configurado */
 .disabledNote {
   position: fixed;
-  left: 16px;
+  right: 16px;
   bottom: 16px;
   z-index: 30;
   padding: 0.45rem 0.7rem;
@@ -515,31 +585,29 @@
   pointer-events: none;
 }
 
-/* --- Móvil: hoja inferior; colapsado deja libre el joystick (abajo-izq) ----- */
+/* --- Móvil: a la derecha; el joystick vive en la mitad izquierda ------------ */
 @media (max-width: 640px) {
-  /* Colapsado: el launcher se va a la esquina inferior DERECHA para no tapar el
-     joystick (mitad izquierda inferior libre). */
+  /* Colapsado: el launcher, en la esquina inferior DERECHA (joystick libre). */
   .launcher {
-    left: auto;
     right: 14px;
     bottom: 14px;
   }
   .disabledNote {
-    left: auto;
     right: 14px;
     bottom: 14px;
   }
-  /* Expandido: hoja inferior a lo ancho. */
-  .dock {
-    left: 8px;
-    right: 8px;
-    bottom: 8px;
-    width: auto;
-    height: min(56vh, 460px);
-    border-radius: var(--radius);
+  /* Columna: ancho cómodo a la derecha que NO tapa el joystick izquierdo. */
+  .dockColumn {
+    width: min(78vw, 340px);
+    padding-top: 60px;
+  }
+  /* Flotante: hoja compacta que se puede arrastrar. */
+  .dockFloating {
+    width: min(84vw, 380px);
+    height: min(60vh, 460px);
   }
   /* Áreas táctiles ≥44px (WCAG 2.5.5) en el HUD de chat. */
-  .collapseBtn {
+  .iconBtn {
     width: 44px;
     height: 44px;
   }

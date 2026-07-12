@@ -1,0 +1,83 @@
+/* Botones táctiles de acción (inferior-derecha). Sólo se renderizan en touch.
+   El joystick del engine vive en la mitad izquierda; el chat, en la columna
+   derecha (colapsable), así que estos botones se sitúan por encima del launcher. */
+
+.pad {
+  position: fixed;
+  right: 18px;
+  bottom: 92px;
+  z-index: 28;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.7rem;
+  pointer-events: none;
+}
+
+.btn {
+  pointer-events: auto;
+  display: inline-grid;
+  place-content: center;
+  width: 74px;
+  height: 74px;
+  border-radius: 50%;
+  border: 1px solid var(--line);
+  background: var(--panel-hud);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  box-shadow: var(--shadow);
+  color: var(--gold-bright);
+  font-family: var(--font-display);
+  font-size: 0.72rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+  touch-action: none;
+  transition:
+    transform var(--dur-fast) var(--ease-brand),
+    box-shadow var(--dur-fast) var(--ease-brand),
+    background var(--dur-fast) var(--ease-brand);
+}
+.btn:active {
+  transform: scale(0.93);
+  box-shadow: var(--shadow), 0 0 22px var(--glow);
+}
+.btn:focus-visible {
+  outline: 2px solid var(--gold-bright);
+  outline-offset: 2px;
+}
+
+/* Saltar: acento dorado sólido. */
+.jump {
+  background: linear-gradient(180deg, rgba(227, 176, 99, 0.28), rgba(227, 176, 99, 0.12));
+  border-color: var(--gold-dim);
+}
+
+/* Agarrar/Lanzar: más pequeño, aparece sólo cuando hay algo agarrable. */
+.grab {
+  width: 64px;
+  height: 64px;
+  font-size: 0.66rem;
+  animation: grabIn var(--dur-fast) var(--ease-brand);
+}
+.holding {
+  background: linear-gradient(180deg, rgba(222, 121, 78, 0.3), rgba(222, 121, 78, 0.14));
+  border-color: var(--terra);
+  color: var(--terra);
+}
+@keyframes grabIn {
+  from {
+    opacity: 0;
+    transform: scale(0.85);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .btn,
+  .grab {
+    transition: none;
+    animation: none;
+  }
+}

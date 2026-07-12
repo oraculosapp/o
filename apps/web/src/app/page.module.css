@@ -46,21 +46,7 @@
   }
 }
 
-/* ---- Capa 1: canvas del diorama ---- */
-.canvas {
-  position: absolute;
-  inset: 0;
-  z-index: 1;
-  opacity: 0;
-  transition: opacity 1200ms var(--ease-brand, ease);
-  pointer-events: none;
-}
-
-.canvasOn {
-  opacity: 1;
-}
-
-/* ---- Capa 2: contenido ---- */
+/* ---- Capa 1: contenido ---- */
 .content {
   position: relative;
   z-index: 3;
@@ -69,9 +55,10 @@
   align-items: center;
   text-align: center;
   padding: 2rem;
-  /* Empuja logo arriba y botón abajo dejando el círculo respirar en el centro. */
+  gap: clamp(1rem, 3vh, 2rem);
+  /* Logo arriba, isla (avatar + nick + ENTRAR) en el centro, footer abajo. */
   justify-content: space-between;
-  min-height: min(100dvh, 780px);
+  min-height: min(100dvh, 860px);
   pointer-events: none;
 }
 
@@ -129,8 +116,10 @@
 
 .enter {
   display: inline-block;
-  margin: 0 0 clamp(0.5rem, 3vh, 1.5rem);
-  padding: 0.95rem 3.2rem;
+  margin: 0;
+  padding: 0.95rem 2.6rem;
+  border: none;
+  cursor: pointer;
   border-radius: var(--radius-pill);
   font-family: var(--font-display);
   font-weight: 600;
@@ -159,6 +148,191 @@
   outline: 2px solid var(--gold-bright);
   outline-offset: 4px;
 }
+.enter:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+/* ---- Isla interactiva: preview 3D + anillo + nickname + ENTRAR ---- */
+.island {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: clamp(0.9rem, 2.6vh, 1.6rem);
+  width: 100%;
+  max-width: 560px;
+}
+
+/* Escenario de la RULETA 3D (AvatarCarousel monta su canvas aquí). */
+.stageWrap {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 100%;
+}
+.stage {
+  width: min(100%, 460px);
+  height: clamp(240px, 54vw, 340px);
+  opacity: 0;
+  transition: opacity 900ms var(--ease-brand);
+  /* Halo dorado suave detrás de la ruleta. */
+  background: radial-gradient(58% 46% at 50% 52%, var(--glow), transparent 72%);
+  touch-action: pan-y;
+}
+.stageOn {
+  opacity: 1;
+}
+.stageName {
+  margin-top: 0.2rem;
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: clamp(0.95rem, 2.4vw, 1.2rem);
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--gold-bright);
+  text-shadow: 0 1px 10px rgba(6, 7, 12, 0.9);
+}
+
+/* Botones ‹ › para girar la ruleta (flanquean el escenario). */
+.ringNav {
+  position: absolute;
+  top: 44%;
+  z-index: 2;
+  display: inline-grid;
+  place-content: center;
+  width: 44px;
+  height: 44px;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  background: var(--panel-hud);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  box-shadow: var(--shadow);
+  color: var(--gold-bright);
+  font-size: 1.6rem;
+  line-height: 1;
+  cursor: pointer;
+  transition:
+    transform var(--dur-fast) var(--ease-brand),
+    border-color var(--dur-fast) var(--ease-brand),
+    box-shadow var(--dur-fast) var(--ease-brand);
+}
+.ringNav:hover {
+  border-color: var(--gold-dim);
+  transform: translateY(-1px);
+  box-shadow: var(--shadow), 0 0 20px var(--glow);
+}
+.ringNav:focus-visible {
+  outline: 2px solid var(--gold-bright);
+  outline-offset: 2px;
+}
+.ringNavPrev {
+  left: clamp(-4px, 1vw, 12px);
+}
+.ringNavNext {
+  right: clamp(-4px, 1vw, 12px);
+}
+
+/* Pager accesible: los 9 arquetipos como dots (radiogroup). */
+.pager {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.55rem;
+  flex-wrap: wrap;
+  max-width: 100%;
+  padding: 0.2rem;
+}
+.dot {
+  width: 12px;
+  height: 12px;
+  padding: 0;
+  border: 1px solid var(--gold-dim);
+  border-radius: 50%;
+  background: transparent;
+  cursor: pointer;
+  transition:
+    background var(--dur-fast) var(--ease-brand),
+    transform var(--dur-fast) var(--ease-brand),
+    box-shadow var(--dur-fast) var(--ease-brand);
+}
+.dot:hover {
+  background: var(--gold-dim);
+}
+.dotActive {
+  background: linear-gradient(180deg, var(--gold-bright), var(--gold));
+  border-color: var(--gold);
+  transform: scale(1.25);
+  box-shadow: 0 0 12px -2px var(--glow);
+}
+.dot:focus-visible {
+  outline: 2px solid var(--gold-bright);
+  outline-offset: 3px;
+}
+
+/* Nickname + ENTRAR */
+.entry {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.45rem;
+  width: 100%;
+  max-width: 460px;
+}
+.nickLabel {
+  font-family: var(--font-display);
+  font-size: 0.62rem;
+  letter-spacing: 0.24em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+.entryRow {
+  display: flex;
+  gap: 0.6rem;
+  width: 100%;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+.nick {
+  flex: 1 1 240px;
+  min-width: 0;
+  max-width: 320px;
+  padding: 0.9rem 1.3rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-pill);
+  background: var(--panel-hud);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  color: var(--text);
+  font-family: var(--font-body);
+  font-size: 1rem;
+  text-align: center;
+  outline: none;
+  transition:
+    border-color var(--dur-fast) var(--ease-brand),
+    box-shadow var(--dur-fast) var(--ease-brand);
+}
+.nick::placeholder {
+  color: var(--text-faint);
+}
+.nick:focus {
+  border-color: var(--gold-dim);
+  box-shadow: 0 0 0 2px var(--glow);
+}
+.nick:focus-visible {
+  outline: 2px solid var(--gold-bright);
+  outline-offset: 2px;
+}
+.nickError {
+  border-color: var(--terra);
+  box-shadow: 0 0 0 2px rgba(201, 138, 94, 0.35);
+}
+.nickHint {
+  font-size: 0.78rem;
+  color: var(--terra);
+  text-shadow: 0 1px 3px rgba(6, 7, 12, 0.9);
+}
 
 /* Viñeta radial: oscurece los bordes, asienta el texto sobre la escena. */
 .vignette {
@@ -179,14 +353,19 @@
   }
 }
 
-/* Sin movimiento: la escena three.js ya congela rotación/parallax por su cuenta;
-   aquí quitamos el parpadeo de las estrellas. */
+/* Sin movimiento: la ruleta ya desactiva su inercia y sus tweens por su cuenta
+   (le pasamos reducedMotion:true); aquí quitamos el parpadeo de las estrellas, el
+   fade del escenario y los micro-movimientos del pager. */
 @media (prefers-reduced-motion: reduce) {
   .stars {
     animation: none;
     opacity: 0.8;
   }
-  .canvas {
+  .stage,
+  .dot,
+  .dotActive,
+  .ringNav,
+  .nick {
     transition: none;
   }
 }

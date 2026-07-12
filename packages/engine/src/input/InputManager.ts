@@ -7,6 +7,24 @@ export interface InputFrame {
   run: boolean;
   /** true sólo el frame en que se presionó saltar (edge). */
   jump: boolean;
+  /** true sólo el frame en que se presionó E (agarrar/lanzar, edge). */
+  grab: boolean;
+}
+
+/**
+ * Estado de acción del personaje que la UI móvil observa para dibujar los botones
+ * de Saltar y Agarrar/Lanzar (Contrato B). El mundo lo empuja cada frame; el
+ * InputManager sólo notifica a los suscriptores cuando cambia.
+ */
+export interface ActionState {
+  /** Hay una pelota agarrable al alcance (y no llevas ninguna). */
+  canGrab: boolean;
+  /** El personaje sostiene una pelota (el botón pasa a "Lanzar"). */
+  holding: boolean;
+  /** Pegado al suelo. */
+  grounded: boolean;
+  /** Puede encadenar un segundo salto en el aire (doble salto). */
+  canDoubleJump: boolean;
 }
 
 interface PointerRec {
@@ -31,7 +49,25 @@ interface PointerRec {
 export class InputManager {
   private keys = new Set<string>();
   private jumpEdge = false;
+  private grabEdge = false;
   private pointers = new Map<number, PointerRec>();
+
+  /**
+   * Interruptor maestro del input del juego. Cuando es `false` (p.ej. el chat
+   * tomó foco), el teclado del juego se ignora y `consumeMove` devuelve un frame
+   * neutro: el avatar no se mueve y Space/Enter NO se consumen (llegan al campo
+   * de texto). Lo gobierna `world.setInputEnabled(bool)` desde la UI.
+   */
+  private inputEnabled = true;
+
+  // Estado de acción (Contrato B) + suscriptores. Lo empuja el mundo cada frame.
+  private actionSubs = new Set<(s: ActionState) => void>();
+  private actionState: ActionState = {
+    canGrab: false,
+    holding: false,
+    grounded: true,
+    canDoubleJump: false,
+  };
 
   private orbitDX = 0;
   private orbitDY = 0;
@@ -109,11 +145,21 @@ export class InputManager {
   // ---- teclado ----
 
   private onKeyDown = (e: KeyboardEvent): void => {
+    // BUG-FIX: el teclado del juego (WASD/flechas/Space/Shift/E) se IGNORA cuando
+    // el foco está en un campo editable (input/textarea/select/contenteditable) o
+    // cuando la UI apagó el input (chat con foco). Crucial: NO hacemos
+    // preventDefault → Space/Enter llegan al campo de texto y escriben normal.
+    if (!this.inputEnabled || InputManager.isEditableTarget(e)) return;
+
     const k = e.key.toLowerCase();
     if (k === " " || k === "spacebar") {
       if (!this.keys.has(" ")) this.jumpEdge = true;
       this.keys.add(" ");
       e.preventDefault();
+    } else if (k === "e") {
+      // Edge de agarrar/lanzar (una emisión por pulsación, no por auto-repeat).
+      if (!this.keys.has("e")) this.grabEdge = true;
+      this.keys.add("e");
     } else {
       this.keys.add(k);
     }
@@ -121,8 +167,11 @@ export class InputManager {
   };
 
   private onKeyUp = (e: KeyboardEvent): void => {
-    this.keys.delete(e.key.toLowerCase());
-    if (e.key === " ") this.keys.delete(" ");
+    // El keyup limpia SIEMPRE (aunque el input esté deshabilitado) para no dejar
+    // una tecla "pegada" si el estado cambió mientras estaba pulsada.
+    const k = e.key.toLowerCase();
+    this.keys.delete(k);
+    if (k === " ") this.keys.delete(" ");
   };
 
   private isMoveKey(k: string): boolean {
@@ -130,6 +179,77 @@ export class InputManager {
       k === "w" || k === "a" || k === "s" || k === "d" ||
       k === "arrowup" || k === "arrowdown" || k === "arrowleft" || k === "arrowright"
     );
+  }
+
+  /** ¿El evento de teclado nace de (o el foco está en) un campo editable? */
+  private static isEditableTarget(e: KeyboardEvent): boolean {
+    if (InputManager.isEditable(e.target as Element | null)) return true;
+    const active = typeof document !== "undefined" ? document.activeElement : null;
+    return InputManager.isEditable(active);
+  }
+
+  private static isEditable(el: Element | null): boolean {
+    if (!el) return false;
+    const tag = el.tagName;
+    if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return true;
+    return (el as HTMLElement).isContentEditable === true;
+  }
+
+  /**
+   * Enciende/apaga el input del juego (Contrato UI). Al apagar, suelta cualquier
+   * tecla mantenida y anula el joystick para que el avatar se detenga en seco.
+   */
+  setInputEnabled(enabled: boolean): void {
+    this.inputEnabled = enabled;
+    if (!enabled) {
+      this.keys.clear();
+      this.joyVec.set(0, 0);
+      this.jumpEdge = false;
+      this.grabEdge = false;
+    }
+  }
+
+  /** ¿El input del juego está habilitado? */
+  isInputEnabled(): boolean {
+    return this.inputEnabled;
+  }
+
+  // ---- Contrato B: acciones móviles (sin teclado) ----
+
+  /** Encola un salto (botón móvil). Da el primer salto o el doble salto en aire. */
+  pressJump(): void {
+    this.jumpEdge = true;
+  }
+
+  /** Encola un E (botón móvil): agarra la pelota cercana o lanza la que llevas. */
+  pressGrab(): void {
+    this.grabEdge = true;
+  }
+
+  /**
+   * Suscribe cambios del estado de acción (canGrab/holding/grounded/canDoubleJump).
+   * Llama al callback de inmediato con el estado actual y luego sólo en cambios.
+   * Devuelve la función para desuscribir.
+   */
+  onActionState(cb: (s: ActionState) => void): () => void {
+    this.actionSubs.add(cb);
+    cb({ ...this.actionState });
+    return () => this.actionSubs.delete(cb);
+  }
+
+  /** El mundo empuja el estado de acción cada frame; notifica sólo si cambió. */
+  setActionState(s: ActionState): void {
+    const p = this.actionState;
+    if (
+      p.canGrab === s.canGrab &&
+      p.holding === s.holding &&
+      p.grounded === s.grounded &&
+      p.canDoubleJump === s.canDoubleJump
+    ) {
+      return;
+    }
+    this.actionState = { ...s };
+    for (const cb of this.actionSubs) cb({ ...this.actionState });
   }
 
   // ---- puntero (mouse + touch) ----
@@ -237,9 +357,15 @@ export class InputManager {
 
   // ---- consumo por frame ----
 
-  /** Eje de movimiento (teclado o joystick), run y edge de salto. */
+  /** Eje de movimiento (teclado o joystick), run y edges de salto/agarrar. */
   consumeMove(): InputFrame {
     this._axis.set(0, 0);
+    // Input del juego apagado (chat con foco): frame neutro, edges descartados.
+    if (!this.inputEnabled) {
+      this.jumpEdge = false;
+      this.grabEdge = false;
+      return { moveAxis: this._axis, run: false, jump: false, grab: false };
+    }
     if (this.joyVec.lengthSq() > 0.001) {
       this._axis.copy(this.joyVec);
     } else {
@@ -251,8 +377,10 @@ export class InputManager {
     }
     const run = this.keys.has("shift");
     const jump = this.jumpEdge;
+    const grab = this.grabEdge;
     this.jumpEdge = false;
-    return { moveAxis: this._axis, run, jump };
+    this.grabEdge = false;
+    return { moveAxis: this._axis, run, jump, grab };
   }
 
   /** Deltas de órbita acumulados (px) y los resetea. */
@@ -281,6 +409,7 @@ export class InputManager {
   }
 
   dispose(): void {
+    this.actionSubs.clear();
     window.removeEventListener("keydown", this.onKeyDown);
     window.removeEventListener("keyup", this.onKeyUp);
     this.el.removeEventListener("pointerdown", this.onPointerDown);

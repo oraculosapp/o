@@ -1,10 +1,9 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { ARCHETYPES, thumbUrl, archetypeUrl, type Gender } from "@/lib/avatars";
+import { ARCHETYPES, thumbUrl } from "@/lib/avatars";
 import {
   AVATAR_TINTS,
-  archetypeExists,
   defaultSelection,
   type AvatarSelection,
 } from "@/lib/avatar-store";
@@ -21,23 +20,20 @@ export interface AvatarPickerProps {
   initial?: AvatarSelection | null;
   onClose(): void;
   /**
-   * Confirma la selección. `available` = si el GLB del arquetipo ya existe
-   * (HEAD). Si es false, el llamador muestra el aviso “aún duerme” y el mundo cae
-   * con gracia al maniquí — pero la elección se guarda igual, lista para cuando
-   * llegue el modelo.
+   * Confirma la selección. Los 9 arquetipos son procedurales (siempre
+   * disponibles): al aplicar, el mundo encarna el chibi al instante.
    */
-  onApply(sel: AvatarSelection, available: boolean): void;
+  onApply(sel: AvatarSelection): void;
 }
 
 /**
  * Selector de arquetipo: panel glass de marca con la cuadrícula de 9 arquetipos
- * (miniaturas de las láminas), selector M/F y 3 paletas de tinte. Funciona HOY
- * aunque no exista ningún GLB: al confirmar, si el modelo no está, el mundo usa
- * el maniquí con el tinte elegido.
+ * PROCEDURALES (miniaturas de las láminas) y 3 paletas de tinte. Sin género: son
+ * 9 avatares distintos, todos disponibles — al confirmar, el mundo los construye
+ * en código (buildArchetype) sin esperar ninguna descarga.
  */
 export function AvatarPicker({ open, initial, onClose, onApply }: AvatarPickerProps) {
   const [sel, setSel] = useState<AvatarSelection>(initial ?? defaultSelection());
-  const [applying, setApplying] = useState(false);
   const panelRef = useRef<HTMLElement>(null);
   const radioRefs = useRef<(HTMLButtonElement | null)[]>([]);
 
@@ -63,7 +59,6 @@ export function AvatarPicker({ open, initial, onClose, onApply }: AvatarPickerPr
 
   if (!open) return null;
 
-  const setGender = (gender: Gender) => setSel((s) => ({ ...s, gender }));
   const setArchetype = (archetype: string) => setSel((s) => ({ ...s, archetype }));
   const setTint = (tint: AvatarSelection["tint"]) => setSel((s) => ({ ...s, tint }));
 
@@ -101,13 +96,7 @@ export function AvatarPicker({ open, initial, onClose, onApply }: AvatarPickerPr
     radioRefs.current[next]?.focus();
   };
 
-  const confirm = async () => {
-    if (applying) return;
-    setApplying(true);
-    const available = await archetypeExists(archetypeUrl(sel.archetype, sel.gender));
-    setApplying(false);
-    onApply(sel, available);
-  };
+  const confirm = () => onApply(sel);
 
   const activeArchetype = ARCHETYPES.find((a) => a.id === sel.archetype);
 
@@ -122,8 +111,8 @@ export function AvatarPicker({ open, initial, onClose, onApply }: AvatarPickerPr
           <span className={styles.eyebrow}>Tu avatar</span>
           <h2 className={styles.title}>Elige tu arquetipo</h2>
           <p className={styles.lead}>
-            Nueve viajeros arquetípicos. Aún se están materializando: elige el tuyo
-            y aparecerás con él en cuanto despierte.
+            Nueve viajeros arquetípicos. Elige el tuyo y encarnarás con él al
+            instante.
           </p>
         </header>
 
@@ -159,30 +148,8 @@ export function AvatarPicker({ open, initial, onClose, onApply }: AvatarPickerPr
           })}
         </div>
 
-        {/* Controles: género + tinte */}
+        {/* Controles: tinte */}
         <div className={styles.controls}>
-          <div className={styles.controlGroup}>
-            <span className={styles.controlLabel}>Género</span>
-            <div className={styles.segment} role="group" aria-label="Género">
-              <button
-                type="button"
-                className={`${styles.segBtn} ${sel.gender === "m" ? styles.segActive : ""}`}
-                aria-pressed={sel.gender === "m"}
-                onClick={() => setGender("m")}
-              >
-                Masculino
-              </button>
-              <button
-                type="button"
-                className={`${styles.segBtn} ${sel.gender === "f" ? styles.segActive : ""}`}
-                aria-pressed={sel.gender === "f"}
-                onClick={() => setGender("f")}
-              >
-                Femenino
-              </button>
-            </div>
-          </div>
-
           <div className={styles.controlGroup}>
             <span className={styles.controlLabel}>Tinte</span>
             <div className={styles.swatches} role="group" aria-label="Paleta de tinte">
@@ -211,8 +178,8 @@ export function AvatarPicker({ open, initial, onClose, onApply }: AvatarPickerPr
 
         <div className={styles.actions}>
           <span className={styles.selName}>{activeArchetype?.name}</span>
-          <button type="button" className={styles.confirm} onClick={confirm} disabled={applying}>
-            {applying ? "Preparando…" : "Encarnar"}
+          <button type="button" className={styles.confirm} onClick={confirm}>
+            Encarnar
           </button>
         </div>
       </section>

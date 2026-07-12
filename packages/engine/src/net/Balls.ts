@@ -38,24 +38,23 @@ const KICK_COOLDOWN = 0.2;
 /** Duración de la reconciliación suave tras applyBallState (s). */
 const RECONCILE_TIME = 0.45;
 
-/** Paleta toon variada (8 colores) + 1 dorada al final. */
-const BALL_COLORS = [
-  0xd76b6b, // coral
-  0x6bb0d7, // celeste
-  0x8fc46b, // verde lima
-  0xd7a86b, // ámbar
-  0xb06bd7, // violeta
-  0x6bd7b0, // menta
-  0xd76bb0, // rosa
-  0x6b7bd7, // índigo
-  0xe3b063, // ★ dorada (acento de Paqo)
-];
-/** Índice de la pelota dorada en la paleta (acento de Paqo). */
-const GOLD_INDEX = BALL_COLORS.length - 1;
-/** Emisivo base de las pelotas normales (suave, que "canten" en su color). */
-const EMISSIVE_BASE = 0.22;
-/** Emisivo de la pelota dorada (marcado, combina con el anillo-runa y el bloom). */
-const EMISSIVE_GOLD = 0.85;
+/** Blanco cálido único para TODAS las pelotas (combina con el toon del mundo). */
+const BALL_COLOR = 0xf4f1ea;
+/** Emisivo base muy tenue: un glow blanco sutil que no las apague ni las haga farolas. */
+const EMISSIVE_BASE = 0.06;
+
+/** Alcance HORIZONTAL (u, plano XZ) para agarrar la pelota más cercana con E. */
+const GRAB_RANGE = 1.5;
+/** Distancia frontal (u) a la que flota la pelota agarrada, delante del avatar. */
+const HOLD_FORWARD = 0.62;
+/** Altura (u) sobre los pies a la que flota la pelota agarrada (a la altura de manos). */
+const HOLD_HEIGHT = 1.15;
+/** Rapidez (u/s) del lanzamiento en la dirección de mirada. */
+const THROW_SPEED = 9.5;
+/** Componente vertical (u/s) del lanzamiento: da el arco. */
+const THROW_ARC = 4.6;
+/** Fracción de la velocidad del jugador que hereda la pelota al lanzarla. */
+const THROW_INHERIT = 0.5;
 
 interface Ball {
   pos: THREE.Vector3;
@@ -79,6 +78,16 @@ export class Balls {
   private balls: Ball[] = [];
   private kickCbs = new Set<(id: number, s: BallState) => void>();
 
+  // --- agarrar / lanzar ---
+  /** Índice de la pelota agarrada, o -1 si no llevas ninguna (solo una a la vez). */
+  private heldId = -1;
+  /** Índice de la pelota agarrable resaltada por el sprite E este frame (-1 = ninguna). */
+  private hintId = -1;
+  /** Sprite billboard con el glifo "E" que aparece sobre la pelota agarrable. */
+  private eSprite?: THREE.Sprite;
+  private eTex?: THREE.Texture;
+  private time = 0;
+
   private _m = new THREE.Matrix4();
   private _q = new THREE.Quaternion();
   private _scale = new THREE.Vector3(1, 1, 1);
@@ -91,8 +100,8 @@ export class Balls {
   /** Construye la malla instanciada y esparce las pelotas por el claro. */
   build(): void {
     const geo = new THREE.IcosahedronGeometry(RADIUS, 1); // low-poly toon (~80 tris)
-    // Emisivo/rim por instancia: cada pelota "canta" suave en su propio color;
-    // la dorada más marcada (combina con el anillo-runa y el bloom del claro).
+    // Emisivo/rim por instancia: todas iguales, un glow blanco muy tenue que las
+    // integra al toon del claro sin apagarlas ni convertirlas en farolas.
     const emis = new Float32Array(BALL_COUNT);
     geo.setAttribute("aEmis", new THREE.InstancedBufferAttribute(emis, 1));
     const mat = this.buildMaterial();
@@ -115,20 +124,86 @@ export class Balls {
         kickCd: 0,
         recTimer: 0,
       });
-      const ci = i % BALL_COLORS.length;
-      this.mesh.setColorAt(i, new THREE.Color(BALL_COLORS[ci]));
-      // Dorada marcada; el resto suave con una variación sutil por posición.
-      emis[i] = ci === GOLD_INDEX ? EMISSIVE_GOLD : EMISSIVE_BASE + (i % 3) * 0.05;
+      this.mesh.setColorAt(i, new THREE.Color(BALL_COLOR));
+      // Todas iguales: blanco cálido con un emisivo muy tenue.
+      emis[i] = EMISSIVE_BASE;
     }
     this.syncInstances();
     if (this.mesh.instanceColor) this.mesh.instanceColor.needsUpdate = true;
+    this.buildEHint();
+  }
+
+  /**
+   * Sprite billboard con el glifo "E" (textura generada en canvas 2D, estilo de
+   * marca: tecla redondeada clara con la letra E). Un THREE.Sprite mira SIEMPRE a
+   * cámara sin coste; la flotación la aplica `update`. Oculto hasta que hay una
+   * pelota agarrable cerca y no llevas ninguna. Cero DOM.
+   */
+  private buildEHint(): void {
+    this.eTex = this.makeKeyTexture("E");
+    const mat = new THREE.SpriteMaterial({
+      map: this.eTex,
+      transparent: true,
+      depthTest: false, // siempre legible sobre la pelota
+      depthWrite: false,
+      fog: false,
+    });
+    this.eSprite = new THREE.Sprite(mat);
+    this.eSprite.scale.set(0.6, 0.6, 0.6);
+    this.eSprite.renderOrder = 6;
+    this.eSprite.visible = false;
+    this.eSprite.name = "ball-grab-hint-E";
+  }
+
+  /** Textura de "tecla" redondeada clara con una letra centrada (canvas 2D). */
+  private makeKeyTexture(glyph: string): THREE.CanvasTexture {
+    const s = 128;
+    const canvas = document.createElement("canvas");
+    canvas.width = canvas.height = s;
+    const ctx = canvas.getContext("2d")!;
+    const pad = 14;
+    const r = 26;
+    const x = pad;
+    const y = pad;
+    const w = s - pad * 2;
+    const h = s - pad * 2;
+    // Cuerpo de la tecla: redondeada clara con borde ámbar de la marca.
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w, y, x + w, y + h, r);
+    ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r);
+    ctx.arcTo(x, y, x + w, y, r);
+    ctx.closePath();
+    const g = ctx.createLinearGradient(0, y, 0, y + h);
+    g.addColorStop(0, "rgba(255,252,245,0.97)");
+    g.addColorStop(1, "rgba(232,220,198,0.95)");
+    ctx.fillStyle = g;
+    ctx.fill();
+    ctx.lineWidth = 6;
+    ctx.strokeStyle = "rgba(227,176,99,0.95)"; // ámbar de marca
+    ctx.stroke();
+    // Sombra interior sutil bajo el borde superior (relieve de tecla).
+    ctx.strokeStyle = "rgba(0,0,0,0.06)";
+    ctx.lineWidth = 3;
+    ctx.stroke();
+    // Glifo.
+    ctx.fillStyle = "#2a2118";
+    ctx.font = `700 ${Math.round(h * 0.62)}px system-ui, -apple-system, "Segoe UI", sans-serif`;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText(glyph, s / 2, s / 2 + 2);
+    const tex = new THREE.CanvasTexture(canvas);
+    tex.anisotropy = 4;
+    tex.needsUpdate = true;
+    return tex;
   }
 
   /**
    * Material toon instanciado con emisivo + rim inyectados por `onBeforeCompile`.
-   * El emisivo tiñe cada pelota en su PROPIO color (leído de `instanceColor`) con
-   * intensidad por instancia (`aEmis`), y un rim-light barato (borde que capta el
-   * atardecer) la integra a la estética. No toca cielo/fog/paleta del mundo.
+   * El emisivo aporta un glow blanco muy tenue (leído de `instanceColor` = blanco
+   * cálido, con intensidad por instancia `aEmis`), y un rim-light barato (borde que
+   * capta el atardecer) la integra a la estética. No toca cielo/fog/paleta del mundo.
    */
   private buildMaterial(): THREE.MeshToonMaterial {
     const mat = new THREE.MeshToonMaterial({ gradientMap: makeToonRamp() });
@@ -159,11 +234,11 @@ export class Balls {
           "#include <emissivemap_fragment>",
           [
             "#include <emissivemap_fragment>",
-            "// Emisivo tenue en el color propio de la pelota (la dorada canta más).",
+            "// Emisivo blanco muy tenue (glow sutil, uniforme en todas).",
             "totalEmissiveRadiance += vBallColor * vEmis;",
-            "// Rim-light barato en espacio de vista: el borde capta el atardecer.",
+            "// Rim-light barato en espacio de vista: el borde capta el atardecer, muy sutil.",
             "float _rim = pow(1.0 - abs(normalize(vNormal).z), 3.0);",
-            "totalEmissiveRadiance += vBallColor * _rim * (0.28 + vEmis * 0.5);",
+            "totalEmissiveRadiance += vBallColor * _rim * (0.10 + vEmis * 0.25);",
           ].join("\n"),
         );
     };
@@ -172,6 +247,7 @@ export class Balls {
 
   addTo(scene: THREE.Scene): void {
     scene.add(this.mesh);
+    if (this.eSprite) scene.add(this.eSprite);
   }
 
   onKick(cb: (id: number, s: BallState) => void): () => void {
@@ -179,10 +255,92 @@ export class Balls {
     return () => this.kickCbs.delete(cb);
   }
 
+  // ---- agarrar / lanzar ----
+
+  /**
+   * Índice de la pelota agarrable más cercana en el plano XZ dentro de GRAB_RANGE,
+   * o -1 si ninguna (o si ya llevas una). No considera la pelota agarrada.
+   */
+  nearestGrabbable(px: number, pz: number): number {
+    if (this.heldId >= 0) return -1;
+    let best = -1;
+    let bestD = GRAB_RANGE;
+    for (let i = 0; i < this.balls.length; i++) {
+      const b = this.balls[i];
+      const d = Math.hypot(b.pos.x - px, b.pos.z - pz);
+      if (d < bestD) {
+        bestD = d;
+        best = i;
+      }
+    }
+    return best;
+  }
+
+  /** ¿Llevas una pelota agarrada ahora mismo? */
+  isHolding(): boolean {
+    return this.heldId >= 0;
+  }
+
+  /** Índice de la pelota agarrada, o -1. */
+  heldBall(): number {
+    return this.heldId;
+  }
+
+  /** ¿Hay una pelota agarrable al alcance (y no llevas ninguna)? */
+  canGrab(px: number, pz: number): boolean {
+    return this.nearestGrabbable(px, pz) >= 0;
+  }
+
+  /**
+   * Agarra la pelota `id`: se "pega" al jugador (flota frente a las manos), se
+   * desactiva su física libre. Solo una a la vez. Devuelve true si se agarró.
+   */
+  grab(id: number): boolean {
+    if (this.heldId >= 0) return false;
+    const b = this.balls[id];
+    if (!b) return false;
+    this.heldId = id;
+    b.vel.set(0, 0, 0);
+    b.grounded = false;
+    b.recPos = undefined;
+    b.recVel = undefined;
+    b.recTimer = 0;
+    if (this.eSprite) this.eSprite.visible = false;
+    return true;
+  }
+
+  /**
+   * Lanza la pelota agarrada en la dirección `dir` (mirada del avatar) con impulso
+   * + arco, heredando algo de la velocidad del jugador. Reactiva su física libre.
+   * Emite la patada (para que la red la propague). Devuelve true si lanzó.
+   */
+  throwBall(dir: THREE.Vector3, playerVel: THREE.Vector3): boolean {
+    if (this.heldId < 0) return false;
+    const id = this.heldId;
+    const b = this.balls[id];
+    this.heldId = -1;
+
+    this._tmp.set(dir.x, 0, dir.z);
+    if (this._tmp.lengthSq() < 1e-6) this._tmp.set(0, 0, -1);
+    this._tmp.normalize();
+    b.vel.set(
+      this._tmp.x * THROW_SPEED + playerVel.x * THROW_INHERIT,
+      THROW_ARC + Math.max(0, dir.y) * THROW_SPEED,
+      this._tmp.z * THROW_SPEED + playerVel.z * THROW_INHERIT,
+    );
+    b.grounded = false;
+    b.kickCd = KICK_COOLDOWN;
+
+    const s = this.stateOf(id);
+    for (const cb of this.kickCbs) cb(id, s);
+    return true;
+  }
+
   /** Reconciliación suave hacia el estado recibido (lerp, no teleport). */
   applyState(id: number, s: BallState): void {
     const b = this.balls[id];
     if (!b) return;
+    if (id === this.heldId) return; // la pelota agarrada la manda el portador local
     b.recPos = new THREE.Vector3(s.pos[0], s.pos[1], s.pos[2]);
     b.recVel = new THREE.Vector3(s.vel[0], s.vel[1], s.vel[2]);
     b.recTimer = RECONCILE_TIME;
@@ -208,11 +366,26 @@ export class Balls {
    * Física O(9): gravedad, integración, contacto con el suelo (rebote+fricción+
    * rodadura por pendiente), patada al contacto con el jugador y reconciliación.
    */
-  update(dt: number, playerPos: THREE.Vector3, playerVel: THREE.Vector3, playerFeetY?: number): void {
+  update(
+    dt: number,
+    playerPos: THREE.Vector3,
+    playerVel: THREE.Vector3,
+    playerFeetY?: number,
+    holdTarget?: THREE.Vector3,
+  ): void {
+    this.time += dt;
     const feetY = playerFeetY ?? playerPos.y - 0.9;
     for (let i = 0; i < this.balls.length; i++) {
       const b = this.balls[i];
       if (b.kickCd > 0) b.kickCd -= dt;
+
+      // --- pelota agarrada: sigue el punto de agarre (frente/manos), sin física ---
+      if (i === this.heldId) {
+        if (holdTarget) b.pos.copy(holdTarget);
+        b.vel.set(0, 0, 0);
+        b.grounded = false;
+        continue;
+      }
 
       // --- reconciliación de red: mezcla suave hacia el objetivo recibido ---
       if (b.recTimer > 0 && b.recPos && b.recVel) {
@@ -267,6 +440,26 @@ export class Balls {
       this.tryKick(i, b, playerPos, playerVel, feetY);
     }
     this.syncInstances();
+    this.updateEHint(playerPos);
+  }
+
+  /**
+   * Coloca/oculta el sprite E: visible sobre la pelota agarrable más cercana
+   * cuando no llevas ninguna; se esconde al agarrar o alejarte. Leve flotación.
+   */
+  private updateEHint(playerPos: THREE.Vector3): void {
+    const sprite = this.eSprite;
+    if (!sprite) return;
+    const id = this.nearestGrabbable(playerPos.x, playerPos.z);
+    this.hintId = id;
+    if (id < 0) {
+      sprite.visible = false;
+      return;
+    }
+    const b = this.balls[id];
+    const bob = Math.sin(this.time * 3.2) * 0.07;
+    sprite.position.set(b.pos.x, b.pos.y + RADIUS + 0.55 + bob, b.pos.z);
+    sprite.visible = true;
   }
 
   private tryKick(
@@ -335,5 +528,10 @@ export class Balls {
     this.mesh.geometry.dispose();
     (this.mesh.material as THREE.Material).dispose();
     this.mesh.dispose();
+    if (this.eSprite) {
+      this.eSprite.removeFromParent();
+      (this.eSprite.material as THREE.SpriteMaterial).dispose();
+    }
+    this.eTex?.dispose();
   }
 }

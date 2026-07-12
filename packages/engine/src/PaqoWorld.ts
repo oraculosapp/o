@@ -9,7 +9,6 @@ import { FollowCamera } from "./camera/FollowCamera";
 import { InputManager } from "./input/InputManager";
 import { makeToonRamp } from "./util/toon";
 import { Vegetation } from "./world/Vegetation";
-import { Water } from "./world/Water";
 import { Atmosphere } from "./world/Atmosphere";
 import { PixelSwarm } from "./world/PixelSwarm";
 import { Totem } from "./world/Totem";
@@ -40,7 +39,16 @@ export class PaqoWorld {
 
   private rig!: TestDummy;
   private follow!: FollowCamera;
-  private input!: InputManager;
+
+  /**
+   * Input del mundo. Público para el Contrato B (UI móvil):
+   * `world.input.pressJump()`, `world.input.pressGrab()`,
+   * `world.input.onActionState(cb)`. Disponible tras start().
+   */
+  input!: InputManager;
+
+  // Inset de viewport activo (Contrato A); se reaplica en resize.
+  private viewportInset = { left: 0, right: 0, top: 0, bottom: 0 };
 
   private rune!: THREE.Mesh;
   private pixels!: PixelSwarm;
@@ -49,7 +57,6 @@ export class PaqoWorld {
   private markerLife = 0;
 
   private vegetation!: Vegetation;
-  private water!: Water;
   private atmosphere!: Atmosphere;
   private totem!: Totem;
   private bloom!: BloomComposer;
@@ -108,9 +115,7 @@ export class PaqoWorld {
     this.vegetation.build();
     this.vegetation.addTo(this.scene);
 
-    this.water = new Water(this.island.field, this.preset);
-    this.water.build();
-    this.water.addTo(this.scene);
+    // Agua RETIRADA (S5): la laguna/arroyo/cascada se eliminaron de la escena.
 
     this.atmosphere = new Atmosphere(this.island.field, this.preset);
     this.atmosphere.build();
@@ -256,6 +261,45 @@ export class PaqoWorld {
   /** Error de anclaje al suelo (m): |pies − heightAt|. Para la métrica de QA. */
   groundError(): number {
     return this.controller.groundError();
+  }
+
+  /**
+   * Contrato UI — enciende/apaga el input del juego. La UI lo apaga (false) cuando
+   * el chat toma foco: el avatar deja de moverse y Space/Enter llegan al chat.
+   */
+  setInputEnabled(enabled: boolean): void {
+    this.input?.setInputEnabled(enabled);
+  }
+
+  /**
+   * Contrato A — recentra el encuadre en el ÁREA VISIBLE cuando el HUD ocupa
+   * márgenes del lienzo (p.ej. `{ right: 360 }` para el chat en columna a la
+   * derecha). Aplica `camera.setViewOffset` vía FollowCamera. Con todo en 0 vuelve
+   * al comportamiento normal. Se reevalúa en resize.
+   */
+  setViewportInset(inset: { left?: number; right?: number; top?: number; bottom?: number }): void {
+    this.viewportInset = {
+      left: inset.left ?? 0,
+      right: inset.right ?? 0,
+      top: inset.top ?? 0,
+      bottom: inset.bottom ?? 0,
+    };
+    const { w, h } = this.size();
+    this.follow?.setViewportInset(this.viewportInset, w, h);
+  }
+
+  /**
+   * Offset de vista activo de la cámara (para el smoke test del Contrato A).
+   * `enabled:false` → sin inset (encuadre normal). Tras `setViewportInset({right:360})`
+   * → `enabled:true` con `offsetX` desplazado (≈180 px con lienzo simétrico).
+   */
+  cameraViewOffset(): { enabled: boolean; offsetX: number; offsetY: number } {
+    const view = (this.camera as THREE.PerspectiveCamera & { view?: { enabled: boolean; offsetX: number; offsetY: number } | null }).view;
+    return {
+      enabled: view?.enabled ?? false,
+      offsetX: view?.offsetX ?? 0,
+      offsetY: view?.offsetY ?? 0,
+    };
   }
 
   /**
@@ -478,6 +522,8 @@ export class PaqoWorld {
     this.camera.updateProjectionMatrix();
     this.renderer.setSize(w, h);
     this.bloom?.setSize(w, h);
+    // Reevalúa el inset del viewport con el nuevo tamaño (Contrato A).
+    this.follow?.applyViewOffset(w, h);
   };
 
   private loop = (): void => {
@@ -527,15 +573,28 @@ export class PaqoWorld {
     this.controller.update(dt, { worldDir: this._worldDir, throttle, run: f.run, jump: f.jump });
     this.follow.update(dt);
 
+    // E (teclado o botón móvil): si llevas pelota la lanzas; si no, agarras la
+    // más cercana. La detección de proximidad y el sprite E los lleva Balls.
+    if (f.grab) this.net.grabOrThrow();
+
     // Multijugador: interpola remotos, integra pelotas, evalúa zonas.
     this.net.update(dt);
+
+    // Estado de acción para los botones móviles (Contrato B). Se empuja cada
+    // frame; el InputManager notifica a los observadores sólo cuando cambia.
+    this.input.setActionState({
+      canGrab: this.net.canGrab(),
+      holding: this.net.isHolding(),
+      grounded: this.controller.isGrounded(),
+      canDoubleJump: this.controller.canDoubleJump(),
+    });
 
     // Audio: cadencia de pasos/salto/aterrizaje atada a la velocidad REAL del
     // controller, proximidad al agua para mezclar su capa, y avance de la cama
     // generativa. Todo es no-op silencioso mientras no haya habido gesto.
-    const pos = this.controller.position;
     const hSpeed = this.controller.getHorizVelocity(this._hvel).length();
-    this.soundscape.setWaterProximity(this.water.proximityAt(pos.x, pos.z));
+    // Agua retirada: proximidad 0 → la capa de agua del audio queda inerte.
+    this.soundscape.setWaterProximity(0);
     this.soundscape.setMotion(hSpeed, 7, this.controller.isGrounded(), dt);
     this.soundscape.update(dt);
 
@@ -552,7 +611,6 @@ export class PaqoWorld {
     this.pixels.update(dt, t, pointer);
 
     this.vegetation.update(dt, t);
-    this.water.update(dt, t);
     this.atmosphere.update(dt, t);
 
     if (this.marker.visible) {
@@ -603,7 +661,6 @@ export class PaqoWorld {
     this.controller?.dispose();
     this.rig?.dispose();
     this.vegetation?.dispose();
-    this.water?.dispose();
     this.atmosphere?.dispose();
     this.pixels?.dispose();
     this.totem?.dispose();

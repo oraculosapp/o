@@ -64,7 +64,8 @@
 .panel {
   position: absolute;
   top: calc(100% + 10px);
-  right: 0;
+  /* Clúster anclado a la IZQUIERDA: el panel se despliega hacia la derecha. */
+  left: 0;
   z-index: 40;
   width: min(320px, calc(100vw - 32px));
   max-height: min(420px, 70vh);

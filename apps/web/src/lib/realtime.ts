@@ -24,7 +24,8 @@ import type {
   SupabaseClient,
 } from "@supabase/supabase-js";
 import { ensureAnonSession, getSupabaseBrowserClient } from "./supabase";
-import { getStoredArchetypeUrl, getStoredPrimaryTint } from "./avatar-store";
+import { getStoredArchetype, getStoredPrimaryTint } from "./avatar-store";
+import { isArchetypeId } from "./avatars";
 
 // --- Contrato con el engine (lo implementa el equipo PaqoWorld) --------------
 export interface WorldNetHooks {
@@ -41,7 +42,7 @@ export interface WorldNetHooks {
       anim: string;
       tint?: string;
       name?: string;
-      /** URL del GLB del arquetipo del remoto (si eligió uno). */
+      /** Id del arquetipo PROCEDURAL del remoto (p.ej. "vampiro"). */
       archetype?: string;
     }
   ): void;
@@ -89,7 +90,7 @@ export interface RealtimeIdentity {
   sessionId: string;
   displayName: string;
   tint: string;
-  /** URL del GLB del arquetipo elegido (si hay), para que los demás te vean así. */
+  /** Id del arquetipo procedural elegido (si hay), para que los demás te vean así. */
   archetype?: string;
   /** true si la sesión es de un usuario registrado (no anónimo). */
   registered: boolean;
@@ -116,26 +117,16 @@ const SWEEP_MS = 1_000;
 const NET_RETRY_MS = 600;
 const NET_RETRY_MAX = 20; // ~12 s intentando enganchar world.net
 
-/** Prefijo same-origin permitido para las URLs de arquetipo (avatar GLB). */
-const AVATAR_PATH_PREFIX = "/assets/avatars/";
-
 /**
- * Valida que un `archetype` recibido por broadcast sea una ruta same-origin bajo
- * `/assets/avatars/` (M-5). El broadcast no es de fiar: sin esto, un emisor
- * malicioso podría enviar una URL externa y hacer que las víctimas descarguen un
- * GLB de un host arbitrario. Devuelve la URL si es segura, o `undefined`.
+ * Valida que un `archetype` recibido por broadcast sea uno de los 9 ids
+ * PROCEDURALES conocidos (M-5). El broadcast no es de fiar: al aceptar sólo ids
+ * de una lista blanca fija (no una URL arbitraria), un emisor malicioso no puede
+ * inducir ninguna descarga externa — el engine construye el rig en código.
+ * Devuelve el id si es válido, o `undefined`.
  */
-function safeArchetype(url: string | undefined): string | undefined {
-  if (!url || typeof url !== "string") return undefined;
-  if (url.includes("..") || url.includes("\\")) return undefined;
-  try {
-    const u = new URL(url, window.location.origin);
-    if (u.origin !== window.location.origin) return undefined;
-    if (!u.pathname.startsWith(AVATAR_PATH_PREFIX)) return undefined;
-    return url;
-  } catch {
-    return undefined;
-  }
+function safeArchetype(id: string | undefined): string | undefined {
+  if (!id || typeof id !== "string") return undefined;
+  return isArchetypeId(id) ? id : undefined;
 }
 
 /** ¿Están las env vars públicas de Supabase presentes? (decide si hay chat). */
@@ -198,7 +189,7 @@ export class BiosphereRealtime {
         displayName: this.opts.displayName,
         // El color/arquetipo del avatar elegido manda sobre el tinte por defecto.
         tint: getStoredPrimaryTint() ?? this.opts.tint,
-        archetype: getStoredArchetypeUrl(),
+        archetype: getStoredArchetype(),
         registered: user.is_anonymous !== true,
         accessToken: session.access_token ?? null,
       };
@@ -243,7 +234,7 @@ export class BiosphereRealtime {
           id,
           display_name: meta.display_name ?? "Viajero",
           tint: meta.tint,
-          // Sólo arquetipos same-origin válidos llegan al engine (M-5).
+          // Sólo ids de arquetipo válidos (lista blanca) llegan al engine (M-5).
           archetype: safeArchetype(meta.archetype),
         });
       }
@@ -263,7 +254,7 @@ export class BiosphereRealtime {
         anim: payload.anim,
         tint: payload.tint,
         name: payload.name,
-        // Sólo URLs de arquetipo same-origin válidas pasan al loader (M-5).
+        // Sólo ids de arquetipo válidos (lista blanca) pasan al engine (M-5).
         archetype: safeArchetype(payload.archetype),
       });
     });
@@ -344,7 +335,7 @@ export class BiosphereRealtime {
           anim: s.anim,
           tint: getStoredPrimaryTint() ?? me.tint,
           name: me.displayName,
-          archetype: getStoredArchetypeUrl() ?? me.archetype,
+          archetype: getStoredArchetype() ?? me.archetype,
         } satisfies PosPayload,
       });
     }, POS_HZ);

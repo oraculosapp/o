@@ -1,0 +1,164 @@
+/* FAB de cuenta: botón glass + menú desplegable de marca (arriba-derecha). */
+
+.root {
+  position: relative;
+  display: inline-flex;
+}
+
+/* Botón flotante: mismo lenguaje que el icon-button de la campanita. */
+.fab {
+  display: inline-grid;
+  place-content: center;
+  width: 40px;
+  height: 40px;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  background: var(--panel);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  box-shadow: var(--shadow);
+  color: var(--text);
+  cursor: pointer;
+  transition:
+    transform var(--dur-fast) var(--ease-brand),
+    border-color var(--dur-fast) var(--ease-brand),
+    box-shadow var(--dur-fast) var(--ease-brand),
+    color var(--dur-fast) var(--ease-brand);
+}
+.fab:hover {
+  transform: translateY(-2px);
+  color: var(--gold-bright);
+  border-color: var(--gold-dim);
+  box-shadow: var(--shadow), 0 0 20px var(--glow);
+}
+.fab:focus-visible,
+.fab[aria-expanded="true"] {
+  outline: 2px solid var(--gold-bright);
+  outline-offset: 2px;
+  border-color: var(--gold-dim);
+  color: var(--gold-bright);
+}
+
+.glyphWrap {
+  position: relative;
+  display: inline-grid;
+  place-content: center;
+}
+.badge {
+  position: absolute;
+  top: -7px;
+  right: -8px;
+  font-size: 0.6rem;
+  color: var(--gold-bright);
+  text-shadow: 0 0 8px var(--glow);
+  pointer-events: none;
+}
+
+/* Menú desplegado bajo el FAB. El clúster vive a la IZQUIERDA del HUD, así que el
+   menú se alinea al borde izquierdo del FAB y crece hacia la derecha. */
+.menu {
+  position: absolute;
+  top: calc(100% + 10px);
+  left: 0;
+  z-index: 40;
+  min-width: 168px;
+  display: flex;
+  flex-direction: column;
+  padding: 0.35rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--panel-solid, var(--panel-hud));
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  box-shadow: var(--shadow);
+  animation: menuIn var(--dur-fast) var(--ease-brand);
+}
+@keyframes menuIn {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+}
+
+.item {
+  display: block;
+  width: 100%;
+  padding: 0.6rem 0.75rem;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text);
+  font-family: var(--font-display);
+  font-size: 0.74rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    background var(--dur-fast) var(--ease-brand),
+    color var(--dur-fast) var(--ease-brand);
+}
+.item:hover {
+  background: var(--panel-hi);
+  color: var(--gold-bright);
+}
+.item:focus-visible {
+  outline: 2px solid var(--gold-bright);
+  outline-offset: -2px;
+  color: var(--gold-bright);
+}
+
+/* Tooltip de marca (glass), reutiliza el patrón del clúster del HUD. */
+.tip {
+  position: relative;
+}
+.tip::after {
+  content: attr(data-tip);
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  padding: 0.3rem 0.55rem;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--line);
+  background: var(--panel-hud);
+  box-shadow: var(--shadow);
+  color: var(--text);
+  font-family: var(--font-display);
+  font-size: 0.58rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  opacity: 0;
+  transform: translateY(-4px);
+  pointer-events: none;
+  transition:
+    opacity var(--dur-fast) var(--ease-brand),
+    transform var(--dur-fast) var(--ease-brand);
+}
+/* No mostrar el tooltip cuando el menú está abierto (evita choque visual). */
+.fab[aria-expanded="false"]:hover::after,
+.fab[aria-expanded="false"]:focus-visible::after {
+  opacity: 1;
+  transform: none;
+}
+
+@media (max-width: 640px) {
+  .fab {
+    width: 44px;
+    height: 44px;
+  }
+  .item {
+    padding: 0.7rem 0.8rem;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fab,
+  .item,
+  .tip::after {
+    transition: none;
+  }
+  .menu {
+    animation: none;
+  }
+}

@@ -4,7 +4,7 @@ export { Island } from "./island/Island";
 export { IslandField } from "./island/IslandField";
 export { CharacterController } from "./controller/CharacterController";
 export { FollowCamera } from "./camera/FollowCamera";
-export { InputManager } from "./input/InputManager";
+export { InputManager, type InputFrame, type ActionState } from "./input/InputManager";
 export type { BiospherePreset } from "./planet/types";
 
 // "Hola planeta" original (se conserva para referencia / fallback).

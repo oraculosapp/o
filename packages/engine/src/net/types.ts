@@ -55,9 +55,10 @@ export interface RemoteState {
   /** Etiqueta flotante sobre la cabeza. */
   name?: string;
   /**
-   * URL del GLB del arquetipo del remoto (p.ej. `/assets/avatars/hacker-m.glb`).
-   * Si está y el GLB existe, el remoto se pinta con ese AvatarRig (caché de GLTFs
-   * compartida); si falta o falla la carga, se queda con el maniquí procedural.
+   * ID del arquetipo del remoto (p.ej. `vampiro`). Si es uno de los 9
+   * PROCEDURALES, el remoto se construye con `buildArchetype` (100% código,
+   * instantáneo, sin fetch). Como fallback (uso futuro) admite una URL de GLB
+   * same-origin bajo `/assets/avatars/`; si falta o falla, se queda con el maniquí.
    */
   archetype?: string;
 }

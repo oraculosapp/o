@@ -11,15 +11,25 @@ export interface OpenChannelProps {
   sessionId: string | null;
   onSetName(name: string): void;
   onSend(text: string): void | Promise<void>;
+  /** Al montar (chat abierto con Enter), enfoca el campo de mensaje. */
+  autoFocusInput?: boolean;
 }
 
 /** Canal ABIERTO: chat público de la Biósfera. Menciona a Paqo con "@paqo". */
-export function OpenChannel({ messages, name, sessionId, onSetName, onSend }: OpenChannelProps) {
+export function OpenChannel({ messages, name, sessionId, onSetName, onSend, autoFocusInput }: OpenChannelProps) {
   const [draft, setDraft] = useState("");
   const [nameDraft, setNameDraft] = useState("");
   const [editingName, setEditingName] = useState(false);
   const listRef = useRef<HTMLUListElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
   const nearBottom = useRef(true);
+
+  // Enfoca el campo de mensaje al abrir el chat con Enter (si ya hay nombre).
+  useEffect(() => {
+    if (autoFocusInput && name) inputRef.current?.focus();
+    // Sólo al montar: el chat monta este canal cada vez que se abre el dock.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Autoscroll sólo si el usuario ya estaba abajo (no interrumpe la lectura).
   useLayoutEffect(() => {
@@ -125,6 +135,7 @@ export function OpenChannel({ messages, name, sessionId, onSetName, onSend }: Op
             {name}
           </button>
           <input
+            ref={inputRef}
             className={styles.input}
             placeholder="Escribe en el claro… (@paqo para llamarlo)"
             value={draft}

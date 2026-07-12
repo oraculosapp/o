@@ -66,6 +66,10 @@ export class FollowCamera {
   private smoothTarget = new THREE.Vector3();
   private initialized = false;
 
+  // --- inset de viewport para HUD lateral (Contrato A) ---
+  /** Márgenes CSS (px) que ocupa el HUD; el encuadre se recentra en lo visible. */
+  private inset = { left: 0, right: 0, top: 0, bottom: 0 };
+
   // Scratch.
   private _fwd = new THREE.Vector3();
   private _vel = new THREE.Vector3();
@@ -107,6 +111,45 @@ export class FollowCamera {
 
   zoom(delta: number): void {
     this.distance = THREE.MathUtils.clamp(this.distance + delta, this.minDist, this.maxDist);
+  }
+
+  /**
+   * Contrato A — recentra el encuadre en el ÁREA VISIBLE cuando el HUD (p.ej. el
+   * chat como columna a la derecha) tapa parte del lienzo. Usa `camera.setViewOffset`
+   * de three.js: desplaza el punto principal de la proyección para que el avatar/
+   * tótem quede centrado en lo que se ve, sin recortar ni hacer zoom.
+   *
+   * `fullW`/`fullH` = tamaño CSS del lienzo (px). El desplazamiento del principal
+   * es (right−left)/2 en x y (bottom−top)/2 en y (fracción del frustum, así el
+   * corrimiento en px es exacto e independiente del devicePixelRatio). Con todos
+   * los insets a 0 se limpia el offset (comportamiento normal). Reaplica en resize.
+   */
+  setViewportInset(
+    inset: { left?: number; right?: number; top?: number; bottom?: number },
+    fullW: number,
+    fullH: number,
+  ): void {
+    this.inset = {
+      left: inset.left ?? 0,
+      right: inset.right ?? 0,
+      top: inset.top ?? 0,
+      bottom: inset.bottom ?? 0,
+    };
+    this.applyViewOffset(fullW, fullH);
+  }
+
+  /** (Re)aplica el offset de vista con el tamaño actual del lienzo (px CSS). */
+  applyViewOffset(fullW: number, fullH: number): void {
+    const { left, right, top, bottom } = this.inset;
+    if (fullW <= 0 || fullH <= 0) return;
+    if (!left && !right && !top && !bottom) {
+      this.camera.clearViewOffset();
+      return;
+    }
+    // Desplaza el principal hacia el centro del área visible.
+    const offX = (right - left) / 2;
+    const offY = (bottom - top) / 2;
+    this.camera.setViewOffset(fullW, fullH, offX, offY, fullW, fullH);
   }
 
   /** Activa/desactiva el auto-retorno (lo apaga el modo movimiento reducido). */

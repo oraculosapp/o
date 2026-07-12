@@ -1,6 +1,6 @@
 "use client";
 
-import { useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
   getStoredConversationId,
   storeConversationId,
@@ -21,6 +21,8 @@ export interface PaqoChannelProps {
   sessionId: string | null;
   accessToken: string | null;
   onRegisterClick(): void;
+  /** Al montar (chat abierto con Enter), enfoca el campo de mensaje. */
+  autoFocusInput?: boolean;
 }
 
 const GREETING = "Bienvenido a Phygitalia. Soy Paqo, el que recibe. ¿Qué te trajo hasta aquí?";
@@ -32,6 +34,7 @@ export function PaqoChannel({
   sessionId,
   accessToken,
   onRegisterClick,
+  autoFocusInput,
 }: PaqoChannelProps) {
   const [turns, setTurns] = useState<Turn[]>([{ role: "oracle", content: GREETING }]);
   const [draft, setDraft] = useState("");
@@ -42,12 +45,20 @@ export function PaqoChannel({
   const [announce, setAnnounce] = useState("");
   const streamRef = useRef("");
   const listRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
   const abortRef = useRef<AbortController | null>(null);
 
   useLayoutEffect(() => {
     const el = listRef.current;
     if (el) el.scrollTop = el.scrollHeight;
   }, [turns]);
+
+  // Enfoca el campo de mensaje al abrir el chat con Enter.
+  useEffect(() => {
+    if (autoFocusInput) inputRef.current?.focus();
+    // Sólo al montar: el chat monta este canal cada vez que se abre el dock.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -153,6 +164,7 @@ export function PaqoChannel({
 
       <form className={styles.composer} onSubmit={submit}>
         <input
+          ref={inputRef}
           className={styles.input}
           placeholder="Cuéntale a Paqo…"
           value={draft}

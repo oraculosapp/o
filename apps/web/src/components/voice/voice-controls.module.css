@@ -1,0 +1,196 @@
+/* VoiceControls — lenguaje glass del design system Phygitalia (mismo vocabulario
+   de tokens que el resto del HUD/chat: --panel, --line, --gold-*, --glow). */
+
+.voice {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  align-items: flex-start;
+}
+
+/* Botón de marca "Unirse a la voz" (glass, píldora). */
+.join {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-height: 40px;
+  padding: 0 0.95rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-pill);
+  background: var(--panel);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  box-shadow: var(--shadow);
+  color: var(--text);
+  font: inherit;
+  font-size: 0.86rem;
+  cursor: pointer;
+  transition:
+    transform var(--dur-fast) var(--ease-brand),
+    border-color var(--dur-fast) var(--ease-brand),
+    box-shadow var(--dur-fast) var(--ease-brand),
+    color var(--dur-fast) var(--ease-brand);
+}
+.join:hover:not(:disabled) {
+  transform: translateY(-2px);
+  color: var(--gold-bright);
+  border-color: var(--gold-dim);
+  box-shadow: var(--shadow), 0 0 20px var(--glow);
+}
+.join:focus-visible {
+  outline: 2px solid var(--gold-bright);
+  outline-offset: 2px;
+  border-color: var(--gold-dim);
+}
+.join:disabled {
+  cursor: not-allowed;
+  color: var(--text-faint);
+  opacity: 0.75;
+}
+
+/* Fila "en directo": micro + hablando + salir. */
+.live {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+  padding: 0.35rem 0.5rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-pill);
+  background: var(--panel);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  box-shadow: var(--shadow);
+}
+
+/* Botón de micrófono (redondo, glass). */
+.mic {
+  display: inline-grid;
+  place-content: center;
+  width: 36px;
+  height: 36px;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  background: transparent;
+  color: var(--text-faint);
+  cursor: pointer;
+  transition:
+    color var(--dur-fast) var(--ease-brand),
+    border-color var(--dur-fast) var(--ease-brand),
+    box-shadow var(--dur-fast) var(--ease-brand);
+}
+.mic:hover {
+  color: var(--gold-bright);
+  border-color: var(--gold-dim);
+}
+.mic:focus-visible {
+  outline: 2px solid var(--gold-bright);
+  outline-offset: 2px;
+  border-color: var(--gold-dim);
+}
+/* Micrófono ACTIVO (no muteado): resaltado dorado + halo. */
+.mic[aria-pressed="true"] {
+  color: var(--gold-bright);
+  border-color: var(--gold);
+  box-shadow: 0 0 14px var(--glow);
+}
+
+/* Botón "Salir": texto discreto. */
+.leave {
+  padding: 0 0.6rem;
+  height: 32px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--text-dim);
+  font: inherit;
+  font-size: 0.8rem;
+  cursor: pointer;
+  transition:
+    color var(--dur-fast) var(--ease-brand),
+    border-color var(--dur-fast) var(--ease-brand);
+}
+.leave:hover {
+  color: var(--gold-bright);
+  border-color: var(--gold-dim);
+}
+.leave:focus-visible {
+  outline: 2px solid var(--gold-bright);
+  outline-offset: 2px;
+}
+
+/* Lista de "hablando ahora": puntos que pulsan + nombre. */
+.speakers {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0;
+  padding: 0 0.2rem;
+  list-style: none;
+  max-width: 12rem;
+  overflow: hidden;
+}
+.speaker {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+.speakerName {
+  font-size: 0.78rem;
+  color: var(--gold-bright);
+  white-space: nowrap;
+}
+.speakersEmpty {
+  font-size: 0.76rem;
+  color: var(--text-faint);
+  padding: 0 0.2rem;
+}
+.pulse {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--gold-bright);
+  box-shadow: 0 0 8px var(--glow);
+  animation: voicePulse 1.1s var(--ease-brand) infinite;
+}
+
+.status {
+  margin: 0;
+  font-size: 0.72rem;
+  color: var(--text-faint);
+  max-width: 18rem;
+}
+
+@keyframes voicePulse {
+  0%,
+  100% {
+    transform: scale(0.7);
+    opacity: 0.55;
+  }
+  50% {
+    transform: scale(1.1);
+    opacity: 1;
+  }
+}
+
+@media (max-width: 640px) {
+  .join,
+  .mic {
+    /* Área táctil ≥44px (WCAG 2.5.5). */
+    min-height: 44px;
+  }
+  .mic {
+    width: 44px;
+    height: 44px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .join,
+  .mic,
+  .leave {
+    transition: none;
+  }
+  .pulse {
+    animation: none;
+  }
+}

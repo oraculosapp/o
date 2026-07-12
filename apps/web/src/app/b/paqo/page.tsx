@@ -7,6 +7,7 @@ import { PerfOverlay } from "@/components/dev/PerfOverlay";
 import { ChatDock } from "@/components/chat/ChatDock";
 import { HintToasts } from "@/components/hints/HintToasts";
 import { HudControls } from "@/components/notifications/HudControls";
+import { MobileControls } from "@/components/notifications/MobileControls";
 import { MuteButton } from "@/components/audio/MuteButton";
 import { InstallButton } from "@/components/pwa/InstallButton";
 import { AvatarPicker } from "@/components/avatar-picker/AvatarPicker";
@@ -19,6 +20,7 @@ import {
   type AvatarSelection,
 } from "@/lib/avatar-store";
 import type { WorldNetHooks } from "@/lib/realtime";
+import type { WorldUiHooks } from "@/lib/world-ui";
 import styles from "./paqo.module.css";
 
 const BIOSPHERE_ID = "paqo";
@@ -97,18 +99,21 @@ export default function PaqoBiosphere() {
     return w?.net ?? null;
   };
 
-  const onApplyAvatar = useCallback((sel: AvatarSelection, available: boolean) => {
+  // Getter perezoso del MUNDO para los hooks de UI (setViewportInset /
+  // setInputEnabled / input.*). El engine (equipo paralelo) los adjunta a
+  // PaqoWorld; el HUD los consume con optional-chaining, así que degradan con
+  // gracia mientras aún no existan.
+  const getWorld = (): WorldUiHooks | null =>
+    (worldRef.current as unknown as WorldUiHooks | null) ?? null;
+
+  const onApplyAvatar = useCallback((sel: AvatarSelection) => {
     storeAvatar(sel);
     void saveAvatarToProfile(sel);
     setAvatarSel(sel);
     setPickerOpen(false);
-    // Aplica en caliente (tinte inmediato; arquetipo cuando cargue el GLB).
+    // Aplica en caliente: el arquetipo procedural se encarna al instante (sin red).
     worldRef.current?.setAvatar(worldConfigFromSelection(sel));
-    setToast(
-      available
-        ? "Tu arquetipo te acompaña ✦"
-        : "Este arquetipo aún duerme — viajas con tu esencia y su color hasta que despierte.",
-    );
+    setToast("Tu arquetipo te acompaña ✦");
   }, []);
 
   return (
@@ -118,22 +123,29 @@ export default function PaqoBiosphere() {
 
       {/* HUD social + pistas diegéticas. Se montan siempre: el chat funciona sin
           world.net (sólo pierde presencia) y sin Supabase se oculta con aviso. */}
-      <ChatDock biosphereId={BIOSPHERE_ID} getWorldNet={getWorldNet} />
+      <ChatDock biosphereId={BIOSPHERE_ID} getWorldNet={getWorldNet} getWorld={getWorld} />
       <HintToasts oracleId={BIOSPHERE_ID} getWorldNet={getWorldNet} />
 
-      {/* Campanita + perfil + “Cambiar avatar” (arriba-derecha). El botón de
-          avatar muestra el retrato/tinte actual para no confundirse con Perfil. */}
+      {/* Botones táctiles de saltar/agarrar (sólo en dispositivos touch). */}
+      <MobileControls getWorld={getWorld} />
+
+      {/* Clúster superior-IZQUIERDA sobre el juego (NO sobre la columna del chat,
+          que ocupa la derecha a toda altura): Instalar · mute · avatar ·
+          campanita+cuenta, en fila. */}
+
+      {/* Píldora "Instalar app" (left:16); se autooculta si no aplica. */}
+      <InstallButton placement="hud" />
+
+      {/* Botón mute del soundscape (left:68). */}
+      <MuteButton />
+
+      {/* Campanita + perfil + “Cambiar avatar” (avatar left:116, cluster left:164).
+          El avatar muestra el retrato/tinte actual para no confundirse con Perfil. */}
       <HudControls
         onChangeAvatar={() => setPickerOpen(true)}
         avatarThumbUrl={avatarSel ? thumbUrl(avatarSel.archetype) : null}
         avatarTint={avatarSel?.tint.primary ?? null}
       />
-
-      {/* Botón mute del soundscape (arriba-derecha, a la izq. del clúster). */}
-      <MuteButton />
-
-      {/* Píldora "Instalar app" (arriba-izquierda); se autooculta si no aplica. */}
-      <InstallButton placement="hud" />
 
       <AvatarPicker
         open={pickerOpen}

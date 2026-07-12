@@ -1,14 +1,16 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import Link from "next/link";
 import { Bell } from "./Bell";
+import { AccountFab } from "./AccountFab";
 import styles from "./hud-controls.module.css";
 
 /**
- * Grupo de controles del HUD anclado arriba-derecha: campanita de
- * notificaciones + enlace al perfil propio (`/usuario`). Discreto, glass, no
- * estorba el joystick (abajo-izquierda) ni el chat (abajo-izquierda).
+ * Grupo de controles del HUD anclado arriba-IZQUIERDA (sobre el viewport del
+ * juego, NO sobre la columna del chat de la derecha): campanita de
+ * notificaciones + FAB de cuenta (crear cuenta / entrar / perfil / cerrar
+ * sesión). Forma fila con "Instalar app", mute y el retrato de avatar. Discreto,
+ * glass, no estorba el joystick (abajo-izquierda) ni la columna del chat.
  *
  * Pensado para montarse en una línea desde la page de la Biósfera.
  */
@@ -30,18 +32,11 @@ export function HudControls({
     <>
       <div className={styles.cluster}>
         <Bell />
-        {/* "Perfil": silueta genérica de persona. */}
-        <Link
-          href="/usuario"
-          className={`${styles.profileLink} ${styles.tip}`}
-          aria-label="Tu perfil"
-          data-tip="Tu perfil"
-        >
-          <ProfileGlyph />
-        </Link>
+        {/* FAB de cuenta: menú con crear cuenta / entrar / perfil / cerrar sesión. */}
+        <AccountFab />
       </div>
-      {/* “Cambiar avatar” en su propio slot fijo, a la IZQUIERDA del botón de
-          mute (que vive anclado en right:112px y pertenece a audio/). Muestra el
+      {/* “Cambiar avatar” en su propio slot fijo dentro del clúster superior-
+          izquierda (left:116, entre el mute y la campanita+cuenta). Muestra el
           RETRATO del avatar actual (o su tinte) para distinguirlo del "Perfil". */}
       {onChangeAvatar && (
         <button
@@ -89,20 +84,5 @@ function AvatarPortrait({ thumbUrl, tint }: { thumbUrl?: string | null; tint?: s
       aria-hidden
       style={tint ? { background: tint } : undefined}
     />
-  );
-}
-
-/** Glifo de persona/viajero (trazo 1.6px currentColor). */
-function ProfileGlyph() {
-  return (
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden>
-      <circle cx="12" cy="8" r="3.4" stroke="currentColor" strokeWidth="1.6" />
-      <path
-        d="M5.5 19.5c.7-3.3 3.3-5 6.5-5s5.8 1.7 6.5 5"
-        stroke="currentColor"
-        strokeWidth="1.6"
-        strokeLinecap="round"
-      />
-    </svg>
   );
 }

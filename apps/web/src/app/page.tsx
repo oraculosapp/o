@@ -1,11 +1,12 @@
-import Link from "next/link";
-import SplashCanvas from "./splash-canvas";
+import SplashHome from "./splash-home";
 import { InstallButton } from "@/components/pwa/InstallButton";
 import { Footer } from "@/components/legal/Footer";
 import styles from "./page.module.css";
 
-// Splash de o.oraculos.app — la puerta al mundo. Todo el texto es SSR (SEO);
-// el diorama 3D se compone encima de la nebulosa y nunca bloquea al botón.
+// Splash de o.oraculos.app — la puerta al mundo. La marca (nebulosa + logotipo +
+// footer) es SSR y pinta al instante; la isla interactiva (nick + selector 3D de
+// avatar + ENTRAR) hidrata encima. El preview 3D del avatar aparece en fade cuando
+// monta y nunca bloquea al campo ni al botón.
 export default function Home() {
   return (
     <main className={styles.hero}>
@@ -13,10 +14,7 @@ export default function Home() {
       <div className={styles.nebula} aria-hidden />
       <div className={styles.stars} aria-hidden />
 
-      {/* Capa 1 — diorama ceremonial three.js (transparente sobre la nebulosa). */}
-      <SplashCanvas />
-
-      {/* Capa 2 — contenido SSR: logotipo, subtítulo y ENTRAR. */}
+      {/* Capa 1 — contenido: logotipo, subtítulo, isla interactiva y ENTRAR. */}
       <div className={styles.content}>
         <div className={styles.header}>
           <h1 className={styles.logotype}>
@@ -37,10 +35,11 @@ export default function Home() {
             PHYGITALIA · El mundo de los Oráculos Telúrico&#8209;Sintéticos
           </p>
         </div>
+
+        {/* Isla interactiva: nickname + selector 3D de avatar + ENTRAR (client). */}
+        <SplashHome />
+
         <div className={styles.tail}>
-          <Link href="/b/paqo" className={styles.enter}>
-            ENTRAR
-          </Link>
           <InstallButton />
           <Footer />
         </div>

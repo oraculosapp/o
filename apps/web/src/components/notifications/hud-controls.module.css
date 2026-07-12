@@ -1,9 +1,11 @@
-/* Controles del HUD arriba-derecha: campanita + enlace al perfil. */
+/* Controles del HUD en el clúster superior-IZQUIERDA (sobre el juego, NO sobre la
+   columna del chat de la derecha): campanita + FAB de cuenta. Forman fila con
+   "Instalar app" (left:16), mute (left:68) y el retrato de avatar (left:116). */
 
 .cluster {
   position: fixed;
   top: 16px;
-  right: 16px;
+  left: 164px;
   z-index: 35;
   display: inline-flex;
   align-items: center;
@@ -44,11 +46,12 @@
   border-color: var(--gold-dim);
 }
 
-/* Slot del botón “Cambiar avatar”: fijo a la IZQUIERDA del mute (right:112px). */
+/* Slot del botón “Cambiar avatar”: en el clúster superior-izquierda, entre el
+   mute (left:68) y la campanita+cuenta (left:164). */
 .avatarSlot {
   position: fixed;
   top: 16px;
-  right: 160px;
+  left: 116px;
   z-index: 35;
 }
 
@@ -81,7 +84,7 @@
   content: attr(data-tip);
   position: absolute;
   top: calc(100% + 8px);
-  right: 0;
+  left: 0;
   padding: 0.3rem 0.55rem;
   border-radius: var(--radius-pill);
   border: 1px solid var(--line);
@@ -109,11 +112,11 @@
 @media (max-width: 640px) {
   .cluster {
     top: 12px;
-    right: 12px;
+    left: 168px;
   }
   .avatarSlot {
     top: 12px;
-    right: 152px;
+    left: 116px;
   }
   /* Área táctil ≥44px (WCAG 2.5.5) — glifo intacto a ~20px. */
   .profileLink {
