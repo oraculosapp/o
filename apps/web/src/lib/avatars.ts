@@ -35,6 +35,22 @@ export function isArchetypeId(id: string): boolean {
   return ARCHETYPES.some((a) => a.id === id);
 }
 
+/**
+ * Modelos GLB ya MATERIALIZADOS (por slot `<arquetipo>-<m|f>`). Los demás "aún
+ * duermen": el mundo cae con gracia al maniquí procedural con su tinte hasta que
+ * lleguen sus riggeados. Fuente de verdad declarativa — al procesar un arquetipo
+ * con `tools/assets` (npm run optimize:avatars) añade aquí su slot.
+ *
+ * `hacker-f`: primer avatar real (Sketchfab + rig Mixamo). Sin clips de
+ * locomoción → lo anima ProceduralLocomotion sobre los huesos Mixamo.
+ */
+export const AVAILABLE_AVATARS: ReadonlySet<string> = new Set<string>(["hacker-f"]);
+
+/** ¿El GLB de este slot ya está disponible (marcado en el catálogo)? */
+export function isAvatarAvailable(id: string, gender: Gender): boolean {
+  return AVAILABLE_AVATARS.has(`${id}-${gender}`);
+}
+
 /** URL pública del GLB del arquetipo (p.ej. `/assets/avatars/hacker-m.glb`). */
 export function archetypeUrl(id: string, gender: Gender): string {
   return `/assets/avatars/${id}-${gender}.glb`;

@@ -3,6 +3,7 @@ import { GLTFLoader, type GLTF } from "three/examples/jsm/loaders/GLTFLoader.js"
 import { DRACOLoader } from "three/examples/jsm/loaders/DRACOLoader.js";
 import { MeshoptDecoder } from "three/examples/jsm/libs/meshopt_decoder.module.js";
 import { AnimationDriver, type Locomotion } from "./AnimationDriver";
+import { ProceduralLocomotion, type LocomotionQA } from "./ProceduralLocomotion";
 import { TintController, toToonMaterial, avatarToonRamp, type HueBand } from "./tint";
 import type { AvatarDriveState, IAvatarRig, PropSocket, TintZone } from "./types";
 
@@ -17,6 +18,13 @@ export interface AvatarRigOptions {
   /** Velocidades de referencia para sincronizar los clips walk/run con la velocidad real. */
   walkRefSpeed?: number;
   runRefSpeed?: number;
+  /**
+   * Altura objetivo (u) para normalizar modelos que vengan a otra escala. Si la
+   * altura medida cae fuera de `[1.4, 2.2]` (p.ej. un Mixamo exportado a ~1.16 u),
+   * el rig escala `root` uniformemente hasta esta altura para que el controller lo
+   * coloque bien (eyeHeight = height/2). Default 1.7. Poner `0` desactiva.
+   */
+  targetHeight?: number;
   /**
    * Si `false`, NO libera los materiales fuente al convertirlos a toon. Necesario
    * cuando la escena viene de un clon compartido (SkeletonUtils.clone) cuyos
@@ -57,8 +65,10 @@ export class AvatarRig implements IAvatarRig {
   readonly root: THREE.Object3D;
   readonly height: number;
 
-  private mixer: THREE.AnimationMixer;
-  private driver: AnimationDriver;
+  private mixer?: THREE.AnimationMixer;
+  private driver?: AnimationDriver;
+  /** Animador procedural cuando el GLB no trae clips de locomoción utilizables. */
+  private loco?: ProceduralLocomotion;
   private tint = new TintController();
   private sockets: Record<PropSocket, THREE.Object3D>;
   private ramp: THREE.DataTexture;
@@ -72,20 +82,53 @@ export class AvatarRig implements IAvatarRig {
     this.ramp = opts?.gradientMap ?? avatarToonRamp();
     this.disposeSourceMats = opts?.disposeSource !== false;
 
-    // Altura real del modelo (para que el controller coloque el centro correctamente).
-    const box = new THREE.Box3().setFromObject(this.root);
-    const size = new THREE.Vector3();
-    box.getSize(size);
-    this.height = size.y || 1.8;
+    // Altura CRUDA del modelo (pre-escala), para el bob procedural en unidades locales.
+    const rawHeight = this.measureHeight();
+    this.height = rawHeight;
 
     this.convertMaterials();
     this.sockets = this.buildSockets();
 
-    this.mixer = new THREE.AnimationMixer(this.root);
-    this.driver = new AnimationDriver(this.mixer, gltf.animations, {
-      walkRefSpeed: opts?.walkRefSpeed,
-      runRefSpeed: opts?.runRefSpeed,
-    });
+    // ── Elección de motor de locomoción ──────────────────────────────────────
+    // Si el GLB trae clips walk/run REALES (duración > 0.2 s) → AnimationDriver.
+    // Si NO (p.ej. sólo poses estáticas) pero el esqueleto mapea como humanoide
+    // Mixamo → ProceduralLocomotion. Los clips-pose quedan como pose base (no se
+    // reproducen: el procedural es dueño de los huesos).
+    const usableClips = AvatarRig.hasUsableLocomotion(gltf.animations);
+    const loco = usableClips ? null : ProceduralLocomotion.tryCreate(this.root);
+    if (loco) {
+      this.loco = loco;
+      this.locoClipNames = gltf.animations.map((c) => c.name);
+    } else {
+      this.mixer = new THREE.AnimationMixer(this.root);
+      this.driver = new AnimationDriver(this.mixer, gltf.animations, {
+        walkRefSpeed: opts?.walkRefSpeed,
+        runRefSpeed: opts?.runRefSpeed,
+      });
+    }
+
+    // ── Normalización de escala ──────────────────────────────────────────────
+    // Modelos fuera de rango humano (Mixamo suele venir a ~1.16 u) se escalan a la
+    // altura objetivo para que el controller (eyeHeight = height/2) los ancle bien.
+    const target = opts?.targetHeight ?? 1.7;
+    if (target > 0 && (rawHeight < 1.4 || rawHeight > 2.2)) {
+      const s = target / rawHeight;
+      this.root.scale.multiplyScalar(s);
+      this.root.updateMatrixWorld(true);
+      this.height = this.measureHeight();
+    }
+  }
+
+  private measureHeight(): number {
+    const box = new THREE.Box3().setFromObject(this.root);
+    const size = new THREE.Vector3();
+    box.getSize(size);
+    return size.y || 1.8;
+  }
+
+  /** ¿Hay algún clip de locomoción REAL (walk/run con duración animable)? */
+  private static hasUsableLocomotion(clips: THREE.AnimationClip[]): boolean {
+    return clips.some((c) => c.duration > 0.2 && /walk|run|locomo|caminar|correr/i.test(c.name));
   }
 
   static async load(url: string, opts?: AvatarRigOptions): Promise<AvatarRig> {
@@ -118,7 +161,24 @@ export class AvatarRig implements IAvatarRig {
    * qué locomoción quedó mapeado cada uno tras el mapeo difuso del AnimationDriver.
    */
   get clipInfo(): { names: string[]; mapping: Record<Locomotion, string | null> } {
-    return { names: this.driver.clipNames, mapping: this.driver.mapping };
+    if (this.driver) return { names: this.driver.clipNames, mapping: this.driver.mapping };
+    // Modo procedural: no hay clips utilizables; reporta el origen y los huesos.
+    const names = this.locoClipNames;
+    const tag = "procedural";
+    return { names, mapping: { idle: tag, walk: tag, run: tag, jump: tag } };
+  }
+
+  /** Nombres de clips estáticos que trajo el GLB (informativo en modo procedural). */
+  private locoClipNames: string[] = [];
+
+  /** ¿Qué motor conduce la locomoción? Para diagnóstico del laboratorio. */
+  get locomotionSource(): "clips" | "procedural" {
+    return this.loco ? "procedural" : "clips";
+  }
+
+  /** Métricas de QA del animador procedural (o `null` si conduce por clips). */
+  get locomotionQA(): LocomotionQA | null {
+    return this.loco?.getQA() ?? null;
   }
 
   // ---- conversión de materiales + tinte ----
@@ -132,6 +192,13 @@ export class AvatarRig implements IAvatarRig {
     this.root.traverse((obj) => {
       const mesh = obj as THREE.Mesh;
       if (!mesh.isMesh) return;
+      // Los materiales de la casa son `MeshToonMaterial` (con luz): necesitan
+      // NORMALES. Los GLB `KHR_materials_unlit` (p.ej. hacker-girl, con sombreado
+      // horneado en la textura) suelen venir SIN normales → renderizarían negros.
+      // Las generamos en la pose de bind si faltan (idempotente; ~7k tris, trivial).
+      if (mesh.geometry && !mesh.geometry.attributes.normal) {
+        mesh.geometry.computeVertexNormals();
+      }
       const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
       const converted = mats.map((m) => {
         let toon = seen.get(m);
@@ -222,7 +289,8 @@ export class AvatarRig implements IAvatarRig {
 
   update(dt: number, state: AvatarDriveState): void {
     if (this.disposed) return;
-    this.driver.update(dt, state);
+    if (this.loco) this.loco.update(dt, state);
+    else this.driver?.update(dt, state);
   }
 
   setTint(palette: Partial<Record<TintZone, THREE.Color>>): void {
@@ -238,7 +306,7 @@ export class AvatarRig implements IAvatarRig {
 
   dispose(): void {
     this.disposed = true;
-    this.driver.dispose();
+    this.driver?.dispose();
     this.root.traverse((obj) => {
       const mesh = obj as THREE.Mesh;
       if (mesh.geometry) mesh.geometry.dispose();

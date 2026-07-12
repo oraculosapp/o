@@ -68,6 +68,22 @@ export default function TerminosPage() {
         Lo que tú escribes en el chat sigue siendo tuyo; al publicarlo nos das permiso para
         mostrarlo dentro del servicio como parte de la experiencia compartida.
       </p>
+      <p>
+        Algunos avatares provienen de creadores independientes bajo licencia abierta: el
+        personaje &ldquo;Cute Chibi Girl&rdquo; es obra de <strong>Yury Misiyuk</strong>{" "}
+        (<a
+          href="https://sketchfab.com/3d-models/cute-chibi-girl-free-game-ready-character-28e2f98ab4bf4313a3f258d45d987716"
+          target="_blank"
+          rel="noreferrer"
+        >
+          Sketchfab
+        </a>
+        ,{" "}
+        <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noreferrer">
+          CC BY 4.0
+        </a>
+        ). ¡Gracias!
+      </p>
 
       <h2>Limitación de responsabilidad</h2>
       <p>

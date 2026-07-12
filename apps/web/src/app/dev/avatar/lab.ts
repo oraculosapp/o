@@ -7,6 +7,7 @@ import {
   type AvatarDriveState,
   type TintZone,
   type Locomotion,
+  type LocomotionQA,
 } from "@phygitalia/engine";
 
 export type LabMode = "idle" | "walk" | "run" | "jump";
@@ -76,6 +77,9 @@ export class AvatarLab {
     this.rig = new TestDummy();
     this.scene.add(this.rig.root);
     this.frameOnRig();
+
+    // Handle de QA para validación (navegador/headless): window.__AVATARLAB__.
+    (window as unknown as { __AVATARLAB__?: AvatarLab }).__AVATARLAB__ = this;
 
     this.resizeObs = new ResizeObserver(() => this.onResize());
     this.resizeObs.observe(this.container);
@@ -164,6 +168,37 @@ export class AvatarLab {
     }
   }
 
+  /**
+   * Muestra de QA para la validación (star deliverable): métricas del animador
+   * procedural + posiciones de mundo de pies/manos/cadera para correlacionar fase
+   * con distancia y verificar antifase sin patinaje. Devuelve null si el rig
+   * actual no es procedural (maniquí o clips).
+   */
+  qa(): (LocomotionQA & { footL: number[]; footR: number[]; hipY: number; mode: LabMode }) | null {
+    const rig = this.rig as { locomotionQA?: LocomotionQA | null };
+    const metrics = rig.locomotionQA;
+    if (!metrics) return null;
+    const worldY = (substr: string): number[] => {
+      let out: number[] = [NaN, NaN, NaN];
+      const v = new THREE.Vector3();
+      this.rig.root.traverse((o) => {
+        if (out[0] === out[0]) return; // ya encontrado
+        if (o.name.toLowerCase().includes(substr)) {
+          o.getWorldPosition(v);
+          out = [v.x, v.y, v.z];
+        }
+      });
+      return out;
+    };
+    return {
+      ...metrics,
+      footL: worldY("leftfoot"),
+      footR: worldY("rightfoot"),
+      hipY: worldY("hips")[1],
+      mode: this.mode,
+    };
+  }
+
   // ---- loop ----
 
   private driveState(): AvatarDriveState {
@@ -205,6 +240,8 @@ export class AvatarLab {
 
   dispose(): void {
     this.disposed = true;
+    const g = window as unknown as { __AVATARLAB__?: AvatarLab };
+    if (g.__AVATARLAB__ === this) delete g.__AVATARLAB__;
     cancelAnimationFrame(this.rafId);
     this.resizeObs?.disconnect();
     window.removeEventListener("resize", this.onResize);

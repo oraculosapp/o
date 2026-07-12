@@ -4,6 +4,7 @@ import {
   archetypeUrl,
   avatarFileNames,
   isArchetypeId,
+  isAvatarAvailable,
   thumbUrl,
 } from "../avatars";
 
@@ -36,5 +37,11 @@ describe("catálogo de avatares", () => {
   it("reconoce ids válidos e inválidos", () => {
     expect(isArchetypeId("astronomo")).toBe(true);
     expect(isArchetypeId("inexistente")).toBe(false);
+  });
+
+  it("marca hacker-f como disponible; el resto sigue durmiendo", () => {
+    expect(isAvatarAvailable("hacker", "f")).toBe(true);
+    expect(isAvatarAvailable("hacker", "m")).toBe(false);
+    expect(isAvatarAvailable("chaman", "f")).toBe(false);
   });
 });

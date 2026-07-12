@@ -17,6 +17,7 @@ export { AvatarRig, type AvatarRigOptions, type AvatarSource } from "./avatar/Av
 export { loadAvatarRigShared, clearAvatarGLTFCache } from "./avatar/AvatarGLTFCache";
 export { TestDummy } from "./avatar/TestDummy";
 export { AnimationDriver, type Locomotion } from "./avatar/AnimationDriver";
+export { ProceduralLocomotion, type LocomotionQA } from "./avatar/ProceduralLocomotion";
 export { TintController, toToonMaterial, avatarToonRamp, type HueBand } from "./avatar/tint";
 export type { IAvatarRig, AvatarDriveState, TintZone, PropSocket, AvatarConfig } from "./avatar/types";
 

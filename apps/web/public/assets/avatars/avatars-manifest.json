@@ -1,0 +1,31 @@
+{
+  "generado": "2026-07-12T06:32:50.857Z",
+  "texturas": "webp",
+  "avatares": [
+    {
+      "archivo": "hacker-f.glb",
+      "fuente": "hacker-f.glb",
+      "bytes": 148620,
+      "bytesFuente": 676964,
+      "tris": 6920,
+      "clips": 3,
+      "clipNombres": [
+        "Armature|idle",
+        "Armature|pose_01",
+        "Armature|pose_02"
+      ],
+      "skin": {
+        "skins": 1,
+        "skinnedPrims": 1,
+        "brokenPrims": 0
+      },
+      "textura": {
+        "formato": "webp",
+        "resolucion": 1024
+      },
+      "compresion": "EXT_meshopt_compression",
+      "notas": []
+    }
+  ],
+  "totalBytes": 148620
+}
