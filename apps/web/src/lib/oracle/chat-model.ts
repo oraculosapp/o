@@ -101,7 +101,8 @@ export function createOpenAiChatModel(config: OpenAiChatModelConfig): ChatModel 
         body: JSON.stringify({
           model,
           stream,
-          max_tokens: opts?.maxTokens ?? DEFAULT_MAX_TOKENS,
+          // OpenAI retiró max_tokens en los modelos gpt-5.x actuales
+          max_completion_tokens: opts?.maxTokens ?? DEFAULT_MAX_TOKENS,
           temperature: opts?.temperature ?? DEFAULT_TEMPERATURE,
           messages,
         }),
