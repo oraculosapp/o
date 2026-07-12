@@ -116,7 +116,7 @@ export class WorldNet implements WorldNetHooks {
     else this.localAnim = "run";
 
     // Subsistemas.
-    this.balls.update(dt, p, this.smoothVel);
+    this.balls.update(dt, p, this.smoothVel, this.deps.playerFeetY?.());
     this.remotes.update(dt, this.time, this.deps.camera);
     this.zones.update(p);
 

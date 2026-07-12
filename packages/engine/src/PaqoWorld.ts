@@ -121,6 +121,7 @@ export class PaqoWorld {
       playerPosition: this.controller.position,
       playerForward: (out) => this.controller.getForward(out),
       playerGrounded: () => this.controller.isGrounded(),
+      playerFeetY: () => this.controller.feetY,
       field: this.island.field,
     });
     this.net.start();

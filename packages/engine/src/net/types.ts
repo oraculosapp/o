@@ -75,6 +75,12 @@ export interface WorldNetDeps {
   playerForward: (out?: THREE.Vector3) => THREE.Vector3;
   /** ¿El jugador está en el suelo? (para elegir idle/walk/run vs jump). */
   playerGrounded: () => boolean;
+  /**
+   * Altura Y de los PIES del jugador (pivote − eyeHeight). La usa el contacto
+   * de patada de las pelotas (ventana vertical de piernas). Opcional:
+   * sin ella se estima como pos.y − 0.9.
+   */
+  playerFeetY?: () => number;
   /** Campo de altura de la isla (ancla la física de pelotas). */
   field: FieldLike;
 }

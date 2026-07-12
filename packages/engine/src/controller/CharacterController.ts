@@ -46,7 +46,8 @@ export class CharacterController {
   private readonly jumpSpeed = 9.2;
   private readonly coyoteTime = 0.12;
   private readonly jumpBuffer = 0.12;
-  private readonly turnRate = 12;
+  // 8/s (antes 12): giros más pausados — feedback del director en S3b.
+  private readonly turnRate = 8;
   private readonly slopeLimitCos = Math.cos(THREE.MathUtils.degToRad(50));
   private eyeHeight = 0.9;
 
@@ -125,6 +126,16 @@ export class CharacterController {
 
   isFalling(): boolean {
     return this.falling;
+  }
+
+  /** Altura Y de los PIES (pivote − eyeHeight). Para contactos a ras de suelo. */
+  get feetY(): number {
+    return this.position.y - this.eyeHeight;
+  }
+
+  /** Velocidad horizontal actual (u/s, mundo). Copia en `out`; no mutar la interna. */
+  getHorizVelocity(out = new THREE.Vector3()): THREE.Vector3 {
+    return out.copy(this.horizVel);
   }
 
   /**

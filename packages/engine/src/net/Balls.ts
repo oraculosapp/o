@@ -18,8 +18,15 @@ const ROLL_FRICTION = 1.9;
 const SLOPE_ROLL = 0.5;
 /** Velocidad horizontal (u/s) bajo la cual, ya en suelo, la pelota se duerme. */
 const SLEEP_SPEED = 0.06;
-/** Radio efectivo del jugador para el contacto de patada (u). */
-const PLAYER_RADIUS = 0.45;
+/**
+ * Alcance HORIZONTAL de la patada (u): distancia XZ pies↔centro de pelota.
+ * (El contacto 3D contra el PIVOTE del controller — a ~eyeHeight del suelo —
+ * dejaba <0.6u de ventana horizontal y en juego real nunca disparaba; S3b.)
+ */
+const KICK_RANGE = 0.75;
+/** Ventana vertical de patada respecto a los pies (u): piernas del avatar. */
+const KICK_Y_MIN = -0.6;
+const KICK_Y_MAX = 1.4;
 /** Factor de transferencia de la velocidad del jugador a la pelota en la patada. */
 const KICK_FACTOR = 1.35;
 /** Componente vertical mínima que añade una patada (u/s). */
@@ -142,7 +149,8 @@ export class Balls {
    * Física O(9): gravedad, integración, contacto con el suelo (rebote+fricción+
    * rodadura por pendiente), patada al contacto con el jugador y reconciliación.
    */
-  update(dt: number, playerPos: THREE.Vector3, playerVel: THREE.Vector3): void {
+  update(dt: number, playerPos: THREE.Vector3, playerVel: THREE.Vector3, playerFeetY?: number): void {
+    const feetY = playerFeetY ?? playerPos.y - 0.9;
     for (let i = 0; i < this.balls.length; i++) {
       const b = this.balls[i];
       if (b.kickCd > 0) b.kickCd -= dt;
@@ -197,26 +205,39 @@ export class Balls {
       }
 
       // --- patada por contacto con el jugador ---
-      this.tryKick(i, b, playerPos, playerVel);
+      this.tryKick(i, b, playerPos, playerVel, feetY);
     }
     this.syncInstances();
   }
 
-  private tryKick(id: number, b: Ball, playerPos: THREE.Vector3, playerVel: THREE.Vector3): void {
-    this._delta.copy(b.pos).sub(playerPos);
+  private tryKick(
+    id: number,
+    b: Ball,
+    playerPos: THREE.Vector3,
+    playerVel: THREE.Vector3,
+    feetY: number,
+  ): void {
+    // Contacto HORIZONTAL (XZ) pies↔centro de pelota + ventana vertical de
+    // piernas. La distancia 3D contra el pivote (a ~eyeHeight) comía el
+    // presupuesto vertical y en gameplay real la patada nunca disparaba.
+    this._delta.set(b.pos.x - playerPos.x, 0, b.pos.z - playerPos.z);
     const dist = this._delta.length();
-    const contact = RADIUS + PLAYER_RADIUS;
-    if (dist >= contact) return;
+    if (dist >= KICK_RANGE) return;
+    const rel = b.pos.y - feetY;
+    if (rel < KICK_Y_MIN || rel > KICK_Y_MAX) return;
 
-    // Dirección de expulsión (del jugador a la pelota); si están encimados usa
-    // la dirección de avance del jugador.
+    // Dirección de expulsión horizontal (del jugador a la pelota); si están
+    // encimados usa la dirección de avance del jugador.
     if (dist > 1e-4) this._delta.divideScalar(dist);
-    else this._delta.copy(playerVel).setY(0).normalize();
+    else if (this._delta.copy(playerVel).setY(0).lengthSq() > 1e-8) this._delta.normalize();
+    else this._delta.set(1, 0, 0);
 
-    // Resuelve penetración: saca la pelota del jugador (sin empujar al jugador).
-    b.pos.addScaledVector(this._delta, contact - dist);
+    // Resuelve penetración en el plano XZ (no hundir la pelota en el suelo).
+    b.pos.x += this._delta.x * (KICK_RANGE - dist);
+    b.pos.z += this._delta.z * (KICK_RANGE - dist);
 
-    // Impulso horizontal: velocidad del jugador × factor, mínimo garantizado.
+    // Impulso horizontal: velocidad del jugador × factor, mínimo garantizado
+    // (KICK_MIN aplica también caminando lento).
     const nHoriz = this._tmp.set(this._delta.x, 0, this._delta.z);
     if (nHoriz.lengthSq() < 1e-6) nHoriz.set(playerVel.x, 0, playerVel.z);
     nHoriz.normalize();
