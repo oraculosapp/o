@@ -10,6 +10,14 @@ import {
   type SocialLink,
 } from "@/lib/profile";
 import { Bell } from "@/components/notifications/Bell";
+import { AvatarPicker } from "@/components/avatar-picker/AvatarPicker";
+import { ARCHETYPES, thumbUrl } from "@/lib/avatars";
+import {
+  getStoredAvatar,
+  saveAvatarToProfile,
+  storeAvatar,
+  type AvatarSelection,
+} from "@/lib/avatar-store";
 import { BIOSPHERE_RUNES } from "./biospheres";
 import styles from "./profile.module.css";
 
@@ -46,6 +54,8 @@ export function ProfileForm({ userId, initial, progress }: ProfileFormProps) {
   const [saving, setSaving] = useState(false);
   const [handleError, setHandleError] = useState<string | null>(null);
   const [toasts, setToasts] = useState<Toast[]>([]);
+  const [avatarSel, setAvatarSel] = useState<AvatarSelection | null>(() => getStoredAvatar());
+  const [pickerOpen, setPickerOpen] = useState(false);
 
   const set = useCallback(<K extends keyof ProfileData>(key: K, value: ProfileData[K]) => {
     setData((d) => ({ ...d, [key]: value }));
@@ -56,6 +66,21 @@ export function ProfileForm({ userId, initial, progress }: ProfileFormProps) {
     setToasts((t) => [...t, { id, kind, text }]);
     window.setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 3600);
   }, []);
+
+  // --- Avatar (arquetipo + tinte) --------------------------------------------
+  const onApplyAvatar = useCallback(
+    (sel: AvatarSelection, available: boolean) => {
+      storeAvatar(sel);
+      void saveAvatarToProfile(sel);
+      setAvatarSel(sel);
+      setPickerOpen(false);
+      pushToast(
+        "success",
+        available ? "Avatar actualizado ✦" : "Guardado — este arquetipo aún duerme",
+      );
+    },
+    [pushToast],
+  );
 
   // --- Redes sociales (lista dinámica) ---------------------------------------
   const addSocial = useCallback(() => {
@@ -167,6 +192,46 @@ export function ProfileForm({ userId, initial, progress }: ProfileFormProps) {
               placeholder="https://…"
             />
           </label>
+        </section>
+
+        {/* --- Avatar --------------------------------------------------------- */}
+        <section className={styles.panel}>
+          <h2 className={styles.panelTitle}>Avatar</h2>
+          <p className={styles.panelLead}>
+            Tu arquetipo y su color te acompañan por todas las Biósferas.
+          </p>
+          <div className={styles.avatarRow}>
+            <div className={styles.avatarPreview}>
+              {avatarSel ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={thumbUrl(avatarSel.archetype)} alt="" className={styles.avatarThumb} />
+              ) : (
+                <span className={styles.avatarEmpty} aria-hidden />
+              )}
+            </div>
+            <div className={styles.avatarMeta}>
+              <span className={styles.avatarName}>
+                {avatarSel
+                  ? `${ARCHETYPES.find((a) => a.id === avatarSel.archetype)?.name ?? avatarSel.archetype} · ${avatarSel.gender === "f" ? "Femenino" : "Masculino"}`
+                  : "Sin elegir todavía"}
+              </span>
+              {avatarSel && (
+                <span
+                  className={styles.avatarTint}
+                  title="Color primario"
+                  style={{ background: avatarSel.tint.primary }}
+                  aria-hidden
+                />
+              )}
+            </div>
+            <button
+              type="button"
+              className={styles.avatarBtn}
+              onClick={() => setPickerOpen(true)}
+            >
+              Cambiar avatar
+            </button>
+          </div>
         </section>
 
         {/* --- Redes sociales ------------------------------------------------- */}
@@ -315,6 +380,13 @@ export function ProfileForm({ userId, initial, progress }: ProfileFormProps) {
           </div>
         ))}
       </div>
+
+      <AvatarPicker
+        open={pickerOpen}
+        initial={avatarSel}
+        onClose={() => setPickerOpen(false)}
+        onApply={onApplyAvatar}
+      />
     </div>
   );
 }

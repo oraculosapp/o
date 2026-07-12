@@ -53,3 +53,36 @@
     transform: rotate(360deg);
   }
 }
+
+/* Toast del selector de avatar (selbar): píldora glass arriba-centro. */
+.avatarToast {
+  position: absolute;
+  top: 72px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 40;
+  max-width: min(92vw, 460px);
+  padding: 0.65rem 1.1rem;
+  font-family: var(--font-body);
+  font-size: 0.82rem;
+  line-height: 1.4;
+  text-align: center;
+  color: var(--text);
+  background: var(--panel-solid);
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--gold);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow);
+  animation: avatarToastIn var(--dur-slow) var(--ease-brand);
+}
+@keyframes avatarToastIn {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -8px);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .avatarToast {
+    animation: none;
+  }
+}

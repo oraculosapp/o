@@ -6,6 +6,8 @@
   "type": "module",
   "scripts": {
     "optimize": "node optimize-totems.mjs",
+    "optimize:avatars": "node optimize-avatars.mjs",
+    "thumbs:avatars": "node gen-avatar-thumbs.mjs",
     "inspect": "gltf-transform inspect"
   },
   "dependencies": {

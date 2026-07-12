@@ -47,3 +47,26 @@ export type TintZone = "primary" | "secondary" | "hair";
 
 /** Sockets donde se pueden enganchar props icónicos. */
 export type PropSocket = "handR" | "handL" | "back";
+
+/**
+ * Configuración de avatar que la app pasa al mundo (selector de arquetipo →
+ * PaqoWorld). Todos los campos son opcionales para degradar con gracia:
+ *
+ *   · sin `archetypeUrl`  → el mundo usa el maniquí procedural (TestDummy).
+ *   · con `archetypeUrl`  → intenta cargar el GLB riggeado; si falla (404 porque
+ *     el modelo "aún duerme"), se queda en el maniquí y avisa por `onArchetypeMissing`.
+ *   · `tint` se aplica SIEMPRE (dummy o arquetipo): es la capa híbrida de color.
+ *
+ * Los colores van como hex `#rrggbb` para que la config sea serializable
+ * (localStorage / jsonb del perfil) sin depender de THREE.
+ */
+export interface AvatarConfig {
+  /** URL del GLB del arquetipo (p.ej. `/assets/avatars/hacker-m.glb`). */
+  archetypeUrl?: string;
+  /** Tinte por zona (hex). Blanco/omitido = sin cambio. */
+  tint?: Partial<Record<TintZone, string>>;
+  /** Se llama si el GLB del arquetipo no se pudo cargar (fallback a dummy). */
+  onArchetypeMissing?: (url: string) => void;
+  /** Se llama cuando el arquetipo cargó y sustituyó al maniquí. */
+  onArchetypeLoaded?: (url: string) => void;
+}

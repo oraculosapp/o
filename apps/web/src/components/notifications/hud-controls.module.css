@@ -44,9 +44,21 @@
   box-shadow: 0 0 0 2px var(--glow);
 }
 
+/* Slot del botón “Cambiar avatar”: fijo a la IZQUIERDA del mute (right:112px). */
+.avatarSlot {
+  position: fixed;
+  top: 16px;
+  right: 160px;
+  z-index: 35;
+}
+
 @media (max-width: 640px) {
   .cluster {
     top: 12px;
     right: 12px;
+  }
+  .avatarSlot {
+    top: 12px;
+    right: 152px;
   }
 }

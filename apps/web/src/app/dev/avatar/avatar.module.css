@@ -143,3 +143,40 @@
   border-radius: var(--radius-sm);
   box-shadow: var(--shadow);
 }
+
+/* Indicador de clips que trajo el GLB (mapeo del AnimationDriver). */
+.clipMap {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+.clipRow {
+  display: grid;
+  grid-template-columns: 3.2rem 0.8rem 1fr;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.72rem;
+}
+.clipKey {
+  font-family: var(--font-display);
+  letter-spacing: 0.06em;
+  color: var(--gold);
+}
+.clipArrow {
+  color: var(--text-faint);
+  text-align: center;
+}
+.clipVal {
+  font-family: var(--font-body);
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.clipMissing {
+  color: var(--text-faint);
+  font-style: italic;
+}

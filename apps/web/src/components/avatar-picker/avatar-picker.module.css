@@ -1,0 +1,268 @@
+/* Selector de arquetipo — panel glass de marca sobre nebulosa. Design system @phygitalia/ui. */
+
+.overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 70;
+  display: grid;
+  place-items: center;
+  padding: 1rem;
+  background: rgba(8, 10, 18, 0.62);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  animation: apFade var(--dur-fast) var(--ease-brand);
+}
+@keyframes apFade {
+  from {
+    opacity: 0;
+  }
+}
+
+.panel {
+  position: relative;
+  width: min(560px, 100%);
+  max-height: min(88vh, 720px);
+  overflow-y: auto;
+  padding: 1.6rem 1.5rem 1.3rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background:
+    radial-gradient(80% 60% at 20% 0%, rgba(201, 138, 94, 0.14), transparent 60%),
+    radial-gradient(70% 70% at 90% 10%, rgba(80, 96, 150, 0.14), transparent 65%),
+    var(--panel-solid);
+  box-shadow: var(--shadow);
+  color: var(--text);
+  animation: apIn var(--dur-slow) var(--ease-brand);
+}
+@keyframes apIn {
+  from {
+    opacity: 0;
+    transform: translateY(14px) scale(0.98);
+  }
+}
+
+.close {
+  position: absolute;
+  top: 0.7rem;
+  right: 0.7rem;
+  width: 30px;
+  height: 30px;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+  line-height: 1;
+  transition: color var(--dur-fast) var(--ease-brand);
+}
+.close:hover {
+  color: var(--gold-bright);
+  border-color: var(--gold-dim);
+}
+
+.head {
+  margin-bottom: 1rem;
+}
+.eyebrow {
+  font-family: var(--font-display);
+  font-size: 0.62rem;
+  letter-spacing: 0.28em;
+  text-transform: uppercase;
+  color: var(--gold);
+}
+.title {
+  margin: 0.25rem 0 0.35rem;
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 1.25rem;
+  letter-spacing: 0.02em;
+  color: var(--gold-bright);
+}
+.lead {
+  margin: 0;
+  max-width: 42ch;
+  color: var(--text-dim);
+  font-size: 0.86rem;
+  line-height: 1.45;
+}
+
+/* Cuadrícula de arquetipos */
+.grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.6rem;
+  margin-bottom: 1.1rem;
+}
+@media (max-width: 460px) {
+  .grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+.card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.5rem 0.4rem 0.55rem;
+  background: var(--bg-1);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition:
+    border-color var(--dur-fast) var(--ease-brand),
+    transform var(--dur-fast) var(--ease-brand),
+    background var(--dur-fast) var(--ease-brand);
+}
+.card:hover {
+  border-color: var(--gold-dim);
+  transform: translateY(-2px);
+}
+.cardActive {
+  border-color: var(--gold);
+  background: var(--panel-hi);
+  box-shadow: 0 0 0 1px var(--gold), 0 0 18px -6px var(--glow);
+}
+
+.thumb {
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  object-fit: cover;
+  border-radius: var(--radius-sm);
+  background: var(--bg-2);
+  /* placeholder mientras carga la miniatura */
+  box-shadow: inset 0 0 0 1px var(--line-soft);
+}
+
+.cardName {
+  font-family: var(--font-display);
+  font-size: 0.72rem;
+  letter-spacing: 0.04em;
+  color: var(--text);
+  text-align: center;
+}
+.cardActive .cardName {
+  color: var(--gold-bright);
+}
+
+/* Controles */
+.controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1.1rem;
+  margin-bottom: 1.2rem;
+}
+.controlGroup {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+.controlLabel {
+  font-size: 0.64rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+
+.segment {
+  display: inline-flex;
+  padding: 3px;
+  gap: 3px;
+  background: var(--bg-1);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-pill);
+}
+.segBtn {
+  padding: 0.42rem 0.9rem;
+  font-family: var(--font-display);
+  font-size: 0.74rem;
+  letter-spacing: 0.04em;
+  color: var(--text-dim);
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-pill);
+  cursor: pointer;
+  transition:
+    color var(--dur-fast) var(--ease-brand),
+    background var(--dur-fast) var(--ease-brand);
+}
+.segActive {
+  color: var(--bg-0);
+  background: linear-gradient(180deg, var(--gold-bright), var(--gold));
+}
+
+.swatches {
+  display: flex;
+  gap: 0.5rem;
+}
+.swatch {
+  width: 38px;
+  height: 38px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--line);
+  cursor: pointer;
+  padding: 0;
+  transition:
+    transform var(--dur-fast) var(--ease-brand),
+    box-shadow var(--dur-fast) var(--ease-brand);
+}
+.swatch:hover {
+  transform: scale(1.08);
+  border-color: var(--gold-bright);
+}
+.swatchActive {
+  box-shadow: 0 0 0 2px var(--gold), 0 0 14px -4px var(--glow);
+  border-color: var(--gold);
+}
+
+/* Acciones */
+.actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding-top: 0.4rem;
+  border-top: 1px solid var(--line-soft);
+}
+.selName {
+  font-family: var(--font-display);
+  font-size: 0.9rem;
+  letter-spacing: 0.03em;
+  color: var(--text);
+}
+.confirm {
+  padding: 0.66rem 1.5rem;
+  border: none;
+  border-radius: var(--radius-pill);
+  background: linear-gradient(180deg, var(--gold-bright), var(--gold));
+  color: var(--bg-0);
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 0.8rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition:
+    transform var(--dur-fast) var(--ease-brand),
+    filter var(--dur-fast) var(--ease-brand);
+}
+.confirm:hover:not(:disabled) {
+  transform: translateY(-1px);
+  filter: brightness(1.06);
+}
+.confirm:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .overlay,
+  .panel {
+    animation: none;
+  }
+  .card,
+  .confirm,
+  .swatch {
+    transition: none;
+  }
+}

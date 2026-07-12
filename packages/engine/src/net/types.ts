@@ -54,6 +54,12 @@ export interface RemoteState {
   tint?: string;
   /** Etiqueta flotante sobre la cabeza. */
   name?: string;
+  /**
+   * URL del GLB del arquetipo del remoto (p.ej. `/assets/avatars/hacker-m.glb`).
+   * Si está y el GLB existe, el remoto se pinta con ese AvatarRig (caché de GLTFs
+   * compartida); si falta o falla la carga, se queda con el maniquí procedural.
+   */
+  archetype?: string;
 }
 
 /** Estado dinámico de una pelota (posición + velocidad en mundo). */

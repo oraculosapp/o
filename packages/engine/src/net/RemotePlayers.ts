@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import { TestDummy } from "../avatar/TestDummy";
-import type { AvatarDriveState } from "../avatar/types";
+import { loadAvatarRigShared } from "../avatar/AvatarGLTFCache";
+import type { AvatarDriveState, IAvatarRig } from "../avatar/types";
 import { makeSoftCircleTexture } from "../util/toon";
 import type { NetAnim, RemoteState } from "./types";
 
@@ -50,13 +51,15 @@ function driveStateFor(anim: string): AvatarDriveState {
  */
 class RemoteAvatar {
   readonly holder = new THREE.Group();
-  private rig = new TestDummy();
+  private rig: IAvatarRig = new TestDummy();
   private samples: Sample[] = [];
   private materials: THREE.Material[] = [];
   private label?: THREE.Sprite;
   private labelTex?: THREE.Texture;
   private curName?: string;
   private curTint?: string;
+  private curArchetype?: string;
+  private loadingArchetype = false;
 
   /** Fundido 0..1 (aparición) y estado de retirada. */
   private fade = 0;
@@ -77,18 +80,60 @@ class RemoteAvatar {
     this.holder.add(this.rig.root);
     scene.add(this.holder);
 
-    // Materiales transparentes para poder fundir.
+    this.collectFadeMaterials();
+    this.spawnPuff(scene);
+  }
+
+  /** Recolecta los materiales del rig actual y los prepara para el fundido. */
+  private collectFadeMaterials(): void {
+    this.materials = [];
     this.rig.root.traverse((o) => {
       const m = (o as THREE.Mesh).material as THREE.Material | THREE.Material[] | undefined;
       if (!m) return;
       const list = Array.isArray(m) ? m : [m];
       for (const mat of list) {
         mat.transparent = true;
-        mat.opacity = 0;
+        mat.opacity = this.fade;
         this.materials.push(mat);
       }
     });
-    this.spawnPuff(scene);
+  }
+
+  /**
+   * Adopta el arquetipo del remoto (URL de GLB). Carga perezosa desde la caché
+   * compartida; al terminar sustituye el maniquí por el AvatarRig. Si falla (404 o
+   * error), se queda con el maniquí — nunca rompe.
+   */
+  setArchetype(url?: string): void {
+    if (!url || url === this.curArchetype || this.loadingArchetype) return;
+    this.curArchetype = url;
+    this.loadingArchetype = true;
+    loadAvatarRigShared(url)
+      .then((rig) => {
+        this.loadingArchetype = false;
+        if (this.dead) {
+          rig.dispose();
+          return;
+        }
+        this.swapRig(rig);
+      })
+      .catch(() => {
+        // Arquetipo aún inexistente: seguimos con el maniquí.
+        this.loadingArchetype = false;
+      });
+  }
+
+  /** Sustituye el rig del holder conservando tinte, fundido y etiqueta. */
+  private swapRig(rig: IAvatarRig): void {
+    const tint = this.curTint;
+    this.holder.remove(this.rig.root);
+    this.rig.dispose();
+    this.rig = rig;
+    rig.root.position.set(0, -rig.height / 2, 0);
+    this.holder.add(rig.root);
+    this.collectFadeMaterials();
+    if (tint) rig.setTint({ primary: new THREE.Color(tint) });
+    if (this.label) this.label.position.set(0, rig.height / 2 + 0.55, 0);
   }
 
   /** Aplica un estado recibido: encola muestra, actualiza tinte/nombre. */
@@ -324,6 +369,7 @@ export class RemotePlayers {
       this.map.set(id, a);
     }
     a.setAnim(s.anim);
+    a.setArchetype(s.archetype);
     a.push(s, now);
   }
 

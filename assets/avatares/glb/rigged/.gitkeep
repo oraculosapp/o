@@ -1,0 +1,3 @@
+# Los GLB/FBX riggeados de los arquetipos caen aquí.
+# El pipeline (tools/assets/optimize-avatars.mjs) los lee y escribe optimizados en
+# apps/web/public/assets/avatars/. Convención: <arquetipo>-<m|f>.glb (ver docs/avatares-tripo3d.md).

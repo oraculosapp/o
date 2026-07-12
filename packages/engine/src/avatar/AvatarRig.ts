@@ -1,9 +1,13 @@
 import * as THREE from "three";
 import { GLTFLoader, type GLTF } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { DRACOLoader } from "three/examples/jsm/loaders/DRACOLoader.js";
-import { AnimationDriver } from "./AnimationDriver";
+import { MeshoptDecoder } from "three/examples/jsm/libs/meshopt_decoder.module.js";
+import { AnimationDriver, type Locomotion } from "./AnimationDriver";
 import { TintController, toToonMaterial, avatarToonRamp, type HueBand } from "./tint";
 import type { AvatarDriveState, IAvatarRig, PropSocket, TintZone } from "./types";
+
+/** Fuente mínima que necesita el rig: escena skinned + clips (subconjunto de GLTF). */
+export type AvatarSource = Pick<GLTF, "scene" | "animations">;
 
 export interface AvatarRigOptions {
   /** Ruta del decoder DRACO (asume `apps/web/public/draco/`). Default `/draco/`. */
@@ -13,6 +17,13 @@ export interface AvatarRigOptions {
   /** Velocidades de referencia para sincronizar los clips walk/run con la velocidad real. */
   walkRefSpeed?: number;
   runRefSpeed?: number;
+  /**
+   * Si `false`, NO libera los materiales fuente al convertirlos a toon. Necesario
+   * cuando la escena viene de un clon compartido (SkeletonUtils.clone) cuyos
+   * materiales/texturas comparten otras instancias (ver AvatarGLTFCache).
+   * Default `true` (carga única, dueña de sus materiales).
+   */
+  disposeSource?: boolean;
 }
 
 /** Bandas de hue por defecto para modelos de UN solo material (estrategia hueMask).
@@ -52,12 +63,14 @@ export class AvatarRig implements IAvatarRig {
   private sockets: Record<PropSocket, THREE.Object3D>;
   private ramp: THREE.DataTexture;
   private ownRamp: boolean;
+  private disposeSourceMats: boolean;
   private disposed = false;
 
-  private constructor(gltf: GLTF, opts?: AvatarRigOptions) {
+  private constructor(gltf: AvatarSource, opts?: AvatarRigOptions) {
     this.root = gltf.scene;
     this.ownRamp = !opts?.gradientMap;
     this.ramp = opts?.gradientMap ?? avatarToonRamp();
+    this.disposeSourceMats = opts?.disposeSource !== false;
 
     // Altura real del modelo (para que el controller coloque el centro correctamente).
     const box = new THREE.Box3().setFromObject(this.root);
@@ -80,12 +93,32 @@ export class AvatarRig implements IAvatarRig {
     const draco = new DRACOLoader();
     draco.setDecoderPath(opts?.dracoDecoderPath ?? "/draco/");
     loader.setDRACOLoader(draco);
+    // Los GLB optimizados salen con EXT_meshopt_compression (ver
+    // tools/assets/optimize-avatars.mjs); registrar el decoder es imprescindible.
+    loader.setMeshoptDecoder(MeshoptDecoder);
     try {
       const gltf = await loader.loadAsync(url);
       return new AvatarRig(gltf, opts);
     } finally {
       draco.dispose();
     }
+  }
+
+  /**
+   * Adopta una escena ya cargada/clonada (no vuelve a hacer I/O). La usa
+   * {@link AvatarGLTFCache} para instanciar múltiples avatares (remotos) desde un
+   * único GLTF cacheado vía `SkeletonUtils.clone`, sin recargar de red.
+   */
+  static fromGLTF(source: AvatarSource, opts?: AvatarRigOptions): AvatarRig {
+    return new AvatarRig(source, opts);
+  }
+
+  /**
+   * Diagnóstico de clips (para /dev/avatar): nombres reales que trajo el GLB y a
+   * qué locomoción quedó mapeado cada uno tras el mapeo difuso del AnimationDriver.
+   */
+  get clipInfo(): { names: string[]; mapping: Record<Locomotion, string | null> } {
+    return { names: this.driver.clipNames, mapping: this.driver.mapping };
   }
 
   // ---- conversión de materiales + tinte ----
@@ -108,7 +141,9 @@ export class AvatarRig implements IAvatarRig {
           // Nombre para clasificar: el del material o, si viene vacío, el del mesh.
           const srcName = (m.name || mesh.name || "").toLowerCase();
           toonList.push({ mat: toon, srcName });
-          m.dispose();
+          // En modo clon compartido no liberamos: los materiales/texturas fuente
+          // los comparten otras instancias (se liberan al vaciar la caché).
+          if (this.disposeSourceMats) m.dispose();
         }
         return toon;
       });

@@ -13,11 +13,12 @@ export type { PlanetPreset } from "./HolaPlaneta";
 export { SimplexNoise } from "./noise";
 
 // --- Avatares (equipo Avatares S2) ---
-export { AvatarRig, type AvatarRigOptions } from "./avatar/AvatarRig";
+export { AvatarRig, type AvatarRigOptions, type AvatarSource } from "./avatar/AvatarRig";
+export { loadAvatarRigShared, clearAvatarGLTFCache } from "./avatar/AvatarGLTFCache";
 export { TestDummy } from "./avatar/TestDummy";
 export { AnimationDriver, type Locomotion } from "./avatar/AnimationDriver";
 export { TintController, toToonMaterial, avatarToonRamp, type HueBand } from "./avatar/tint";
-export type { IAvatarRig, AvatarDriveState, TintZone, PropSocket } from "./avatar/types";
+export type { IAvatarRig, AvatarDriveState, TintZone, PropSocket, AvatarConfig } from "./avatar/types";
 
 // --- Audio procedural (equipo Audio S4): WebAudio 100% sintético, cero archivos ---
 export { Soundscape } from "./audio/Soundscape";

@@ -38,6 +38,15 @@ export class AnimationDriver {
   private actions: Partial<Record<Locomotion, Resolved>> = {};
   private current?: Locomotion;
 
+  /** Nombres reales de los clips que trajo el GLB (para diagnóstico en /dev/avatar). */
+  readonly clipNames: string[];
+  /**
+   * Qué clip real quedó asignado a cada locomoción tras el mapeo difuso y los
+   * fallbacks (p.ej. `walk` puede resolver a un clip "Run_01" reproducido a media
+   * velocidad). `null` = no había ningún clip utilizable. Visible en el laboratorio.
+   */
+  readonly mapping: Record<Locomotion, string | null>;
+
   constructor(
     private mixer: THREE.AnimationMixer,
     clips: THREE.AnimationClip[],
@@ -50,6 +59,15 @@ export class AnimationDriver {
     const walk = findClip(clips, "walk");
     const run = findClip(clips, "run");
     const jump = findClip(clips, "jump");
+
+    this.clipNames = clips.map((c) => c.name);
+    // Refleja los mismos fallbacks que la resolución de acciones de abajo.
+    this.mapping = {
+      idle: idle?.name ?? null,
+      walk: (walk ?? run ?? idle)?.name ?? null,
+      run: (run ?? walk ?? idle)?.name ?? null,
+      jump: (jump ?? run ?? walk ?? idle)?.name ?? null,
+    };
 
     if (idle) {
       this.actions.idle = { action: this.mixer.clipAction(idle), refSpeed: 0, baseTimeScale: 1 };

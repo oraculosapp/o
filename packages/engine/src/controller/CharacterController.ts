@@ -112,6 +112,48 @@ export class CharacterController {
     scene.add(this.blob);
   }
 
+  /** Rig de avatar actual (dummy o arquetipo GLB), o undefined si usa la cápsula. */
+  getRig(): IAvatarRig | undefined {
+    return this.rig;
+  }
+
+  /**
+   * Sustituye el rig de avatar en caliente (p.ej. cuando termina de cargar el GLB
+   * del arquetipo elegido, tras arrancar con el maniquí). Conserva la posición de
+   * los PIES: recalcula `eyeHeight` con la nueva altura y reancla el pivote para
+   * que el avatar no “salte”. No rompe si venía de la cápsula placeholder.
+   */
+  setRig(rig: IAvatarRig): void {
+    const feet = this.position.y - this.eyeHeight;
+
+    if (this.rig) {
+      this.object.remove(this.rig.root);
+      this.rig.dispose();
+    } else if (this.avatar) {
+      this.object.remove(this.avatar);
+      this.disposeSubtree(this.avatar);
+      this.avatar = undefined;
+    }
+
+    this.rig = rig;
+    this.eyeHeight = rig.height / 2;
+    rig.root.position.set(0, -this.eyeHeight, 0);
+    this.object.add(rig.root);
+
+    this.position.y = feet + this.eyeHeight;
+    this.object.position.copy(this.position);
+  }
+
+  private disposeSubtree(root: THREE.Object3D): void {
+    root.traverse((o) => {
+      const mesh = o as THREE.Mesh;
+      if (mesh.geometry) mesh.geometry.dispose();
+      const mat = mesh.material as THREE.Material | THREE.Material[] | undefined;
+      if (Array.isArray(mat)) mat.forEach((m) => m.dispose());
+      else mat?.dispose();
+    });
+  }
+
   get up(): THREE.Vector3 {
     return UP;
   }

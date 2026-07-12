@@ -555,3 +555,73 @@
     transition: none;
   }
 }
+
+/* --- Avatar (arquetipo + tinte) -------------------------------------------- */
+.avatarRow {
+  display: flex;
+  align-items: center;
+  gap: 0.9rem;
+  flex-wrap: wrap;
+}
+.avatarPreview {
+  width: 64px;
+  height: 64px;
+  flex: 0 0 auto;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--line);
+  background: var(--bg-2);
+  overflow: hidden;
+}
+.avatarThumb {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.avatarEmpty {
+  display: block;
+  width: 100%;
+  height: 100%;
+  background:
+    radial-gradient(60% 60% at 50% 40%, rgba(227, 176, 99, 0.18), transparent 70%),
+    var(--bg-2);
+}
+.avatarMeta {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.avatarName {
+  font-family: var(--font-display);
+  font-size: 0.82rem;
+  letter-spacing: 0.03em;
+  color: var(--text);
+}
+.avatarTint {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  border: 1px solid var(--line);
+  box-shadow: 0 0 8px -2px var(--glow);
+}
+.avatarBtn {
+  padding: 0.55rem 1rem;
+  font-family: var(--font-display);
+  font-size: 0.74rem;
+  letter-spacing: 0.06em;
+  color: var(--text);
+  background: var(--panel-hi);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-pill);
+  cursor: pointer;
+  transition:
+    border-color var(--dur-fast) var(--ease-brand),
+    color var(--dur-fast) var(--ease-brand);
+}
+.avatarBtn:hover {
+  border-color: var(--gold-dim);
+  color: var(--gold-bright);
+}

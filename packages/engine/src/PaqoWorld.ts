@@ -2,6 +2,8 @@ import * as THREE from "three";
 import { Island } from "./island/Island";
 import { CharacterController } from "./controller/CharacterController";
 import { TestDummy } from "./avatar/TestDummy";
+import { loadAvatarRigShared } from "./avatar/AvatarGLTFCache";
+import type { AvatarConfig, TintZone } from "./avatar/types";
 import { FollowCamera } from "./camera/FollowCamera";
 import { InputManager } from "./input/InputManager";
 import { makeToonRamp } from "./util/toon";
@@ -82,6 +84,7 @@ export class PaqoWorld {
     private container: HTMLElement,
     private preset: BiospherePreset,
     private onReady?: () => void,
+    private avatarConfig?: AvatarConfig,
   ) {}
 
   start(): void {
@@ -112,11 +115,16 @@ export class PaqoWorld {
     this.pixels = new PixelSwarm(this.island.field, this.preset);
     this.pixels.addTo(this.scene);
 
+    // Arranca SIEMPRE con el maniquí (mundo vivo al instante). Si hay un
+    // arquetipo elegido, se carga en segundo plano y sustituye al maniquí; si el
+    // GLB no existe aún, se queda el maniquí (con su tinte). Cambiar de avatar en
+    // caliente pasa por el mismo camino (setAvatar).
     this.rig = new TestDummy();
     this.controller = new CharacterController(this.island, this.spawnPos, this.rig);
     this.controller.onVoidFall = () => this.beginFall();
     this.controller.addTo(this.scene);
     this.controller.faceToward(this.rune.position);
+    if (this.avatarConfig) this.setAvatar(this.avatarConfig);
 
     this.follow = new FollowCamera(this.camera, this.controller);
     this.follow.snapBehind();
@@ -170,6 +178,54 @@ export class PaqoWorld {
         if (!this.disposed) this.renderer.compile(this.scene, this.camera);
         this.onReady?.();
       });
+  }
+
+  /**
+   * Aplica una configuración de avatar (arquetipo + tinte). El tinte se aplica
+   * de inmediato sobre el rig actual. Si hay `archetypeUrl`, intenta cargar el GLB
+   * (caché compartida) y, al terminar, sustituye el rig en caliente conservando
+   * la posición; si falla (404 → “aún duerme”), avisa por `onArchetypeMissing` y
+   * se queda con el rig actual. Sirve tanto en el arranque como al cambiar de
+   * avatar desde el selector, sin recrear el mundo.
+   */
+  setAvatar(cfg: AvatarConfig): void {
+    this.avatarConfig = cfg;
+    const colors = PaqoWorld.tintToColors(cfg.tint);
+    if (colors) this.controller.getRig()?.setTint(colors);
+
+    const url = cfg.archetypeUrl;
+    if (!url) return;
+    loadAvatarRigShared(url)
+      .then((rig) => {
+        if (this.disposed) {
+          rig.dispose();
+          return;
+        }
+        this.controller.setRig(rig);
+        if (colors) rig.setTint(colors);
+        cfg.onArchetypeLoaded?.(url);
+      })
+      .catch((err) => {
+        console.warn(`[avatar] arquetipo no disponible (${url}); sigue el maniquí:`, err);
+        cfg.onArchetypeMissing?.(url);
+      });
+  }
+
+  /** Convierte tintes hex de la config a THREE.Color (o null si no hay ninguno). */
+  private static tintToColors(
+    tint?: Partial<Record<TintZone, string>>,
+  ): Partial<Record<TintZone, THREE.Color>> | null {
+    if (!tint) return null;
+    const out: Partial<Record<TintZone, THREE.Color>> = {};
+    let any = false;
+    for (const zone of Object.keys(tint) as TintZone[]) {
+      const hex = tint[zone];
+      if (hex) {
+        out[zone] = new THREE.Color(hex);
+        any = true;
+      }
+    }
+    return any ? out : null;
   }
 
   /** Error de anclaje al suelo (m): |pies − heightAt|. Para la métrica de QA. */

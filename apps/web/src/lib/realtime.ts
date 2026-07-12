@@ -24,6 +24,7 @@ import type {
   SupabaseClient,
 } from "@supabase/supabase-js";
 import { ensureAnonSession, getSupabaseBrowserClient } from "./supabase";
+import { getStoredArchetypeUrl, getStoredPrimaryTint } from "./avatar-store";
 
 // --- Contrato con el engine (lo implementa el equipo PaqoWorld) --------------
 export interface WorldNetHooks {
@@ -34,7 +35,15 @@ export interface WorldNetHooks {
   ): () => void;
   upsertRemote(
     id: string,
-    s: { pos: [number, number, number]; yaw: number; anim: string; tint?: string; name?: string }
+    s: {
+      pos: [number, number, number];
+      yaw: number;
+      anim: string;
+      tint?: string;
+      name?: string;
+      /** URL del GLB del arquetipo del remoto (si eligió uno). */
+      archetype?: string;
+    }
   ): void;
   removeRemote(id: string): void;
   onBallKick(
@@ -62,6 +71,7 @@ export interface RosterMember {
   id: string;
   display_name: string;
   tint?: string;
+  archetype?: string;
 }
 
 export type RealtimeStatus = "idle" | "connecting" | "live" | "error";
@@ -71,6 +81,8 @@ export interface RealtimeIdentity {
   sessionId: string;
   displayName: string;
   tint: string;
+  /** URL del GLB del arquetipo elegido (si hay), para que los demás te vean así. */
+  archetype?: string;
   /** true si la sesión es de un usuario registrado (no anónimo). */
   registered: boolean;
   accessToken: string | null;
@@ -108,6 +120,7 @@ interface PosPayload {
   anim: string;
   tint?: string;
   name?: string;
+  archetype?: string;
 }
 interface BallPayload {
   by: string;
@@ -146,7 +159,9 @@ export class BiosphereRealtime {
       this.identity = {
         sessionId: user.id,
         displayName: this.opts.displayName,
-        tint: this.opts.tint,
+        // El color/arquetipo del avatar elegido manda sobre el tinte por defecto.
+        tint: getStoredPrimaryTint() ?? this.opts.tint,
+        archetype: getStoredArchetypeUrl(),
         registered: user.is_anonymous !== true,
         accessToken: session.access_token ?? null,
       };
@@ -175,12 +190,18 @@ export class BiosphereRealtime {
         id: string;
         display_name: string;
         tint?: string;
+        archetype?: string;
       }>;
       const members: RosterMember[] = [];
       for (const key of Object.keys(state)) {
         const meta = state[key][0];
         if (!meta) continue;
-        members.push({ id: meta.id ?? key, display_name: meta.display_name ?? "Viajero", tint: meta.tint });
+        members.push({
+          id: meta.id ?? key,
+          display_name: meta.display_name ?? "Viajero",
+          tint: meta.tint,
+          archetype: meta.archetype,
+        });
       }
       this.opts.onRoster?.(members);
     });
@@ -196,6 +217,7 @@ export class BiosphereRealtime {
         anim: payload.anim,
         tint: payload.tint,
         name: payload.name,
+        archetype: payload.archetype,
       });
     });
 
@@ -224,7 +246,12 @@ export class BiosphereRealtime {
       if (this.disposed) return;
       if (status === "SUBSCRIBED") {
         this.opts.onStatus?.("live");
-        void channel.track({ id: me.sessionId, display_name: me.displayName, tint: me.tint });
+        void channel.track({
+          id: me.sessionId,
+          display_name: me.displayName,
+          tint: me.tint,
+          archetype: me.archetype,
+        });
         this.wireWorldNet();
         this.startSweep();
       } else if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
@@ -256,6 +283,8 @@ export class BiosphereRealtime {
       const me = this.identity;
       const ch = this.channel;
       if (!me || !ch) return;
+      // Lee tinte/arquetipo frescos: si el viajero cambia de avatar en caliente,
+      // los demás lo ven al instante (sin tocar el chat ni reconectar).
       void ch.send({
         type: "broadcast",
         event: "pos",
@@ -264,8 +293,9 @@ export class BiosphereRealtime {
           pos: s.pos,
           yaw: s.yaw,
           anim: s.anim,
-          tint: me.tint,
+          tint: getStoredPrimaryTint() ?? me.tint,
           name: me.displayName,
+          archetype: getStoredArchetypeUrl() ?? me.archetype,
         } satisfies PosPayload,
       });
     }, POS_HZ);

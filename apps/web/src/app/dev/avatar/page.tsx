@@ -1,10 +1,13 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { AvatarLab, type LabMode } from "./lab";
+import { AvatarLab, type LabMode, type ClipInfo } from "./lab";
+import { avatarFileNames } from "@/lib/avatars";
 import styles from "./avatar.module.css";
 
 const MODES: LabMode[] = ["idle", "walk", "run", "jump"];
+const LOCOMOTIONS: LabMode[] = ["idle", "walk", "run", "jump"];
+const AVATAR_NAMES = avatarFileNames(); // los 18 nombres de la convención
 
 /** Paletas de prueba para setTint (3 swatches). */
 const PALETTES: { name: string; primary: string; secondary: string; hair: string }[] = [
@@ -36,6 +39,7 @@ function AvatarLabView() {
   const [mode, setMode] = useState<LabMode>("idle");
   const [glb, setGlb] = useState("");
   const [toast, setToast] = useState<string | null>(null);
+  const [clips, setClips] = useState<ClipInfo | null>(null);
 
   useEffect(() => {
     const el = mountRef.current;
@@ -64,16 +68,20 @@ function AvatarLabView() {
     labRef.current?.setTint({ primary: p.primary, secondary: p.secondary, hair: p.hair });
   };
 
-  const tryLoad = async () => {
-    const name = glb.trim();
-    if (!name) return;
-    const res = await labRef.current?.loadGlb(name);
+  const loadName = async (name: string) => {
+    const clean = name.trim();
+    if (!clean) return;
+    const res = await labRef.current?.loadGlb(clean);
     if (res && !res.ok) {
-      setToast(`No se pudo cargar “${name}.glb”. Sigue el maniquí de prueba. (${res.error ?? "error"})`);
+      setClips(null);
+      setToast(`No se pudo cargar “${clean}.glb”. Sigue el maniquí de prueba. (${res.error ?? "error"})`);
     } else if (res?.ok) {
-      setToast(`Cargado ${name}.glb ✓`);
+      setClips(res.clips);
+      setToast(`Cargado ${clean}.glb ✓`);
     }
   };
+
+  const tryLoad = () => loadName(glb);
 
   return (
     <main className={styles.stage}>
@@ -124,6 +132,33 @@ function AvatarLabView() {
         </div>
 
         <div>
+          <div className={styles.label}>Arquetipos (convención)</div>
+          <div className={styles.glbRow}>
+            <select
+              className={styles.input}
+              value=""
+              onChange={(e) => {
+                const name = e.target.value;
+                if (!name) return;
+                setGlb(name);
+                void loadName(name);
+              }}
+              aria-label="Elegir arquetipo por nombre"
+            >
+              <option value="">— elige uno de los 18 —</option>
+              {AVATAR_NAMES.map((n) => (
+                <option key={n} value={n}>
+                  {n}
+                </option>
+              ))}
+            </select>
+          </div>
+          <p className={styles.hint}>
+            Prueba de un clic los 18 nombres a medida que lleguen los riggeados.
+          </p>
+        </div>
+
+        <div>
           <div className={styles.label}>Cargar GLB Tripo3D</div>
           <div className={styles.glbRow}>
             <input
@@ -144,6 +179,33 @@ function AvatarLabView() {
             Busca en <code>/assets/avatars/&lt;nombre&gt;.glb</code>. Si falla, sigue el maniquí.
           </p>
         </div>
+
+        {clips && (
+          <div>
+            <div className={styles.label}>Clips del GLB</div>
+            <ul className={styles.clipMap}>
+              {LOCOMOTIONS.map((loco) => {
+                const real = clips.mapping[loco];
+                return (
+                  <li key={loco} className={styles.clipRow}>
+                    <span className={styles.clipKey}>{loco}</span>
+                    <span className={styles.clipArrow} aria-hidden>
+                      →
+                    </span>
+                    <span className={real ? styles.clipVal : styles.clipMissing}>
+                      {real ?? "—"}
+                    </span>
+                  </li>
+                );
+              })}
+            </ul>
+            <p className={styles.hint}>
+              {clips.names.length > 0
+                ? `Trae ${clips.names.length} clip(s): ${clips.names.join(", ")}`
+                : "El GLB no trae clips de animación."}
+            </p>
+          </div>
+        )}
       </section>
     </main>
   );

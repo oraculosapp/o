@@ -1,8 +1,23 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
-import { TestDummy, AvatarRig, type IAvatarRig, type AvatarDriveState, type TintZone } from "@phygitalia/engine";
+import {
+  TestDummy,
+  AvatarRig,
+  type IAvatarRig,
+  type AvatarDriveState,
+  type TintZone,
+  type Locomotion,
+} from "@phygitalia/engine";
 
 export type LabMode = "idle" | "walk" | "run" | "jump";
+
+/** Diagnóstico de clips que devuelve loadGlb (nombres reales + mapeo por locomoción). */
+export interface ClipInfo {
+  names: string[];
+  mapping: Record<Locomotion, string | null>;
+}
+
+export type LoadResult = { ok: true; clips: ClipInfo } | { ok: false; error?: string };
 
 /** Presets de estado de conducción por modo (para las animaciones del avatar). */
 const DRIVE: Record<Exclude<LabMode, "jump">, AvatarDriveState> = {
@@ -133,7 +148,7 @@ export class AvatarLab {
   }
 
   /** Intenta cargar un GLB real; si funciona, reemplaza al avatar actual. */
-  async loadGlb(name: string): Promise<{ ok: boolean; error?: string }> {
+  async loadGlb(name: string): Promise<LoadResult> {
     const url = `/assets/avatars/${name}.glb`;
     try {
       const rig = await AvatarRig.load(url, { dracoDecoderPath: "/draco/" });
@@ -143,7 +158,7 @@ export class AvatarLab {
       this.scene.add(rig.root);
       this.frameOnRig();
       this.setMode(this.mode === "jump" ? "idle" : this.mode);
-      return { ok: true };
+      return { ok: true, clips: rig.clipInfo };
     } catch (e) {
       return { ok: false, error: e instanceof Error ? e.message : String(e) };
     }
