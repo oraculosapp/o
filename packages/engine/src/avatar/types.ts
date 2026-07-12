@@ -61,7 +61,13 @@ export type PropSocket = "handR" | "handL" | "back";
  * (localStorage / jsonb del perfil) sin depender de THREE.
  */
 export interface AvatarConfig {
-  /** URL del GLB del arquetipo (p.ej. `/assets/avatars/hacker-m.glb`). */
+  /**
+   * Id del arquetipo procedural (p.ej. `hacker`, `vampiro`). Si está presente y es
+   * uno de los 9, el mundo construye el rig chibi PROCEDURAL (instantáneo, sin
+   * red) y lo usa — es el camino preferido. Tiene prioridad sobre `archetypeUrl`.
+   */
+  archetype?: string;
+  /** URL del GLB del arquetipo (legado; sólo se intenta si no hay `archetype`). */
   archetypeUrl?: string;
   /** Tinte por zona (hex). Blanco/omitido = sin cambio. */
   tint?: Partial<Record<TintZone, string>>;

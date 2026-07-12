@@ -30,6 +30,15 @@ export const ARCHETYPES: readonly Archetype[] = [
   { id: "dedo-verde", name: "Dedo Verde" },
 ] as const;
 
+/**
+ * Los 9 ids en orden (fuente de verdad para el selector/splash PROCEDURAL). Todos
+ * DISPONIBLES: los avatares son chibi rigged construidos en código por el engine
+ * (`buildArchetype(id)`), así que no hay GLB que pueda faltar ni estado “aún
+ * duerme”. El selector consume por id; el mundo obtiene el rig con
+ * `buildArchetype`. Sin género: son 9 avatares distintos.
+ */
+export const ARCHETYPE_IDS: readonly string[] = ARCHETYPES.map((a) => a.id);
+
 /** ¿Existe un arquetipo con ese id? */
 export function isArchetypeId(id: string): boolean {
   return ARCHETYPES.some((a) => a.id === id);

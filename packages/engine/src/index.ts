@@ -16,6 +16,26 @@ export { SimplexNoise } from "./noise";
 export { AvatarRig, type AvatarRigOptions, type AvatarSource } from "./avatar/AvatarRig";
 export { loadAvatarRigShared, clearAvatarGLTFCache } from "./avatar/AvatarGLTFCache";
 export { TestDummy } from "./avatar/TestDummy";
+// Avatares arquetipo PROCEDURALES (chibi rigged, cero assets).
+export {
+  ChibiAvatar,
+  buildChibi,
+  type ArchetypeSpec,
+  type ChibiPalette,
+  type HeadPiece,
+  type PropKind,
+  type HairStyle,
+  type DecalKind,
+} from "./avatar/ChibiAvatar";
+export {
+  ARCHETYPE_IDS,
+  ARCHETYPE_SPECS,
+  buildArchetype,
+  archetypeSpec,
+  isArchetypeId as isProceduralArchetypeId,
+  type ArchetypeId,
+} from "./avatar/archetypes";
+export { ArchetypePreview, type ArchetypePreviewOptions } from "./avatar/ArchetypePreview";
 export { AnimationDriver, type Locomotion } from "./avatar/AnimationDriver";
 export { ProceduralLocomotion, type LocomotionQA } from "./avatar/ProceduralLocomotion";
 export { TintController, toToonMaterial, avatarToonRamp, type HueBand } from "./avatar/tint";

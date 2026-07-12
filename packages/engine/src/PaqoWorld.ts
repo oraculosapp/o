@@ -2,6 +2,7 @@ import * as THREE from "three";
 import { Island } from "./island/Island";
 import { CharacterController } from "./controller/CharacterController";
 import { TestDummy } from "./avatar/TestDummy";
+import { buildArchetype, isArchetypeId as isProceduralArchetype } from "./avatar/archetypes";
 import { loadAvatarRigShared } from "./avatar/AvatarGLTFCache";
 import type { AvatarConfig, TintZone } from "./avatar/types";
 import { FollowCamera } from "./camera/FollowCamera";
@@ -201,6 +202,22 @@ export class PaqoWorld {
     const colors = PaqoWorld.tintToColors(cfg.tint);
     if (colors) this.controller.getRig()?.setTint(colors);
 
+    // Camino preferido: arquetipo PROCEDURAL por id. Instantáneo (sin red): se
+    // construye el chibi rigged y se hace hot-swap conservando los pies. Los 9
+    // siempre existen (son código), así que nunca cae a “aún duerme”.
+    if (cfg.archetype && isProceduralArchetype(cfg.archetype)) {
+      try {
+        const rig = buildArchetype(cfg.archetype);
+        this.controller.setRig(rig);
+        if (colors) rig.setTint(colors);
+        cfg.onArchetypeLoaded?.(cfg.archetype);
+      } catch (err) {
+        console.warn(`[avatar] no se pudo construir el arquetipo procedural ${cfg.archetype}:`, err);
+      }
+      return;
+    }
+
+    // Legado: GLB por URL (se conserva para modelos reales futuros).
     const url = cfg.archetypeUrl;
     if (!url) return;
     loadAvatarRigShared(url)

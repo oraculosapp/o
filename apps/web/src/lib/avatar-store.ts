@@ -30,6 +30,9 @@ export interface AvatarSelection {
 
 /** Config serializable que se pasa a PaqoWorld (hex, no THREE). */
 export interface AvatarWorldConfig {
+  /** Id del arquetipo PROCEDURAL — el mundo construye el chibi con `buildArchetype`. */
+  archetype: string;
+  /** URL del GLB (legado; el mundo la ignora si hay `archetype` procedural válido). */
   archetypeUrl: string;
   tint: AvatarTint;
 }
@@ -93,9 +96,17 @@ export function storeAvatar(sel: AvatarSelection): void {
   }
 }
 
-/** Config del mundo derivada de una selección. */
+/**
+ * Config del mundo derivada de una selección. Incluye el `archetype` (id) para el
+ * camino PROCEDURAL — el mundo construye el chibi al instante — y conserva
+ * `archetypeUrl` por compatibilidad con el camino GLB legado.
+ */
 export function worldConfigFromSelection(sel: AvatarSelection): AvatarWorldConfig {
-  return { archetypeUrl: archetypeUrl(sel.archetype, sel.gender), tint: sel.tint };
+  return {
+    archetype: sel.archetype,
+    archetypeUrl: archetypeUrl(sel.archetype, sel.gender),
+    tint: sel.tint,
+  };
 }
 
 /** URL del GLB del arquetipo almacenado (o undefined) — la usa la presencia. */
