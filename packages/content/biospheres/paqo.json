@@ -2,11 +2,11 @@
   "id": "paqo",
   "mood": ["brumoso", "receptivo", "umbral"],
   "palette": {
-    "primary": "#3B4A3F",
-    "secondary": "#8FA98C",
-    "accent": "#A8B84E",
-    "ground": "#5C6B5A",
-    "sky": "#E8ECEA"
+    "primary": "#3C4636",
+    "secondary": "#93A17C",
+    "accent": "#B0BA4E",
+    "ground": "#6B6253",
+    "sky": "#F3A6A0"
   },
   "terrain": {
     "type": "valley",
@@ -19,21 +19,21 @@
     "grass": { "density": 0.85, "height": 1.4, "windSway": 0.6 },
     "trees": { "type": "gnarled", "density": 0.35, "mossHang": true, "clusterAtEdges": true },
     "shrubs": { "type": "fern", "density": 0.4 },
-    "flowers": { "density": 0.15, "colors": ["#E8ECEA", "#E67E22"] },
+    "flowers": { "density": 0.15, "colors": ["#9B5DE5", "#F4C542"] },
     "special": { "type": "none" }
   },
   "water": {
     "present": true,
     "bodies": ["stream", "waterfalls", "glacialLake"],
-    "color": "#C9D2CE",
+    "color": "#C7A9C6",
     "flowSpeed": 0.4,
     "foam": 0.7,
     "reflectivity": 0.5
   },
   "sky": {
-    "preset": "overcastDawn",
-    "gradientTop": "#E8ECEA",
-    "gradientBottom": "#C9D2CE",
+    "preset": "flamingoDusk",
+    "gradientTop": "#F3A6A0",
+    "gradientBottom": "#FFD9A8",
     "sunVisible": false,
     "moon": false,
     "stars": false,
@@ -41,23 +41,23 @@
     "godrays": { "enabled": false }
   },
   "lighting": {
-    "keyColor": "#DCE4E2",
-    "keyIntensity": 0.7,
+    "keyColor": "#FFCF8A",
+    "keyIntensity": 1.05,
     "keyAngle": 25,
-    "ambientColor": "#B8C4C0",
-    "ambientIntensity": 0.6,
+    "ambientColor": "#433A6B",
+    "ambientIntensity": 0.78,
+    "skyBounceColor": "#EFC5BC",
     "shadowSoftness": 0.9,
     "celBands": 3
   },
   "fog": {
     "type": "exp2",
-    "color": "#D8E0DE",
+    "color": "#C9A8D4",
     "density": 0.045,
     "groundLayer": { "enabled": true, "height": 6, "rolling": true }
   },
   "particles": [
-    { "type": "mist", "density": 0.6, "color": "#FFFFFF", "size": 0.4 },
-    { "type": "spores", "density": 0.3, "color": "#C9D2CE" },
+    { "type": "pixels", "density": 0.65, "colors": ["#E3B063", "#F2A6B8", "#C9A8D4"], "size": 0.35, "interactive": true },
     { "type": "spray", "density": 0.2, "anchor": "waterfalls" }
   ],
   "props": [
@@ -66,8 +66,8 @@
     { "type": "totemMount", "count": 1, "placement": "centralClearing", "scale": 8 }
   ],
   "postFx": {
-    "bloom": 0.3,
-    "outline": { "enabled": true, "thickness": 1.5, "color": "#0E1512" },
-    "colorGrade": "cool"
+    "bloom": 0.38,
+    "outline": { "enabled": true, "thickness": 1.5, "color": "#2E2140" },
+    "colorGrade": "mysticViolet"
   }
 }

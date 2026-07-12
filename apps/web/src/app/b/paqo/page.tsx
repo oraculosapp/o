@@ -6,6 +6,7 @@ import paqo from "@phygitalia/content/biospheres/paqo.json";
 import { PerfOverlay } from "@/components/dev/PerfOverlay";
 import { ChatDock } from "@/components/chat/ChatDock";
 import { HintToasts } from "@/components/hints/HintToasts";
+import { HudControls } from "@/components/notifications/HudControls";
 import type { WorldNetHooks } from "@/lib/realtime";
 import styles from "./paqo.module.css";
 
@@ -47,6 +48,9 @@ export default function PaqoBiosphere() {
           world.net (sólo pierde presencia) y sin Supabase se oculta con aviso. */}
       <ChatDock biosphereId={BIOSPHERE_ID} getWorldNet={getWorldNet} />
       <HintToasts oracleId={BIOSPHERE_ID} getWorldNet={getWorldNet} />
+
+      {/* Campanita de notificaciones + enlace al perfil (arriba-derecha). */}
+      <HudControls />
 
       {!ready && (
         <div className={styles.loader} role="status" aria-live="polite">

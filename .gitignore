@@ -22,3 +22,5 @@ Thumbs.db
 
 # modelos fuente crudos (viven solo en disco; al repo van los optimizados de public/)
 assets/**/*.glb
+apps/web/tsconfig.tsbuildinfo
+*.tsbuildinfo

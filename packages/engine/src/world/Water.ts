@@ -171,7 +171,8 @@ export class Water {
       uniforms: {
         uTime: { value: 0 },
         uColor: { value: new THREE.Color(this.preset.water?.color ?? "#C9D2CE") },
-        uFoam: { value: new THREE.Color(0xffffff) },
+        // Espuma en blanco rosado: el agua refleja el rosa del cielo flamingo.
+        uFoam: { value: new THREE.Color(0xffe9ef) },
         uOpacity: { value: mode === 2 ? 0.85 : 0.72 },
         uMode: { value: mode },
         uFoamAmt: { value: this.preset.water?.foam ?? 0.7 },

@@ -1,19 +1,17 @@
 import * as THREE from "three";
 import type { IslandField } from "../island/IslandField";
 import type { BiospherePreset } from "../planet/types";
-import { makeSoftCircleTexture } from "../util/toon";
 
 /**
- * Atmósfera de Paqo (la niebla es PROTAGONISTA): capas de niebla baja rodante
- * sobre el claro + esporas/polen lentas cerca de la vegetación + MAR DE NIEBLA
- * bajo la isla (planos enormes con scroll de ruido por debajo del filo) para que
- * mirar hacia el abismo se sienta como un vacío brumoso. Complementa el fog exp2
- * y la cúpula de cielo de PaqoWorld.
+ * Atmósfera de Paqo (la niebla LILA es PROTAGONISTA): capas de niebla baja
+ * rodante sobre el claro + MAR DE NIEBLA bajo la isla (planos enormes con scroll
+ * de ruido por debajo del filo) para que mirar hacia el abismo se sienta como un
+ * vacío brumoso malva. Complementa el fog exp2 y la cúpula de cielo flamingo de
+ * PaqoWorld. Las motas cercanas ahora las lleva PixelSwarm (píxeles interactivos).
  */
 export class Atmosphere {
   readonly group = new THREE.Group();
   private fogMats: THREE.ShaderMaterial[] = [];
-  private sporeMat?: THREE.ShaderMaterial;
   private disposables: (THREE.BufferGeometry | THREE.Material | THREE.Texture)[] = [];
   private fogShells: THREE.Mesh[] = [];
 
@@ -25,7 +23,6 @@ export class Atmosphere {
   build(): void {
     this.buildRollingFog();
     this.buildFogSea();
-    this.buildSpores();
   }
 
   addTo(scene: THREE.Scene): void {
@@ -34,7 +31,6 @@ export class Atmosphere {
 
   update(dt: number, t: number): void {
     for (const m of this.fogMats) m.uniforms.uTime.value = t;
-    if (this.sporeMat) this.sporeMat.uniforms.uTime.value = t;
     // Deriva lenta de las capas altas para que "rueden" sobre el claro.
     for (let i = 0; i < this.fogShells.length; i++) {
       this.fogShells[i].rotateOnAxis(new THREE.Vector3(0, 0, 1), dt * (0.008 + i * 0.004));
@@ -137,65 +133,6 @@ export class Atmosphere {
       this.fogMats.push(mat);
       this.disposables.push(geo, mat);
     }
-  }
-
-  // ---- esporas / polen lentas cerca de la vegetación ----
-
-  private buildSpores(): void {
-    const count = 380;
-    const positions = new Float32Array(count * 3);
-    const phases = new Float32Array(count);
-    for (let i = 0; i < count; i++) {
-      // Anillo alrededor del claro (donde vive la vegetación), a poca altura.
-      const r = 3 + Math.random() * 22;
-      const phi = Math.random() * Math.PI * 2;
-      const x = Math.cos(phi) * r;
-      const z = Math.sin(phi) * r;
-      const h = this.field.heightAt(x, z);
-      const lift = 0.5 + Math.random() * 4.5;
-      positions[i * 3] = x;
-      positions[i * 3 + 1] = h + lift;
-      positions[i * 3 + 2] = z;
-      phases[i] = Math.random() * Math.PI * 2;
-    }
-    const geo = new THREE.BufferGeometry();
-    geo.setAttribute("position", new THREE.BufferAttribute(positions, 3));
-    geo.setAttribute("aPhase", new THREE.BufferAttribute(phases, 1));
-    const tex = makeSoftCircleTexture("rgba(232,236,234,0.9)");
-    const mat = new THREE.ShaderMaterial({
-      transparent: true,
-      depthWrite: false,
-      uniforms: {
-        uTime: { value: 0 },
-        uTex: { value: tex },
-        uColor: { value: new THREE.Color(this.preset.palette?.secondary ?? "#8FA98C") },
-      },
-      vertexShader: /* glsl */ `
-        attribute float aPhase; uniform float uTime; varying float vA;
-        void main(){
-          vec3 p = position;
-          float s = sin(uTime * 0.25 + aPhase);
-          float c = cos(uTime * 0.2 + aPhase);
-          p += vec3(c, s * 0.6, s) * 0.7;
-          vA = 0.35 + 0.35 * (0.5 + 0.5 * sin(uTime * 0.5 + aPhase));
-          vec4 mv = modelViewMatrix * vec4(p, 1.0);
-          gl_PointSize = 6.0 * (60.0 / -mv.z);
-          gl_Position = projectionMatrix * mv;
-        }
-      `,
-      fragmentShader: /* glsl */ `
-        uniform sampler2D uTex; uniform vec3 uColor; varying float vA;
-        void main(){
-          vec4 t = texture2D(uTex, gl_PointCoord);
-          gl_FragColor = vec4(uColor, t.a * vA);
-        }
-      `,
-    });
-    this.sporeMat = mat;
-    const points = new THREE.Points(geo, mat);
-    points.frustumCulled = false;
-    this.group.add(points);
-    this.disposables.push(geo, mat, tex);
   }
 
   dispose(): void {

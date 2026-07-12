@@ -4,10 +4,11 @@ import { CharacterController } from "./controller/CharacterController";
 import { TestDummy } from "./avatar/TestDummy";
 import { FollowCamera } from "./camera/FollowCamera";
 import { InputManager } from "./input/InputManager";
-import { makeToonRamp, makeSoftCircleTexture } from "./util/toon";
+import { makeToonRamp } from "./util/toon";
 import { Vegetation } from "./world/Vegetation";
 import { Water } from "./world/Water";
 import { Atmosphere } from "./world/Atmosphere";
+import { PixelSwarm } from "./world/PixelSwarm";
 import { Totem } from "./world/Totem";
 import { BloomComposer } from "./postfx/BloomComposer";
 import { WorldNet } from "./net/WorldNet";
@@ -37,7 +38,7 @@ export class PaqoWorld {
   private input!: InputManager;
 
   private rune!: THREE.Mesh;
-  private mist!: THREE.Points;
+  private pixels!: PixelSwarm;
   private marker!: THREE.Mesh;
   private moveTarget: THREE.Vector3 | null = null;
   private markerLife = 0;
@@ -64,6 +65,8 @@ export class PaqoWorld {
   private _worldDir = new THREE.Vector3();
   private _ray = new THREE.Raycaster();
   private _ndc = new THREE.Vector2();
+  private _pointerNdc = new THREE.Vector2();
+  private _pointerWorld = new THREE.Vector3();
   private static readonly UP = new THREE.Vector3(0, 1, 0);
 
   /** Spawn a ~7 u del tótem (origen), mirándolo; laderas del anfiteatro de fondo. */
@@ -84,7 +87,6 @@ export class PaqoWorld {
     this.island.addTo(this.scene);
 
     this.buildRune();
-    this.buildMist();
     this.buildMarker();
     this.buildFade();
 
@@ -99,6 +101,10 @@ export class PaqoWorld {
     this.atmosphere = new Atmosphere(this.island.field, this.preset);
     this.atmosphere.build();
     this.atmosphere.addTo(this.scene);
+
+    // Enjambre de píxeles interactivos (oro/rosa/lila) — reemplaza bruma/esporas.
+    this.pixels = new PixelSwarm(this.island.field, this.preset);
+    this.pixels.addTo(this.scene);
 
     this.rig = new TestDummy();
     this.controller = new CharacterController(this.island, this.spawnPos, this.rig);
@@ -211,10 +217,21 @@ export class PaqoWorld {
     });
     this.scene.add(new THREE.Mesh(skyGeo, skyMat));
 
-    const key = new THREE.DirectionalLight(0xf6dca0, 1.05);
+    // Luz key ÁMBAR dorada cálida; rebote de cielo cálido y rebote de suelo MORADO
+    // (HemisphereLight) → sombras que viran a malva sin pass extra. Preset-driven.
+    const lg = this.preset.lighting ?? {};
+    const key = new THREE.DirectionalLight(new THREE.Color(lg.keyColor ?? "#FFCF8A"), lg.keyIntensity ?? 1.05);
     key.position.set(80, 120, 60);
     this.scene.add(key);
-    this.scene.add(new THREE.HemisphereLight(0xe8ecea, 0x3b4a3f, 0.95));
+    // Intensidad contenida (0.78) y rebote apenas enfriado para que el atardecer
+    // bañe el valle SIN lavar el alma verde del terreno.
+    this.scene.add(
+      new THREE.HemisphereLight(
+        new THREE.Color(lg.skyBounceColor ?? "#EFC5BC"),
+        new THREE.Color(lg.ambientColor ?? "#433A6B"),
+        lg.ambientIntensity ?? 0.78,
+      ),
+    );
   }
 
   /** Anillo-runa emisivo dorado en el suelo del claro (origen), plano. */
@@ -231,32 +248,6 @@ export class PaqoWorld {
     this.rune.position.copy(p).add(new THREE.Vector3(0, 0.4, 0));
     this.rune.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), PaqoWorld.UP);
     this.scene.add(this.rune);
-  }
-
-  private buildMist(): void {
-    const count = 260;
-    const positions = new Float32Array(count * 3);
-    for (let i = 0; i < count; i++) {
-      // Motas flotando sobre la isla y derramándose hacia el abismo.
-      const r = Math.random() * 90;
-      const a = Math.random() * Math.PI * 2;
-      positions[i * 3] = Math.cos(a) * r;
-      positions[i * 3 + 1] = -10 + Math.random() * 55;
-      positions[i * 3 + 2] = Math.sin(a) * r;
-    }
-    const geo = new THREE.BufferGeometry();
-    geo.setAttribute("position", new THREE.BufferAttribute(positions, 3));
-    const mat = new THREE.PointsMaterial({
-      size: 3.0,
-      map: makeSoftCircleTexture("rgba(255,255,255,0.85)"),
-      transparent: true,
-      opacity: 0.42,
-      depthWrite: false,
-      sizeAttenuation: true,
-    });
-    this.mist = new THREE.Points(geo, mat);
-    this.mist.frustumCulled = false;
-    this.scene.add(this.mist);
   }
 
   private buildMarker(): void {
@@ -303,6 +294,21 @@ export class PaqoWorld {
 
   private clearMoveTarget(): void {
     this.moveTarget = null;
+  }
+
+  /**
+   * Proyecta un NDC del puntero a un punto 3D en el área de juego: rayo de cámara
+   * a la distancia cámara→avatar (acotada) → el campo magnético queda alrededor
+   * de donde el jugador está mirando, sin necesitar raycast contra el terreno.
+   */
+  private projectPointer(ndc: THREE.Vector2): THREE.Vector3 {
+    this._ray.setFromCamera(ndc, this.camera);
+    const d = THREE.MathUtils.clamp(
+      this.camera.position.distanceTo(this.controller.position),
+      10,
+      120,
+    );
+    return this._pointerWorld.copy(this._ray.ray.origin).addScaledVector(this._ray.ray.direction, d);
   }
 
   private onResize = (): void => {
@@ -369,7 +375,13 @@ export class PaqoWorld {
 
     const runeMat = this.rune.material as THREE.MeshToonMaterial;
     runeMat.emissiveIntensity = 0.55 + Math.sin(t * 1.6) * 0.18;
-    this.mist.rotation.y -= dt * 0.008;
+
+    // Campo magnético del puntero: proyecta el cursor/dedo a un punto 3D del área
+    // de juego (a la distancia cámara→avatar) y alimenta el enjambre de píxeles.
+    const pointer = this.input.readPointer(this._pointerNdc)
+      ? this.projectPointer(this._pointerNdc)
+      : null;
+    this.pixels.update(dt, t, pointer);
 
     this.vegetation.update(dt, t);
     this.water.update(dt, t);
@@ -420,6 +432,7 @@ export class PaqoWorld {
     this.vegetation?.dispose();
     this.water?.dispose();
     this.atmosphere?.dispose();
+    this.pixels?.dispose();
     this.totem?.dispose();
     this.bloom?.dispose();
     this.island?.dispose();

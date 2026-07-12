@@ -1,0 +1,52 @@
+/* Controles del HUD arriba-derecha: campanita + enlace al perfil. */
+
+.cluster {
+  position: fixed;
+  top: 16px;
+  right: 16px;
+  z-index: 35;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+/* Enlace al perfil: mismo lenguaje que el icon-button de la campanita. */
+.profileLink {
+  display: inline-grid;
+  place-content: center;
+  width: 40px;
+  height: 40px;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  background: var(--panel);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  box-shadow: var(--shadow);
+  color: var(--text);
+  cursor: pointer;
+  transition:
+    transform var(--dur-fast) var(--ease-brand),
+    border-color var(--dur-fast) var(--ease-brand),
+    box-shadow var(--dur-fast) var(--ease-brand),
+    color var(--dur-fast) var(--ease-brand);
+}
+.profileLink:hover {
+  transform: translateY(-2px);
+  color: var(--gold-bright);
+  border-color: var(--gold-dim);
+  box-shadow:
+    var(--shadow),
+    0 0 20px var(--glow);
+}
+.profileLink:focus-visible {
+  outline: none;
+  border-color: var(--gold-dim);
+  box-shadow: 0 0 0 2px var(--glow);
+}
+
+@media (max-width: 640px) {
+  .cluster {
+    top: 12px;
+    right: 12px;
+  }
+}

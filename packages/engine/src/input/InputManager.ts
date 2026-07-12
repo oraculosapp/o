@@ -38,6 +38,11 @@ export class InputManager {
   private zoomDelta = 0;
   private joyVec = new THREE.Vector2(); // -1..1 desde el joystick táctil
 
+  // Puntero continuo en NDC (-1..1) para el campo magnético de las partículas.
+  // Mouse: sigue el hover. Táctil: sólo mientras un dedo arrastra.
+  private pointerNdc = new THREE.Vector2();
+  private pointerActive = false;
+
   /** Callback de tap-to-move con coords NDC (-1..1). Lo fija el mundo. */
   onTap: ((ndcX: number, ndcY: number) => void) | null = null;
   /** Se llama cuando el usuario da input manual de movimiento (cancela tap-to-move). */
@@ -96,6 +101,7 @@ export class InputManager {
     this.el.addEventListener("pointermove", this.onPointerMove);
     this.el.addEventListener("pointerup", this.onPointerUp);
     this.el.addEventListener("pointercancel", this.onPointerUp);
+    this.el.addEventListener("pointerleave", this.onPointerLeave);
     this.el.addEventListener("wheel", this.onWheel, { passive: false });
     this.el.addEventListener("contextmenu", this.preventCtx);
   }
@@ -156,6 +162,15 @@ export class InputManager {
   };
 
   private onPointerMove = (e: PointerEvent): void => {
+    // Puntero continuo para el campo magnético (hover de mouse o arrastre táctil).
+    const rectN = this.el.getBoundingClientRect();
+    this.pointerNdc.set(
+      ((e.clientX - rectN.left) / rectN.width) * 2 - 1,
+      -(((e.clientY - rectN.top) / rectN.height) * 2 - 1),
+    );
+    // El mouse ejerce campo al pasar (hover); el táctil sólo mientras toca.
+    this.pointerActive = e.pointerType !== "touch" || this.pointers.has(e.pointerId);
+
     const p = this.pointers.get(e.pointerId);
     if (!p) return;
     const dx = e.clientX - p.lastX;
@@ -182,7 +197,13 @@ export class InputManager {
     }
   };
 
+  private onPointerLeave = (e: PointerEvent): void => {
+    if (e.pointerType !== "touch") this.pointerActive = false;
+  };
+
   private onPointerUp = (e: PointerEvent): void => {
+    // El dedo deja de ejercer campo al levantarse.
+    if (e.pointerType === "touch") this.pointerActive = false;
     const p = this.pointers.get(e.pointerId);
     if (!p) return;
     this.pointers.delete(e.pointerId);
@@ -249,6 +270,16 @@ export class InputManager {
     return z;
   }
 
+  /**
+   * Puntero continuo en NDC para el campo magnético de las partículas. Devuelve
+   * `true` si el puntero está activo (mouse sobre el lienzo, o dedo arrastrando)
+   * y escribe su posición NDC en `out`.
+   */
+  readPointer(out: THREE.Vector2): boolean {
+    out.copy(this.pointerNdc);
+    return this.pointerActive;
+  }
+
   dispose(): void {
     window.removeEventListener("keydown", this.onKeyDown);
     window.removeEventListener("keyup", this.onKeyUp);
@@ -256,6 +287,7 @@ export class InputManager {
     this.el.removeEventListener("pointermove", this.onPointerMove);
     this.el.removeEventListener("pointerup", this.onPointerUp);
     this.el.removeEventListener("pointercancel", this.onPointerUp);
+    this.el.removeEventListener("pointerleave", this.onPointerLeave);
     this.el.removeEventListener("wheel", this.onWheel);
     this.el.removeEventListener("contextmenu", this.preventCtx);
     this.joyBase.remove();

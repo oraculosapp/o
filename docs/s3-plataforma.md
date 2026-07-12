@@ -336,3 +336,120 @@ grant all on public.profiles, public.progress, public.oracle_conversations,
 > Esta es una versión compacta del SQL (mismo efecto). La versión con todos los
 > comentarios está en `supabase/migrations/0001_init.sql`; cualquiera de las dos
 > produce el mismo esquema.
+
+---
+
+## 6. Migración 0002 — Notificaciones in-app (campanita del HUD)
+
+Añade la tabla `notifications` y **extiende `handle_new_user()`** para sembrar la
+notificación de bienvenida de Paqo. La usa la campanita del HUD (equipo Cuentas):
+`components/notifications/Bell.tsx` + `lib/notifications.ts`.
+
+### 6.1 Qué hace
+
+| Pieza | Detalle |
+|---|---|
+| Tabla `notifications` | `id, user_id, type, title, body, link, read_at, created_at` |
+| RLS | El dueño **lee** sus notificaciones y **sólo** puede actualizar `read_at` (grant de columna) |
+| Inserción | Ningún cliente inserta; sólo el trigger `security definer` y `service_role` |
+| Índice | `(user_id, created_at desc)` para el panel |
+| Realtime | `notifications` en `supabase_realtime` con `replica identity full` (INSERT + UPDATE de `read_at`) |
+| Bienvenida | `handle_new_user()` inserta `type='welcome'` "Paqo te dio la bienvenida a Phygitalia" (una por usuario) al crearse **cualquier** usuario, anónimo o registrado |
+
+> **Nota de comportamiento:** el trigger `on_auth_user_created` corre en cada alta
+> de `auth.users`, incluidos los **anónimos** (que se crean al entrar al mundo).
+> Por eso todo viajero recibe la bienvenida de Paqo desde el primer instante; el
+> guard `if not exists (… type='welcome')` evita duplicados. Al promover una
+> sesión anónima a registrada (magic-link) **no** se crea una fila nueva en
+> `auth.users`, así que no se duplica.
+
+### 6.2 Qué debe hacer el humano
+
+1. Abre <https://supabase.com/dashboard/project/kfgpxbwuyksrwzxuggif/sql/new>.
+2. Pega el SQL completo de abajo (§6.3) — o el contenido de
+   `supabase/migrations/0002_notifications.sql` — y pulsa **Run**. Debe terminar
+   con `Success. No rows returned`. Es **idempotente-segura** (re-ejecutar no
+   rompe: usa `if not exists` / `create or replace` / `drop policy if exists`).
+3. Verifica en **Table Editor** que existe `notifications`.
+4. Verifica Realtime: **Database → Publications → `supabase_realtime`** debe
+   listar ahora también `notifications`.
+5. (Ya cubierto por 0001) **Authentication → Providers → Anonymous → Enable**.
+
+Sin esta migración la campanita **degrada con gracia**: no muestra badge y el
+panel dice "Todo tranquilo por ahora" (los errores de tabla inexistente se
+capturan en `lib/notifications.ts`). No rompe el build ni el resto de la app.
+
+### 6.3 SQL completo (copiar y pegar)
+
+> Fuente canónica: `supabase/migrations/0002_notifications.sql`.
+
+```sql
+-- notifications ---------------------------------------------------------------
+create table if not exists public.notifications (
+  id         uuid primary key default gen_random_uuid(),
+  user_id    uuid not null references public.profiles (id) on delete cascade,
+  type       text not null default 'system',
+  title      text not null,
+  body       text,
+  link       text,
+  read_at    timestamptz,
+  created_at timestamptz not null default now()
+);
+create index if not exists idx_notifications_user_created
+  on public.notifications (user_id, created_at desc);
+alter table public.notifications enable row level security;
+alter table public.notifications replica identity full;
+
+drop policy if exists "notifications_owner_select" on public.notifications;
+create policy "notifications_owner_select" on public.notifications
+  for select using (auth.uid() = user_id);
+drop policy if exists "notifications_owner_update" on public.notifications;
+create policy "notifications_owner_update" on public.notifications
+  for update using (auth.uid() = user_id) with check (auth.uid() = user_id);
+
+do $$
+begin
+  if not exists (select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime' and schemaname = 'public'
+      and tablename = 'notifications') then
+    alter publication supabase_realtime add table public.notifications;
+  end if;
+end $$;
+
+-- Grants (el grant de columna acota el UPDATE del cliente a read_at) ----------
+grant select on public.notifications to authenticated;
+grant update (read_at) on public.notifications to authenticated;
+grant all on public.notifications to service_role;
+
+-- handle_new_user() extendido: + bienvenida de Paqo --------------------------
+create or replace function public.handle_new_user()
+returns trigger language plpgsql security definer set search_path = public as $$
+declare base_handle citext; candidate citext; suffix text;
+begin
+  base_handle := lower(regexp_replace(
+    coalesce(split_part(new.email, '@', 1), 'viajero'), '[^a-z0-9_]', '', 'g'));
+  if base_handle is null or length(base_handle) = 0 then base_handle := 'viajero'; end if;
+  suffix := substr(replace(new.id::text, '-', ''), 1, 6);
+  candidate := base_handle || '-' || suffix;
+  insert into public.profiles (id, handle) values (new.id, candidate)
+    on conflict (id) do nothing;
+  insert into public.progress (user_id) values (new.id)
+    on conflict (user_id) do nothing;
+  if not exists (select 1 from public.notifications
+                 where user_id = new.id and type = 'welcome') then
+    insert into public.notifications (user_id, type, title, body, link)
+    values (new.id, 'welcome',
+      'Paqo te dio la bienvenida a Phygitalia',
+      'El anfitrión de barro te reconoce. Completa tu perfil para que los Oráculos te recuerden.',
+      '/usuario');
+  end if;
+  return new;
+end;
+$$;
+drop trigger if exists on_auth_user_created on auth.users;
+create trigger on_auth_user_created after insert on auth.users
+  for each row execute function public.handle_new_user();
+```
+
+> La versión compacta de arriba produce el mismo efecto que
+> `supabase/migrations/0002_notifications.sql` (que incluye todos los comentarios).

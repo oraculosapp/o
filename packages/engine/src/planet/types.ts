@@ -36,10 +36,20 @@ export interface BiospherePreset {
     reflectivity?: number;
   };
   sky: { gradientTop: string; gradientBottom: string };
+  lighting?: {
+    keyColor?: string;
+    keyIntensity?: number;
+    ambientColor?: string;
+    ambientIntensity?: number;
+    /** Rebote cálido del cielo para la HemisphereLight (cara superior). */
+    skyBounceColor?: string;
+  };
   fog: {
     color: string;
     density?: number;
     groundLayer?: { enabled?: boolean; height?: number; rolling?: boolean };
   };
+  /** Colores de las partículas-píxel interactivas (oro/rosa/lila). El motor cae a defaults si falta. */
+  particles?: Array<{ type?: string; density?: number; color?: string; colors?: string[]; size?: number }>;
   postFx: { bloom?: number; outline: { color: string } };
 }
