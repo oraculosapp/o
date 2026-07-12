@@ -23,6 +23,12 @@ export interface OracleRequest {
   mode: OracleMode;
   messages: WireMessage[];
   conversationId?: string;
+  /**
+   * Canal de Biósfera al que pertenece esta conversación (chat público). Sólo
+   * relevante en `mode: "public"`: es la tabla/canal donde el Oráculo publica su
+   * respuesta con `is_oracle = true`. Si se omite, el handler usa `oracleId`.
+   */
+  biosphereId?: string;
 }
 
 export interface ValidationOk {
@@ -102,7 +108,15 @@ export function validateOracleRequest(body: unknown): ValidationResult {
     conversationId = b.conversationId;
   }
 
-  return { ok: true, value: { oracleId, mode, messages, conversationId } };
+  let biosphereId: string | undefined;
+  if (b.biosphereId !== undefined) {
+    if (typeof b.biosphereId !== "string" || !ORACLE_ID_RE.test(b.biosphereId)) {
+      return { ok: false, error: "biosphereId inválido (usa [a-z0-9-], 1-64 chars)." };
+    }
+    biosphereId = b.biosphereId;
+  }
+
+  return { ok: true, value: { oracleId, mode, messages, conversationId, biosphereId } };
 }
 
 /**

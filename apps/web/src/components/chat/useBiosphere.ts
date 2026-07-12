@@ -1,0 +1,150 @@
+"use client";
+
+import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  BiosphereRealtime,
+  isSupabaseConfigured,
+  type BiosphereMessage,
+  type RealtimeStatus,
+  type RosterMember,
+  type WorldNetHooks,
+} from "@/lib/realtime";
+import {
+  getStoredName,
+  mentionPaqoPublic,
+  mentionsPaqo,
+  pickTint,
+  storeName,
+} from "@/lib/oracle-client";
+
+const DEFAULT_NAME = "Viajero";
+const MAX_MESSAGES = 120;
+
+export interface UseBiosphere {
+  status: RealtimeStatus;
+  messages: BiosphereMessage[];
+  roster: RosterMember[];
+  name: string | null;
+  registered: boolean;
+  sessionId: string | null;
+  accessToken: string | null;
+  setName(name: string): void;
+  /** Publica en el chat abierto; si menciona a Paqo, dispara su respuesta pública. */
+  sendPublic(text: string): Promise<void>;
+}
+
+/**
+ * Ata el ciclo de vida de `BiosphereRealtime` a React: conecta al montar,
+ * limpia al desmontar, mantiene mensajes (con dedupe por id) y roster.
+ */
+export function useBiosphere(params: {
+  biosphereId: string;
+  getWorldNet?: () => WorldNetHooks | null | undefined;
+}): UseBiosphere {
+  const { biosphereId, getWorldNet } = params;
+  const [status, setStatus] = useState<RealtimeStatus>("idle");
+  const [messages, setMessages] = useState<BiosphereMessage[]>([]);
+  const [roster, setRoster] = useState<RosterMember[]>([]);
+  const [name, setNameState] = useState<string | null>(null);
+  const [registered, setRegistered] = useState(false);
+  const [sessionId, setSessionId] = useState<string | null>(null);
+  const [accessToken, setAccessToken] = useState<string | null>(null);
+
+  const rtRef = useRef<BiosphereRealtime | null>(null);
+  const seenIds = useRef<Set<string>>(new Set());
+  const getWorldNetRef = useRef(getWorldNet);
+  getWorldNetRef.current = getWorldNet;
+
+  const pushMessage = useCallback((msg: BiosphereMessage) => {
+    if (seenIds.current.has(msg.id)) return;
+    seenIds.current.add(msg.id);
+    setMessages((prev) => {
+      const next = [...prev, msg].sort((a, b) => a.created_at.localeCompare(b.created_at));
+      return next.length > MAX_MESSAGES ? next.slice(next.length - MAX_MESSAGES) : next;
+    });
+  }, []);
+
+  useEffect(() => {
+    // Sin Supabase no hay nada que conectar (la UI ya muestra el aviso discreto).
+    if (!isSupabaseConfigured()) {
+      setNameState(getStoredName());
+      return;
+    }
+    const initialName = getStoredName();
+    setNameState(initialName);
+    const tint = pickTint(biosphereId);
+
+    const rt = new BiosphereRealtime({
+      biosphereId,
+      getWorldNet: () => getWorldNetRef.current?.(),
+      displayName: initialName ?? DEFAULT_NAME,
+      tint,
+      onStatus: setStatus,
+      onRoster: setRoster,
+      onMessage: pushMessage,
+    });
+    rtRef.current = rt;
+
+    let cancelled = false;
+    void rt.connect().then(async () => {
+      if (cancelled) return;
+      const id = rt.getIdentity();
+      if (id) {
+        setSessionId(id.sessionId);
+        setRegistered(id.registered);
+        setAccessToken(id.accessToken);
+      }
+      const recent = await rt.loadRecent(40);
+      for (const m of recent) pushMessage(m);
+    });
+
+    return () => {
+      cancelled = true;
+      rt.disconnect();
+      rtRef.current = null;
+      seenIds.current.clear();
+    };
+    // biosphereId es estable durante la vida de la página.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [biosphereId]);
+
+  const setName = useCallback((next: string) => {
+    const clean = next.trim().slice(0, 40);
+    if (!clean) return;
+    storeName(clean);
+    setNameState(clean);
+    void rtRef.current?.setIdentity({ displayName: clean });
+  }, []);
+
+  const sendPublic = useCallback(
+    async (text: string) => {
+      const rt = rtRef.current;
+      if (!rt) return;
+      const trimmed = text.trim();
+      if (!trimmed) return;
+      const row = await rt.sendMessage(trimmed);
+      if (row) pushMessage(row); // eco optimista (postgres_changes deduplica)
+
+      if (mentionsPaqo(trimmed)) {
+        void mentionPaqoPublic({
+          biosphereId,
+          messages: [{ role: "user", content: trimmed }],
+          sessionId: rt.getIdentity()?.sessionId,
+        });
+      }
+    },
+    [biosphereId, pushMessage]
+  );
+
+  return {
+    status,
+    messages,
+    roster,
+    name,
+    registered,
+    sessionId,
+    accessToken,
+    setName,
+    sendPublic,
+  };
+}

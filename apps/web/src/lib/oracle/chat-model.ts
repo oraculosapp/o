@@ -73,7 +73,10 @@ function withTimeout(timeoutMs: number, external?: AbortSignal): { signal: Abort
 export function createOpenAiChatModel(config: OpenAiChatModelConfig): ChatModel {
   const {
     apiKey,
-    model = DEFAULT_MODEL,
+    // El modelo se parametriza por entorno: `ORACLE_MODEL` es la fuente canónica
+    // (default "gpt-5.4"); `OPENAI_MODEL` se conserva como alias heredado. Un
+    // `config.model` explícito (p.ej. desde un test) siempre gana.
+    model = process.env.ORACLE_MODEL ?? process.env.OPENAI_MODEL ?? DEFAULT_MODEL,
     baseUrl = DEFAULT_BASE_URL,
     timeoutMs = DEFAULT_TIMEOUT_MS,
     fetchImpl = globalThis.fetch,

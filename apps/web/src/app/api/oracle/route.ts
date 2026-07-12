@@ -32,6 +32,7 @@
 import { createOpenAiChatModel } from "../../../lib/oracle/chat-model";
 import { getOracleSystemPrompt } from "../../../lib/oracle/prompts";
 import { createRateLimiter } from "../../../lib/oracle/rate-limit";
+import { createCooldown } from "../../../lib/oracle/cooldown";
 import { getServiceClient } from "../../../lib/supabase-admin";
 import { createOracleRoute, type OracleRouteDeps } from "../../../lib/oracle/handler";
 
@@ -41,15 +42,20 @@ export const dynamic = "force-dynamic";
 // Rate-limit singleton por instancia (ver limitación serverless en rate-limit.ts).
 const rateLimiter = createRateLimiter({ limit: 20, windowMs: 60_000 });
 
+// Cooldown del chat público: 1 respuesta de Paqo cada 10 s por canal de Biósfera.
+const publicCooldown = createCooldown({ windowMs: 10_000 });
+
 const deps: OracleRouteDeps = {
   getSystemPrompt: getOracleSystemPrompt,
+  // El modelo se resuelve por entorno (`ORACLE_MODEL`) dentro de chat-model.ts.
   createChatModel: () => {
     const apiKey = process.env.OPENAI_API_KEY;
     if (!apiKey) return null;
-    return createOpenAiChatModel({ apiKey, model: process.env.OPENAI_MODEL || undefined });
+    return createOpenAiChatModel({ apiKey });
   },
   getServiceClient,
   rateLimiter,
+  publicCooldown,
 };
 
 export const POST = createOracleRoute(deps);

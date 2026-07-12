@@ -1,7 +1,9 @@
 import { describe, it, expect } from "vitest";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { createOracleRoute, type OracleRouteDeps } from "../../../../lib/oracle/handler";
 import { ChatModelError, type ChatMessage, type ChatModel } from "../../../../lib/oracle/chat-model";
 import { createRateLimiter } from "../../../../lib/oracle/rate-limit";
+import { createCooldown } from "../../../../lib/oracle/cooldown";
 
 // --- Helpers -----------------------------------------------------------------
 function makeReq(body: unknown, headers?: Record<string, string>): Request {
@@ -47,6 +49,32 @@ function baseDeps(over: Partial<OracleRouteDeps> = {}): OracleRouteDeps {
     ...over,
   };
 }
+
+/** Recoge los INSERT enviados a una tabla, imitando la superficie mínima de
+ *  SupabaseClient que usa el handler (`.from(table).insert(row)`). */
+interface Insert {
+  table: string;
+  row: Record<string, unknown>;
+}
+function captureServiceClient(sink: Insert[]): SupabaseClient {
+  return {
+    from(table: string) {
+      return {
+        insert: async (row: Record<string, unknown>) => {
+          sink.push({ table, row });
+          return { data: null, error: null };
+        },
+      };
+    },
+  } as unknown as SupabaseClient;
+}
+
+const publicBody = {
+  oracleId: "paqo",
+  mode: "public",
+  biosphereId: "paqo",
+  messages: [{ role: "user", content: "@paqo ¿a dónde voy?" }],
+};
 
 async function readSse(res: Response): Promise<Array<Record<string, unknown>>> {
   const text = await res.text();
@@ -139,5 +167,78 @@ describe("POST /api/oracle", () => {
     );
     const res = await POST(makeReq(validBody));
     expect(res.status).toBe(502);
+  });
+
+  it("en modo público inserta la respuesta en biosphere_messages con is_oracle=true", async () => {
+    const inserts: Insert[] = [];
+    const POST = createOracleRoute(
+      baseDeps({ getServiceClient: () => captureServiceClient(inserts) })
+    );
+    const res = await POST(makeReq(publicBody));
+    expect(res.status).toBe(200);
+    await readSse(res); // drena el stream hasta `done` (dispara la inserción)
+
+    const oracleInserts = inserts.filter((i) => i.table === "biosphere_messages");
+    expect(oracleInserts).toHaveLength(1);
+    expect(oracleInserts[0].row).toMatchObject({
+      biosphere_id: "paqo",
+      is_oracle: true,
+      user_id: null,
+      content: "Hola, viajero",
+    });
+    // display_name derivado del oracleId (capitalizado).
+    expect(oracleInserts[0].row.display_name).toBe("Paqo");
+  });
+
+  it("no inserta en el chat público si no hay service client", async () => {
+    const POST = createOracleRoute(baseDeps({ getServiceClient: () => null }));
+    const res = await POST(makeReq(publicBody));
+    expect(res.status).toBe(200);
+    const events = await readSse(res);
+    // Sigue haciendo streaming normal, sólo que no publica.
+    expect(events.at(-1)).toEqual({ type: "done" });
+  });
+
+  it("respeta el cooldown público por canal (1 respuesta por ventana)", async () => {
+    const inserts: Insert[] = [];
+    const POST = createOracleRoute(
+      baseDeps({
+        getServiceClient: () => captureServiceClient(inserts),
+        publicCooldown: createCooldown({ windowMs: 10_000 }),
+      })
+    );
+
+    // 1ª mención: responde y publica.
+    const first = await POST(makeReq(publicBody));
+    expect(first.status).toBe(200);
+    await readSse(first);
+
+    // 2ª mención inmediata en el mismo canal: cooldown → se omite (no publica).
+    const second = await POST(makeReq(publicBody));
+    expect(second.status).toBe(200);
+    const body = await second.json();
+    expect(body).toEqual({ skipped: "cooldown" });
+
+    const oracleInserts = inserts.filter((i) => i.table === "biosphere_messages");
+    expect(oracleInserts).toHaveLength(1);
+  });
+
+  it("el cooldown público es por canal: otra Biósfera no queda bloqueada", async () => {
+    const inserts: Insert[] = [];
+    const cooldown = createCooldown({ windowMs: 10_000 });
+    const POST = createOracleRoute(
+      baseDeps({ getServiceClient: () => captureServiceClient(inserts), publicCooldown: cooldown })
+    );
+
+    const a = await POST(makeReq({ ...publicBody, biosphereId: "paqo" }));
+    await readSse(a);
+    const b = await POST(makeReq({ ...publicBody, biosphereId: "cosmogenes" }));
+    // Canal distinto: no está en cooldown, responde y publica.
+    expect(b.headers.get("content-type")).toContain("text/event-stream");
+    await readSse(b);
+
+    const oracleInserts = inserts.filter((i) => i.table === "biosphere_messages");
+    expect(oracleInserts).toHaveLength(2);
+    expect(oracleInserts.map((i) => i.row.biosphere_id).sort()).toEqual(["cosmogenes", "paqo"]);
   });
 });

@@ -1,0 +1,538 @@
+/* HUD de chat — dock glass inferior-izquierdo (design system Phygitalia).
+   Panel --panel + blur, borde --line, radios 16px, nombres en Chakra Petch,
+   entrada píldora. Móvil: hoja inferior; colapsado deja libre el joystick. */
+
+.launcher {
+  position: fixed;
+  left: 16px;
+  bottom: 16px;
+  z-index: 30;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.6rem 0.95rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-pill);
+  background: var(--panel);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  box-shadow: var(--shadow);
+  color: var(--text);
+  font-family: var(--font-display);
+  font-size: 0.78rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition:
+    transform var(--dur-fast) var(--ease-brand),
+    border-color var(--dur-fast) var(--ease-brand),
+    box-shadow var(--dur-fast) var(--ease-brand);
+}
+.launcher:hover {
+  transform: translateY(-3px);
+  border-color: var(--gold-dim);
+  box-shadow:
+    var(--shadow),
+    0 0 22px var(--glow);
+}
+.launcherLabel {
+  color: var(--gold-bright);
+}
+.launcherCount {
+  display: inline-grid;
+  place-content: center;
+  min-width: 1.15rem;
+  height: 1.15rem;
+  padding: 0 0.3rem;
+  border-radius: var(--radius-pill);
+  background: var(--gold);
+  color: var(--bg-0);
+  font-size: 0.66rem;
+}
+
+.dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex: 0 0 auto;
+}
+.dotLive {
+  background: #8db38b;
+  box-shadow: 0 0 8px rgba(141, 179, 139, 0.8);
+}
+.dotIdle {
+  background: var(--gold-dim);
+}
+.dotError {
+  background: var(--terra);
+}
+
+/* --- Dock expandido --------------------------------------------------------- */
+.dock {
+  position: fixed;
+  left: 16px;
+  bottom: 16px;
+  z-index: 30;
+  width: min(370px, calc(100vw - 32px));
+  height: min(460px, calc(100vh - 32px));
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  box-shadow: var(--shadow);
+  overflow: hidden;
+  color: var(--text);
+  animation: dockIn var(--dur-slow) var(--ease-brand);
+}
+@keyframes dockIn {
+  from {
+    opacity: 0;
+    transform: translateY(12px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.5rem 0.5rem 0.5rem 0.65rem;
+  border-bottom: 1px solid var(--line-soft);
+}
+.tabs {
+  display: inline-flex;
+  gap: 0.25rem;
+}
+.tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.4rem 0.75rem;
+  border: 1px solid transparent;
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--text-dim);
+  font-family: var(--font-display);
+  font-size: 0.72rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition:
+    color var(--dur-fast) var(--ease-brand),
+    background var(--dur-fast) var(--ease-brand);
+}
+.tab:hover {
+  color: var(--text);
+}
+.tabActive {
+  color: var(--bg-0);
+  background: linear-gradient(180deg, var(--gold-bright), var(--gold));
+}
+.tabCount {
+  font-size: 0.64rem;
+  opacity: 0.85;
+}
+.tabSpark {
+  color: var(--gold);
+}
+.tabActive .tabSpark {
+  color: var(--bg-0);
+}
+.headerRight {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding-right: 0.25rem;
+}
+.collapseBtn {
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+  line-height: 1;
+  transition: color var(--dur-fast) var(--ease-brand);
+}
+.collapseBtn:hover {
+  color: var(--gold-bright);
+  border-color: var(--gold-dim);
+}
+
+.body {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+}
+.channel {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* --- Lista de mensajes (canal abierto) ------------------------------------- */
+.list {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  margin: 0;
+  padding: 0.75rem;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+}
+.empty {
+  flex: 1 1 auto;
+  display: grid;
+  place-content: center;
+  gap: 0.35rem;
+  text-align: center;
+  padding: 1rem;
+  color: var(--text-dim);
+  font-size: 0.85rem;
+}
+.emptyHint {
+  color: var(--text-faint);
+  font-size: 0.8rem;
+}
+
+.row {
+  display: flex;
+  gap: 0.55rem;
+  align-items: flex-start;
+}
+.avatarCol {
+  flex: 0 0 auto;
+}
+.bubbleCol {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  min-width: 0;
+}
+.author {
+  font-family: var(--font-display);
+  font-size: 0.68rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+.authorOracle {
+  color: var(--gold-bright);
+}
+.oracleBadge {
+  font-size: 0.58rem;
+  letter-spacing: 0.14em;
+  padding: 0.05rem 0.35rem;
+  border-radius: var(--radius-pill);
+  background: rgba(222, 121, 78, 0.22);
+  color: var(--terra);
+}
+.bubble {
+  margin: 0;
+  padding: 0.5rem 0.7rem;
+  border-radius: var(--radius-sm);
+  background: var(--panel-hi);
+  color: var(--text);
+  font-size: 0.9rem;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+.rowOracle .bubble {
+  background: rgba(222, 121, 78, 0.14);
+  border: 1px solid rgba(222, 121, 78, 0.35);
+}
+.rowMine {
+  flex-direction: row-reverse;
+}
+.rowMine .bubbleCol {
+  align-items: flex-end;
+}
+.rowMine .bubble {
+  background: linear-gradient(180deg, rgba(227, 176, 99, 0.2), rgba(227, 176, 99, 0.1));
+  border: 1px solid var(--line);
+}
+
+/* Avatares */
+.oraclePortrait {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  object-fit: cover;
+  border: 2px solid #de794e;
+  box-shadow: 0 0 12px rgba(222, 121, 78, 0.5);
+}
+.oracleGlyph {
+  display: grid;
+  place-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 30%, var(--gold-bright), #de794e);
+  color: var(--bg-0);
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 1rem;
+}
+.travelerGlyph {
+  display: grid;
+  place-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  background: var(--sand);
+  color: #12141f;
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+
+/* --- Canal Paqo (privado) -------------------------------------------------- */
+.paqoLog {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 0.85rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+}
+.paqoTurn {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  max-width: 92%;
+}
+.paqoTurnOracle {
+  align-self: flex-start;
+}
+.paqoTurnUser {
+  align-self: flex-end;
+  align-items: flex-end;
+}
+.paqoWho {
+  font-family: var(--font-display);
+  font-size: 0.64rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+.paqoTurnOracle .paqoWho {
+  color: var(--gold-bright);
+}
+.paqoText {
+  margin: 0;
+  padding: 0.5rem 0.72rem;
+  border-radius: var(--radius-sm);
+  font-size: 0.92rem;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+.paqoTurnOracle .paqoText {
+  background: rgba(222, 121, 78, 0.13);
+  border: 1px solid rgba(222, 121, 78, 0.3);
+  color: var(--text);
+}
+.paqoTurnUser .paqoText {
+  background: var(--panel-hi);
+  color: var(--text);
+}
+.caret {
+  display: inline-block;
+  width: 0.5ch;
+  height: 1em;
+  margin-left: 1px;
+  vertical-align: -0.1em;
+  background: var(--gold-bright);
+  animation: blink 1s steps(2, start) infinite;
+}
+@keyframes blink {
+  to {
+    opacity: 0;
+  }
+}
+.paqoError {
+  margin: 0;
+  padding: 0.4rem 0.6rem;
+  border-radius: var(--radius-sm);
+  background: rgba(201, 138, 94, 0.14);
+  border: 1px solid rgba(201, 138, 94, 0.4);
+  color: var(--terra);
+  font-size: 0.8rem;
+}
+
+/* Invitación a registrarse (canal privado, anónimo) */
+.invite {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  margin: 0 0.75rem 0.5rem;
+  padding: 0.55rem 0.7rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: linear-gradient(180deg, rgba(227, 176, 99, 0.12), rgba(227, 176, 99, 0.04));
+  color: var(--text);
+  font-size: 0.8rem;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    border-color var(--dur-fast) var(--ease-brand),
+    box-shadow var(--dur-fast) var(--ease-brand);
+}
+.invite:hover {
+  border-color: var(--gold-dim);
+  box-shadow: 0 0 18px var(--glow);
+}
+.invite b {
+  color: var(--gold-bright);
+}
+.inviteSpark {
+  color: var(--gold);
+  font-size: 1rem;
+}
+
+/* --- Composer (píldora) ---------------------------------------------------- */
+.composer {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.55rem;
+  border-top: 1px solid var(--line-soft);
+}
+.nameChip {
+  flex: 0 0 auto;
+  max-width: 5.5rem;
+  padding: 0.3rem 0.55rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--gold-bright);
+  font-family: var(--font-display);
+  font-size: 0.66rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.nameChip:hover {
+  border-color: var(--gold-dim);
+}
+.input {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 0.55rem 0.85rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-pill);
+  background: var(--bg-2);
+  color: var(--text);
+  font-family: var(--font-body);
+  font-size: 0.9rem;
+  outline: none;
+  transition:
+    border-color var(--dur-fast) var(--ease-brand),
+    box-shadow var(--dur-fast) var(--ease-brand);
+}
+.input::placeholder {
+  color: var(--text-faint);
+}
+.input:focus {
+  border-color: var(--gold-dim);
+  box-shadow: 0 0 0 2px var(--glow);
+}
+.input:disabled {
+  opacity: 0.6;
+}
+.sendBtn {
+  flex: 0 0 auto;
+  padding: 0.5rem 0.9rem;
+  border: none;
+  border-radius: var(--radius-pill);
+  background: linear-gradient(180deg, var(--gold-bright), var(--gold));
+  color: var(--bg-0);
+  font-family: var(--font-display);
+  font-size: 0.72rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition:
+    transform var(--dur-fast) var(--ease-brand),
+    filter var(--dur-fast) var(--ease-brand);
+}
+.sendBtn:hover:not(:disabled) {
+  transform: translateY(-1px);
+  filter: brightness(1.06);
+}
+.sendBtn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+/* Aviso discreto cuando Supabase no está configurado */
+.disabledNote {
+  position: fixed;
+  left: 16px;
+  bottom: 16px;
+  z-index: 30;
+  padding: 0.45rem 0.7rem;
+  border: 1px dashed var(--line);
+  border-radius: var(--radius-pill);
+  background: var(--panel);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  color: var(--text-faint);
+  font-family: var(--font-display);
+  font-size: 0.66rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  pointer-events: none;
+}
+
+/* --- Móvil: hoja inferior; colapsado deja libre el joystick (abajo-izq) ----- */
+@media (max-width: 640px) {
+  /* Colapsado: el launcher se va a la esquina inferior DERECHA para no tapar el
+     joystick (mitad izquierda inferior libre). */
+  .launcher {
+    left: auto;
+    right: 14px;
+    bottom: 14px;
+  }
+  .disabledNote {
+    left: auto;
+    right: 14px;
+    bottom: 14px;
+  }
+  /* Expandido: hoja inferior a lo ancho. */
+  .dock {
+    left: 8px;
+    right: 8px;
+    bottom: 8px;
+    width: auto;
+    height: min(56vh, 460px);
+    border-radius: var(--radius);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dock,
+  .launcher,
+  .sendBtn,
+  .caret {
+    animation: none;
+    transition: none;
+  }
+}

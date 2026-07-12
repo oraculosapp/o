@@ -4,10 +4,19 @@
  * con las dependencias reales — Next no permite exports extra en un route file.
  *
  * Ver el contrato de API completo en `app/api/oracle/route.ts`.
+ *
+ * MODO PÚBLICO (chat de Biósfera): cuando una persona menciona a Paqo en el chat
+ * abierto, el cliente inserta su propio mensaje en `biosphere_messages` y ADEMÁS
+ * llama a esta ruta con `mode: "public"`. Aquí generamos la respuesta y, al
+ * terminar el stream, la INSERTAMOS en `biosphere_messages` con `is_oracle=true`
+ * usando el cliente service-role (omite RLS). Así TODO el canal la recibe por
+ * Realtime y el solicitante NO la renderiza dos veces. Un cooldown por canal
+ * evita que una ráfaga de menciones inunde el chat.
  */
 import { ChatModelError, type ChatModel } from "./chat-model";
 import { validateOracleRequest, buildChatMessages, type OracleRequest } from "./validate";
 import type { RateLimiter } from "./rate-limit";
+import type { Cooldown } from "./cooldown";
 import { resolveRegisteredUserId, ensureConversation, persistPrivateTurn } from "./persistence";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
@@ -18,7 +27,24 @@ export interface OracleRouteDeps {
   /** Cliente service-role, o null si faltan sus env vars. */
   getServiceClient: () => SupabaseClient | null;
   rateLimiter: RateLimiter;
+  /**
+   * Cooldown del chat público por canal (1 respuesta cada N s). Opcional: si no
+   * se inyecta, no se aplica cooldown (útil en tests). En producción la ruta
+   * inyecta uno de 10 s.
+   */
+  publicCooldown?: Cooldown;
+  /**
+   * Nombre a mostrar del Oráculo al publicar en el chat público (columna
+   * `display_name`, NOT NULL). Default: capitaliza el `oracleId`.
+   */
+  getOracleName?: (oracleId: string) => string;
 }
+
+/** Longitud máx. de `biosphere_messages.content` (CHECK en la migración). */
+const PUBLIC_MESSAGE_MAX = 280;
+/** Tokens acotados para las respuestas públicas: deben caber en ~280 chars. */
+const PUBLIC_MAX_TOKENS = 140;
+const PRIVATE_MAX_TOKENS = 400;
 
 const encoder = new TextEncoder();
 
@@ -47,6 +73,25 @@ function bearer(req: Request): string | null {
   return m ? m[1].trim() : null;
 }
 
+function defaultOracleName(oracleId: string): string {
+  return oracleId
+    .split("-")
+    .filter(Boolean)
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(" ");
+}
+
+/** Recorta la respuesta pública al límite de la columna, sin cortar a mitad de
+ *  palabra cuando es posible (respeta el CHECK char_length <= 280). */
+function clampPublic(text: string): string {
+  const trimmed = text.trim();
+  if (trimmed.length <= PUBLIC_MESSAGE_MAX) return trimmed;
+  const slice = trimmed.slice(0, PUBLIC_MESSAGE_MAX - 1);
+  const lastSpace = slice.lastIndexOf(" ");
+  const body = lastSpace > PUBLIC_MESSAGE_MAX * 0.6 ? slice.slice(0, lastSpace) : slice;
+  return `${body.trimEnd()}…`;
+}
+
 async function loadSummary(service: SupabaseClient, conversationId: string): Promise<string | null> {
   try {
     const { data } = await service
@@ -57,6 +102,26 @@ async function loadSummary(service: SupabaseClient, conversationId: string): Pro
     return (data?.summary as string | null) ?? null;
   } catch {
     return null;
+  }
+}
+
+/** Publica la respuesta del Oráculo en el chat público (is_oracle = true). */
+async function publishPublicAnswer(
+  service: SupabaseClient,
+  params: { biosphereId: string; displayName: string; content: string }
+): Promise<void> {
+  const content = clampPublic(params.content);
+  if (content.length === 0) return;
+  try {
+    await service.from("biosphere_messages").insert({
+      biosphere_id: params.biosphereId,
+      user_id: null,
+      display_name: params.displayName,
+      content,
+      is_oracle: true,
+    });
+  } catch {
+    /* best-effort: no romper el turno aunque falle la inserción */
   }
 }
 
@@ -84,6 +149,8 @@ export function createOracleRoute(deps: OracleRouteDeps) {
       return json(400, { error: validated.error });
     }
     const request: OracleRequest = validated.value;
+    const isPublic = request.mode === "public";
+    const channelId = request.biosphereId ?? request.oracleId;
 
     // 3) Modelo (503 si falta la key) ----------------------------------------
     const chatModel = deps.createChatModel();
@@ -93,6 +160,13 @@ export function createOracleRoute(deps: OracleRouteDeps) {
           "El Oráculo no está disponible: falta OPENAI_API_KEY en el servidor. " +
           "Configúrala en Vercel / .env.local (ver docs/s3-plataforma.md).",
       });
+    }
+
+    // 3b) Cooldown del chat público por canal --------------------------------
+    // Se comprueba tras confirmar el modelo (no consumir el turno en balde) y
+    // ANTES de generar (ahorra la llamada a OpenAI si estamos en cooldown).
+    if (isPublic && deps.publicCooldown && !deps.publicCooldown.tryAcquire(channelId)) {
+      return json(200, { skipped: "cooldown" });
     }
 
     // 4) System prompt + memoria (private + usuario registrado) --------------
@@ -122,6 +196,9 @@ export function createOracleRoute(deps: OracleRouteDeps) {
           }
         }
       }
+    } else if (isPublic) {
+      // En público sólo necesitamos el service-client para publicar la respuesta.
+      service = deps.getServiceClient();
     }
 
     const chatMessages = buildChatMessages(systemParts.join("\n\n"), request.messages);
@@ -129,7 +206,10 @@ export function createOracleRoute(deps: OracleRouteDeps) {
 
     // 5) Streaming ------------------------------------------------------------
     const iterator = chatModel
-      .streamChat(chatMessages, { maxTokens: 400, temperature: 0.7 })
+      .streamChat(chatMessages, {
+        maxTokens: isPublic ? PUBLIC_MAX_TOKENS : PRIVATE_MAX_TOKENS,
+        temperature: 0.7,
+      })
       [Symbol.asyncIterator]();
 
     let first: IteratorResult<string>;
@@ -142,6 +222,8 @@ export function createOracleRoute(deps: OracleRouteDeps) {
 
     const shouldPersist =
       request.mode === "private" && !!service && !!registeredUserId && !!conversationId;
+    const shouldPublish = isPublic && !!service;
+    const oracleName = (deps.getOracleName ?? defaultOracleName)(request.oracleId);
 
     const stream = new ReadableStream<Uint8Array>({
       async start(controller) {
@@ -174,6 +256,14 @@ export function createOracleRoute(deps: OracleRouteDeps) {
           } catch {
             /* doble seguro */
           }
+        }
+
+        if (shouldPublish && full.trim().length > 0) {
+          await publishPublicAnswer(service as SupabaseClient, {
+            biosphereId: channelId,
+            displayName: oracleName,
+            content: full,
+          });
         }
 
         controller.enqueue(sse({ type: "done" }));

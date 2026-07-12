@@ -1,0 +1,160 @@
+/* Modal de registro (magic-link) — glass sobre nebulosa, design system Phygitalia. */
+
+.overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: grid;
+  place-items: center;
+  padding: 1rem;
+  background: rgba(8, 10, 18, 0.62);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  animation: fadeIn var(--dur-fast) var(--ease-brand);
+}
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+}
+
+.modal {
+  position: relative;
+  width: min(400px, 100%);
+  padding: 1.6rem 1.5rem 1.4rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background:
+    radial-gradient(80% 60% at 20% 0%, rgba(201, 138, 94, 0.14), transparent 60%),
+    var(--panel-solid);
+  box-shadow: var(--shadow);
+  color: var(--text);
+  animation: modalIn var(--dur-slow) var(--ease-brand);
+}
+@keyframes modalIn {
+  from {
+    opacity: 0;
+    transform: translateY(14px) scale(0.98);
+  }
+}
+
+.close {
+  position: absolute;
+  top: 0.7rem;
+  right: 0.7rem;
+  width: 30px;
+  height: 30px;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+  line-height: 1;
+  transition: color var(--dur-fast) var(--ease-brand);
+}
+.close:hover {
+  color: var(--gold-bright);
+  border-color: var(--gold-dim);
+}
+
+.title {
+  margin: 0 0 0.35rem;
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 1.1rem;
+  letter-spacing: 0.02em;
+  color: var(--gold-bright);
+}
+.lead {
+  margin: 0 0 1rem;
+  color: var(--text-dim);
+  font-size: 0.9rem;
+  line-height: 1.4;
+}
+
+.email {
+  width: 100%;
+  padding: 0.7rem 0.9rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-pill);
+  background: var(--bg-2);
+  color: var(--text);
+  font-family: var(--font-body);
+  font-size: 0.95rem;
+  outline: none;
+  transition:
+    border-color var(--dur-fast) var(--ease-brand),
+    box-shadow var(--dur-fast) var(--ease-brand);
+}
+.email::placeholder {
+  color: var(--text-faint);
+}
+.email:focus {
+  border-color: var(--gold-dim);
+  box-shadow: 0 0 0 2px var(--glow);
+}
+
+.captcha {
+  margin-top: 0.85rem;
+  min-height: 65px;
+}
+.captchaTodo {
+  margin: 0.7rem 0 0;
+  color: var(--text-faint);
+  font-size: 0.72rem;
+}
+
+.errorMsg {
+  margin: 0.7rem 0 0;
+  color: var(--terra);
+  font-size: 0.82rem;
+}
+
+.primary {
+  width: 100%;
+  margin-top: 1rem;
+  padding: 0.72rem;
+  border: none;
+  border-radius: var(--radius-pill);
+  background: linear-gradient(180deg, var(--gold-bright), var(--gold));
+  color: var(--bg-0);
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 0.82rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition:
+    transform var(--dur-fast) var(--ease-brand),
+    filter var(--dur-fast) var(--ease-brand);
+}
+.primary:hover:not(:disabled) {
+  transform: translateY(-1px);
+  filter: brightness(1.06);
+}
+.primary:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.sent {
+  text-align: center;
+  display: grid;
+  gap: 0.5rem;
+  justify-items: center;
+}
+.sentSpark {
+  font-size: 1.8rem;
+  color: var(--gold);
+  filter: drop-shadow(0 0 12px var(--glow));
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .overlay,
+  .modal {
+    animation: none;
+  }
+  .primary {
+    transition: none;
+  }
+}

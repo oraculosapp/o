@@ -10,6 +10,7 @@ import { Water } from "./world/Water";
 import { Atmosphere } from "./world/Atmosphere";
 import { Totem } from "./world/Totem";
 import { BloomComposer } from "./postfx/BloomComposer";
+import { WorldNet } from "./net/WorldNet";
 import type { BiospherePreset } from "./planet/types";
 
 /**
@@ -27,6 +28,9 @@ export class PaqoWorld {
   // Públicos para el harness de QA (handle __PAQO__): métricas de caminata.
   island!: Island;
   controller!: CharacterController;
+
+  /** Hooks de multijugador (avatares remotos, pelotas, zonas). Disponible tras start(). */
+  net!: WorldNet;
 
   private rig!: TestDummy;
   private follow!: FollowCamera;
@@ -108,6 +112,18 @@ export class PaqoWorld {
     this.input = new InputManager(this.container);
     this.input.onTap = (x, y) => this.handleTap(x, y);
     this.input.onManualMove = () => this.clearMoveTarget();
+
+    // Hooks de multijugador (avatares remotos + 9 pelotas + señales de zona).
+    // No hablan con la red: la red (apps/web) programa contra `world.net`.
+    this.net = new WorldNet({
+      scene: this.scene,
+      camera: this.camera,
+      playerPosition: this.controller.position,
+      playerForward: (out) => this.controller.getForward(out),
+      playerGrounded: () => this.controller.isGrounded(),
+      field: this.island.field,
+    });
+    this.net.start();
 
     this.bloom = new BloomComposer(
       this.renderer,
@@ -345,6 +361,9 @@ export class PaqoWorld {
     this.controller.update(dt, { worldDir: this._worldDir, throttle, run: f.run, jump: f.jump });
     this.follow.update(dt);
 
+    // Multijugador: interpola remotos, integra pelotas, evalúa zonas.
+    this.net.update(dt);
+
     this.updateFade(dt);
 
     const runeMat = this.rune.material as THREE.MeshToonMaterial;
@@ -393,6 +412,7 @@ export class PaqoWorld {
     cancelAnimationFrame(this.rafId);
     this.resizeObs?.disconnect();
     window.removeEventListener("resize", this.onResize);
+    this.net?.dispose();
     this.input?.dispose();
     this.controller?.dispose();
     this.rig?.dispose();

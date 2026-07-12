@@ -20,4 +20,22 @@
  */
 declare module "@phygitalia/content" {
   export function getOracleSystemPrompt(oracleId: string): string | undefined;
+
+  /**
+   * Ficha del Oráculo (subconjunto que consume la UI Social). El paquete real
+   * expone más campos; aquí sólo declaramos lo que usa apps/web, para mantener
+   * la web desacoplada del grafo de tipos completo de @phygitalia/content.
+   */
+  export interface OracleDefinition {
+    id: string;
+    name: string;
+    color: string;
+    systemPrompt: string;
+    publicGreeting: string;
+    /** Pistas susurradas escalonadas (HUD de pistas). */
+    hints: string[];
+  }
+
+  /** Resuelve la ficha completa de un Oráculo por id (lanza si no existe). */
+  export function getOracle(id: string): OracleDefinition;
 }

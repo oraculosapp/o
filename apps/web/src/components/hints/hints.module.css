@@ -1,0 +1,102 @@
+/* Pistas susurradas — píldora glass flotante superior estilo "selbar".
+   Entra/sale con el easing de marca (docs/investigacion §2, §4). */
+
+.layer {
+  position: fixed;
+  top: 18px;
+  left: 0;
+  right: 0;
+  z-index: 40;
+  display: flex;
+  justify-content: center;
+  pointer-events: none;
+  padding: 0 1rem;
+}
+
+.toast {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.6rem;
+  max-width: min(560px, 92vw);
+  padding: 0.6rem 1rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-pill);
+  background: var(--panel);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  box-shadow: var(--shadow);
+  color: var(--text);
+  font-family: var(--font-body);
+  font-size: 0.9rem;
+  line-height: 1.35;
+}
+
+.glyph {
+  flex: 0 0 auto;
+  color: var(--gold);
+  font-size: 1rem;
+  filter: drop-shadow(0 0 6px var(--glow));
+}
+.text {
+  min-width: 0;
+}
+
+.entering {
+  animation: hintIn var(--dur-slow) var(--ease-brand);
+}
+.leaving {
+  animation: hintOut var(--dur-slow) var(--ease-brand) forwards;
+}
+@keyframes hintIn {
+  from {
+    opacity: 0;
+    transform: translateY(-14px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes hintOut {
+  to {
+    opacity: 0;
+    transform: translateY(-12px) scale(0.97);
+  }
+}
+
+/* Toast especial al ENCONTRAR: dorado más vivo + resplandor de celebración. */
+.toastFound {
+  border-color: var(--gold);
+  background:
+    radial-gradient(120% 140% at 50% 0%, rgba(246, 220, 160, 0.22), transparent 70%),
+    var(--panel);
+  box-shadow:
+    var(--shadow),
+    0 0 30px var(--glow);
+  color: var(--gold-bright);
+  animation: hintIn var(--dur-slow) var(--ease-brand), foundPulse 1.6s var(--ease-brand) 1;
+}
+.toastFound .glyph {
+  color: var(--gold-bright);
+}
+@keyframes foundPulse {
+  0%,
+  100% {
+    box-shadow:
+      var(--shadow),
+      0 0 28px var(--glow);
+  }
+  50% {
+    box-shadow:
+      var(--shadow),
+      0 0 44px var(--gold);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .entering,
+  .leaving,
+  .toastFound {
+    animation: none;
+  }
+}

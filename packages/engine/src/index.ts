@@ -18,3 +18,20 @@ export { TestDummy } from "./avatar/TestDummy";
 export { AnimationDriver, type Locomotion } from "./avatar/AnimationDriver";
 export { TintController, toToonMaterial, avatarToonRamp, type HueBand } from "./avatar/tint";
 export type { IAvatarRig, AvatarDriveState, TintZone, PropSocket } from "./avatar/types";
+
+// --- Multijugador: hooks del mundo (equipo Engine-Net S3b) ---
+export { WorldNet } from "./net/WorldNet";
+export { RemotePlayers } from "./net/RemotePlayers";
+export { Balls } from "./net/Balls";
+export { ZoneSignals } from "./net/ZoneSignals";
+export type {
+  WorldNetHooks,
+  WorldNetDeps,
+  FieldLike,
+  LocalState,
+  RemoteState,
+  BallState,
+  ZoneSignal,
+  NetAnim,
+  Vec3,
+} from "./net/types";
