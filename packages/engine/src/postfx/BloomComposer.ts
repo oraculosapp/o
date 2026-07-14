@@ -4,8 +4,11 @@ import {
   RenderPass,
   EffectPass,
   SelectiveBloomEffect,
+  LUT3DEffect,
+  LookupTexture,
   BlendFunction,
 } from "postprocessing";
+import { createMoodLUT, type MoodId } from "./MoodGrading";
 
 /**
  * Bloom SELECTIVO (pmndrs/postprocessing): sólo los emisivos dorados de Paqo
@@ -16,6 +19,11 @@ import {
 export class BloomComposer {
   private composer?: EffectComposer;
   private bloom?: SelectiveBloomEffect;
+  /** Pase de color grading (LUT 3D) — vive DESPUÉS del bloom en el mismo EffectPass. */
+  private lut?: LUT3DEffect;
+  /** Caché perezosa de las 7 LUTs de mood (se generan la 1ª vez que se piden). */
+  private lutCache = new Map<MoodId, LookupTexture>();
+  private currentMood: MoodId = "natural";
   readonly enabled: boolean;
 
   constructor(
@@ -42,12 +50,30 @@ export class BloomComposer {
     bloom.ignoreBackground = true;
     this.bloom = bloom;
 
+    // Color grading (LUT 3D) arranca en "natural" = LUT identidad (sin cambio
+    // visual). Datos Float32 (HalfFloat framebuffer) + interpolación tetraédrica
+    // = grading de alta precisión sin banding. El efecto va DESPUÉS del bloom en
+    // el array del EffectPass: gradúa la imagen ya compuesta (escena + glow).
+    const neutral = this.moodLUT("natural");
+    const lut = new LUT3DEffect(neutral, { tetrahedralInterpolation: true });
+    this.lut = lut;
+
     const composer = new EffectComposer(renderer, {
       frameBufferType: THREE.HalfFloatType,
     });
     composer.addPass(new RenderPass(scene, camera));
-    composer.addPass(new EffectPass(camera, bloom));
+    composer.addPass(new EffectPass(camera, bloom, lut));
     this.composer = composer;
+  }
+
+  /** Obtiene (cacheando) la LookupTexture procedural de un mood. */
+  private moodLUT(id: MoodId): LookupTexture {
+    let tex = this.lutCache.get(id);
+    if (!tex) {
+      tex = createMoodLUT(id);
+      this.lutCache.set(id, tex);
+    }
+    return tex;
   }
 
   /** Marca un objeto (y descendientes) como fuente de bloom. */
@@ -61,6 +87,18 @@ export class BloomComposer {
 
   setSize(w: number, h: number): void {
     this.composer?.setSize(w, h);
+  }
+
+  /**
+   * Aplica un "mood" de color grading (LUT 3D) al pase final de post-proceso.
+   * Si el composer está desactivado (fallback móvil), es no-op silencioso.
+   * "natural" carga la LUT identidad (sin cambio visual). Cachea las 7 LUTs.
+   */
+  setMood(id: MoodId): void {
+    if (!this.lut) return; // composer apagado → silencioso
+    if (id === this.currentMood && this.lut.lut) return;
+    this.lut.lut = this.moodLUT(id);
+    this.currentMood = id;
   }
 
   /** Renderiza con bloom si está activo; si no, render directo. */
@@ -89,5 +127,7 @@ export class BloomComposer {
 
   dispose(): void {
     this.composer?.dispose();
+    for (const tex of this.lutCache.values()) tex.dispose();
+    this.lutCache.clear();
   }
 }

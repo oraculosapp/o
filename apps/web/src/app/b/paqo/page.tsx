@@ -11,6 +11,8 @@ import { MobileControls } from "@/components/notifications/MobileControls";
 import { MuteButton } from "@/components/audio/MuteButton";
 import { InstallButton } from "@/components/pwa/InstallButton";
 import { AvatarPicker } from "@/components/avatar-picker/AvatarPicker";
+import { MoodPanel } from "@/components/mood/MoodPanel";
+import { GameHud } from "@/components/game/GameHud";
 import { thumbUrl } from "@/lib/avatars";
 import {
   getStoredAvatar,
@@ -146,6 +148,11 @@ export default function PaqoBiosphere() {
         avatarThumbUrl={avatarSel ? thumbUrl(avatarSel.archetype) : null}
         avatarTint={avatarSel?.tint.primary ?? null}
       />
+
+      {/* Panel de mood/clima (equipo Atmos) y HUD del mini-juego (equipo Juego).
+          Stubs: montados con el getter perezoso del mundo; aún no pintan nada. */}
+      <MoodPanel getWorld={getWorld} />
+      <GameHud getWorld={getWorld} />
 
       <AvatarPicker
         open={pickerOpen}

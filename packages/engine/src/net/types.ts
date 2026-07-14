@@ -97,4 +97,13 @@ export interface FieldLike {
   heightAt(x: number, z: number): number;
   surfaceNormal(x: number, z: number, out?: THREE.Vector3): THREE.Vector3;
   insideIsland(x: number, z: number): boolean;
+  /** Nivel base de referencia del claro (para el umbral de caída al vacío). */
+  readonly clearLevel: number;
 }
+
+/** Eventos del mini-juego ¡Dale a Paqo! difundidos por el canal de la biósfera. */
+export type GameEvent =
+  | { type: "start"; by: string; endsAt: number }
+  | { type: "stop"; by: string }
+  | { type: "hit"; by: string; ballId: number; hitPos: [number, number, number] }
+  | { type: "state"; endsAt: number; scores: Record<string, number>; startedBy: string };

@@ -284,7 +284,13 @@ export function ChatDock({ biosphereId, getWorldNet, getWorld, voiceSlot }: Chat
   };
 
   // El hook siempre se llama (regla de hooks); si no hay Supabase, no conecta.
-  const bio = useBiosphere({ biosphereId, getWorldNet });
+  // El mini-juego (world.game) se engancha al MISMO canal aquí, sin segunda
+  // suscripción: GameHud sólo pinta; la difusión de eventos vive en la capa de red.
+  const bio = useBiosphere({
+    biosphereId,
+    getWorldNet,
+    getWorldGame: () => getWorld?.()?.game,
+  });
 
   if (!configured) {
     return (

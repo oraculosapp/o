@@ -15,6 +15,10 @@ import { Totem } from "./world/Totem";
 import { BloomComposer } from "./postfx/BloomComposer";
 import { WorldNet } from "./net/WorldNet";
 import { Soundscape } from "./audio/Soundscape";
+import { WeatherDirector, type WeatherId } from "./world/Weather";
+import { AmbientLife } from "./world/AmbientLife";
+import { BallGame } from "./game/BallGame";
+import type { MoodId } from "./postfx/MoodGrading";
 import type { BiospherePreset } from "./planet/types";
 import type { BallState } from "./net/types";
 
@@ -60,6 +64,19 @@ export class PaqoWorld {
   private atmosphere!: Atmosphere;
   private totem!: Totem;
   private bloom!: BloomComposer;
+
+  // Referencias de la escena promovidas a campos para que las module el clima.
+  private skyUniforms!: { top: { value: THREE.Color }; bottom: { value: THREE.Color } };
+  private keyLight!: THREE.DirectionalLight;
+  private hemiLight!: THREE.HemisphereLight;
+
+  /** Director de clima (fog/cielo/luces/viento). Disponible tras start(). */
+  private weather!: WeatherDirector;
+  /** Vida ambiente (mariposas/semillas). Disponible tras start(). */
+  private ambientLife!: AmbientLife;
+
+  /** Mini-juego ¡Dale a Paqo! Público (como `net`): la red programa contra él. */
+  game!: BallGame;
 
   /** Audio procedural (WebAudio 100% sintético). Disponible tras start(). */
   private soundscape!: Soundscape;
@@ -121,6 +138,11 @@ export class PaqoWorld {
     this.atmosphere.build();
     this.atmosphere.addTo(this.scene);
 
+    // Vida ambiente (mariposas/semillas — equipo Flora). Stub no-op por ahora.
+    this.ambientLife = new AmbientLife(this.island.field, this.preset);
+    this.ambientLife.build();
+    this.ambientLife.addTo(this.scene);
+
     // Enjambre de píxeles interactivos (oro/rosa/lila) — reemplaza bruma/esporas.
     this.pixels = new PixelSwarm(this.island.field, this.preset);
     this.pixels.addTo(this.scene);
@@ -159,6 +181,31 @@ export class PaqoWorld {
       field: this.island.field,
     });
     this.net.start();
+
+    // Director de clima (equipo Atmos): modula fog/cielo/luces y, vía callbacks,
+    // el viento de la vegetación y la densidad del shell de niebla. Stub no-op.
+    this.weather = new WeatherDirector(
+      {
+        scene: this.scene,
+        skyUniforms: this.skyUniforms,
+        keyLight: this.keyLight,
+        hemiLight: this.hemiLight,
+        setWindScale: (s) => this.vegetation.setWindScale(s),
+        setFogShellScale: (s) => this.atmosphere.setDensityScale(s),
+      },
+      this.preset,
+    );
+
+    // Mini-juego ¡Dale a Paqo! (equipo Juego): usa las pelotas del net, el campo
+    // de la isla, el tótem y el soundscape. No habla con la red directamente:
+    // la capa de red (apps/web) programa contra `world.game`. Stub no-op.
+    this.game = new BallGame({
+      scene: this.scene,
+      balls: this.net.ballsSystem,
+      field: this.island.field,
+      getTotem: () => this.totem?.group ?? null,
+      onSound: (k) => this.soundscape.onGameSound(k),
+    });
 
     // Audio procedural: cama ambiental generativa + foley + blips de UI. El
     // contexto WebAudio nace en el primer gesto (política de autoplay). Se
@@ -271,6 +318,16 @@ export class PaqoWorld {
     this.input?.setInputEnabled(enabled);
   }
 
+  /** Contrato UI — aplica un "mood" de color grading (equipo Atmos). */
+  setMood(id: MoodId): void {
+    this.bloom?.setMood(id);
+  }
+
+  /** Contrato UI — cambia el clima de la biósfera (equipo Atmos). */
+  setWeather(id: WeatherId): void {
+    this.weather?.setWeather(id);
+  }
+
   /**
    * Contrato A — recentra el encuadre en el ÁREA VISIBLE cuando el HUD ocupa
    * márgenes del lienzo (p.ej. `{ right: 360 }` para el chat en columna a la
@@ -344,16 +401,18 @@ export class PaqoWorld {
       2000,
     );
 
-    // Cúpula de cielo (gradiente vertical del preset).
+    // Cúpula de cielo (gradiente vertical del preset). Los uniforms {top,bottom}
+    // se promueven a campo para que el director de clima module el gradiente.
     const skyGeo = new THREE.SphereGeometry(1000, 32, 16);
+    this.skyUniforms = {
+      top: { value: new THREE.Color(this.preset.sky.gradientTop) },
+      bottom: { value: new THREE.Color(this.preset.sky.gradientBottom) },
+    };
     const skyMat = new THREE.ShaderMaterial({
       side: THREE.BackSide,
       depthWrite: false,
       fog: false,
-      uniforms: {
-        top: { value: new THREE.Color(this.preset.sky.gradientTop) },
-        bottom: { value: new THREE.Color(this.preset.sky.gradientBottom) },
-      },
+      uniforms: this.skyUniforms,
       vertexShader: /* glsl */ `
         varying vec3 vPos;
         void main() { vPos = position; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }
@@ -371,18 +430,18 @@ export class PaqoWorld {
     // Luz key ÁMBAR dorada cálida; rebote de cielo cálido y rebote de suelo MORADO
     // (HemisphereLight) → sombras que viran a malva sin pass extra. Preset-driven.
     const lg = this.preset.lighting ?? {};
-    const key = new THREE.DirectionalLight(new THREE.Color(lg.keyColor ?? "#FFCF8A"), lg.keyIntensity ?? 1.05);
-    key.position.set(80, 120, 60);
-    this.scene.add(key);
+    this.keyLight = new THREE.DirectionalLight(new THREE.Color(lg.keyColor ?? "#FFCF8A"), lg.keyIntensity ?? 1.05);
+    this.keyLight.position.set(80, 120, 60);
+    this.scene.add(this.keyLight);
     // Intensidad contenida (0.78) y rebote apenas enfriado para que el atardecer
-    // bañe el valle SIN lavar el alma verde del terreno.
-    this.scene.add(
-      new THREE.HemisphereLight(
-        new THREE.Color(lg.skyBounceColor ?? "#F2BFC4"),
-        new THREE.Color(lg.ambientColor ?? "#4A3874"),
-        lg.ambientIntensity ?? 0.78,
-      ),
+    // bañe el valle SIN lavar el alma verde del terreno. Se promueve a campo para
+    // que el director de clima module color/intensidad.
+    this.hemiLight = new THREE.HemisphereLight(
+      new THREE.Color(lg.skyBounceColor ?? "#F2BFC4"),
+      new THREE.Color(lg.ambientColor ?? "#4A3874"),
+      lg.ambientIntensity ?? 0.78,
     );
+    this.scene.add(this.hemiLight);
   }
 
   /** Anillo-runa emisivo dorado en el suelo del claro (origen), plano. */
@@ -478,6 +537,7 @@ export class PaqoWorld {
     this.reducedMotion = this.resolveReducedMotion();
     this.follow?.setAutoReturn(!this.reducedMotion);
     this.pixels?.setReducedMotion(this.reducedMotion);
+    this.ambientLife?.setReducedMotion(this.reducedMotion);
   }
 
   // ---- tap-to-move ----
@@ -611,6 +671,9 @@ export class PaqoWorld {
     this.pixels.update(dt, t, pointer);
 
     this.vegetation.update(dt, t);
+    this.ambientLife.update(dt, t);
+    this.weather.update(dt);
+    this.game.update(dt);
     this.atmosphere.update(dt, t);
 
     if (this.marker.visible) {
@@ -655,6 +718,9 @@ export class PaqoWorld {
     if (typeof window !== "undefined") {
       window.removeEventListener("storage", this.onReducedMotionChange);
     }
+    this.game?.dispose();
+    this.weather?.dispose();
+    this.ambientLife?.dispose();
     this.net?.dispose();
     this.soundscape?.dispose();
     this.input?.dispose();

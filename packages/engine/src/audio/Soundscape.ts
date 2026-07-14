@@ -90,6 +90,14 @@ export class Soundscape {
     this.foley.kick(strength01, ballId === 8);
   }
 
+  /** Sonido del mini-juego ¡Dale a Paqo! (impacto/inicio/fin). Lo cablea BallGame. */
+  onGameSound(kind: "hit" | "start" | "end"): void {
+    // No-op silencioso sin gesto (autoplay): foley.ensure() aún no construyó el bus.
+    if (kind === "hit") this.foley.paqoHit(1);
+    else if (kind === "start") this.foley.gameStart();
+    else if (kind === "end") this.foley.gameEnd();
+  }
+
   /** Proximidad al agua 0..1 (mezcla la capa de agua y ablanda los pasos). */
   setWaterProximity(p: number): void {
     this.waterProx = p < 0 ? 0 : p > 1 ? 1 : p;

@@ -9,6 +9,7 @@ import {
   type RosterMember,
   type WorldNetHooks,
 } from "@/lib/realtime";
+import type { WorldGameHooks } from "@/lib/world-ui";
 import {
   getStoredName,
   mentionPaqoPublic,
@@ -40,8 +41,9 @@ export interface UseBiosphere {
 export function useBiosphere(params: {
   biosphereId: string;
   getWorldNet?: () => WorldNetHooks | null | undefined;
+  getWorldGame?: () => WorldGameHooks | null | undefined;
 }): UseBiosphere {
-  const { biosphereId, getWorldNet } = params;
+  const { biosphereId, getWorldNet, getWorldGame } = params;
   const [status, setStatus] = useState<RealtimeStatus>("idle");
   const [messages, setMessages] = useState<BiosphereMessage[]>([]);
   const [roster, setRoster] = useState<RosterMember[]>([]);
@@ -54,6 +56,8 @@ export function useBiosphere(params: {
   const seenIds = useRef<Set<string>>(new Set());
   const getWorldNetRef = useRef(getWorldNet);
   getWorldNetRef.current = getWorldNet;
+  const getWorldGameRef = useRef(getWorldGame);
+  getWorldGameRef.current = getWorldGame;
 
   const pushMessage = useCallback((msg: BiosphereMessage) => {
     if (seenIds.current.has(msg.id)) return;
@@ -77,6 +81,7 @@ export function useBiosphere(params: {
     const rt = new BiosphereRealtime({
       biosphereId,
       getWorldNet: () => getWorldNetRef.current?.(),
+      getWorldGame: () => getWorldGameRef.current?.(),
       displayName: initialName ?? DEFAULT_NAME,
       tint,
       onStatus: setStatus,

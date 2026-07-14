@@ -69,4 +69,20 @@ export type {
   ZoneSignal,
   NetAnim,
   Vec3,
+  GameEvent,
 } from "./net/types";
+
+// --- Atmósfera avanzada: color grading + clima (equipo Atmos) ---
+export { MOOD_IDS, type MoodId } from "./postfx/MoodGrading";
+export { WeatherDirector, WEATHER_IDS, type WeatherId, type WeatherRefs } from "./world/Weather";
+
+// --- Vida ambiente (equipo Flora) ---
+export { AmbientLife } from "./world/AmbientLife";
+
+// --- Mini-juego ¡Dale a Paqo! (equipo Juego) ---
+export {
+  BallGame,
+  type GamePhase,
+  type GameSnapshot,
+  type BallGameHooks,
+} from "./game/BallGame";

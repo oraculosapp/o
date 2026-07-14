@@ -218,6 +218,142 @@ export class Foley {
     }
   }
 
+  // ---- golpe a Paqo (mini-juego): barro cocido + destello pentatónico ----
+
+  /**
+   * "Toc" de barro cocido al golpear a Paqo con una pelota: cuerpo triangular que
+   * cae en pitch (~180→90 Hz, pluck corto) + un destello de 3 parciales agudos de
+   * La menor pentatónica (juguetón, tipo `found()` pero breve) + un click de ruido
+   * highpass de contacto. `strength01` (0..1) escala energía y brillo.
+   */
+  paqoHit(strength01 = 1): void {
+    if (!this.ensure()) return;
+    const ctx = this.ctx!;
+    const now = ctx.currentTime;
+    const s = Math.max(0.15, Math.min(1, strength01));
+
+    // Cuerpo: triángulo grave con caída de pitch (barro cocido, pluck).
+    const osc = ctx.createOscillator();
+    osc.type = "triangle";
+    osc.frequency.setValueAtTime(180, now);
+    osc.frequency.exponentialRampToValueAtTime(90, now + 0.08);
+    const og = ctx.createGain();
+    og.gain.setValueAtTime(0.0001, now);
+    og.gain.exponentialRampToValueAtTime(0.16 * s + 0.05, now + 0.005);
+    og.gain.exponentialRampToValueAtTime(0.0001, now + 0.16);
+    osc.connect(og);
+    og.connect(this.bus!);
+    og.connect(this.delay!);
+    this.engine.voiceOn();
+    osc.start(now);
+    osc.stop(now + 0.18);
+    osc.onended = () => {
+      osc.disconnect();
+      og.disconnect();
+      this.engine.voiceOff();
+    };
+
+    // Click de contacto: micro-burst de ruido highpass.
+    const src = ctx.createBufferSource();
+    src.buffer = this.engine.noise!.white;
+    const bp = ctx.createBiquadFilter();
+    bp.type = "highpass";
+    bp.frequency.value = 1800;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.07 + s * 0.06, now);
+    g.gain.exponentialRampToValueAtTime(0.0001, now + 0.04);
+    this.playThrough(src, bp, g, now, 0.06);
+
+    // Destello pentatónico: 3 parciales agudos de La menor pentatónica (A5,C6,E6),
+    // arpegio muy corto y brillante — el "premio" juguetón de acertar a Paqo.
+    const sparkle = [880.0, 1046.5, 1318.5];
+    for (let i = 0; i < sparkle.length; i++) {
+      const when = now + 0.01 + i * 0.035;
+      const bell = ctx.createOscillator();
+      bell.type = "sine";
+      bell.frequency.value = sparkle[i];
+      const bg = ctx.createGain();
+      const peak = (0.07 - i * 0.015) * (0.5 + s * 0.5);
+      bg.gain.setValueAtTime(0.0001, when);
+      bg.gain.exponentialRampToValueAtTime(Math.max(0.008, peak), when + 0.008);
+      bg.gain.exponentialRampToValueAtTime(0.0001, when + 0.5);
+      bell.connect(bg);
+      bg.connect(this.bus!);
+      bg.connect(this.delay!);
+      this.engine.voiceOn();
+      bell.start(when);
+      bell.stop(when + 0.55);
+      bell.onended = () => {
+        bell.disconnect();
+        bg.disconnect();
+        this.engine.voiceOff();
+      };
+    }
+  }
+
+  /**
+   * Arpegio ascendente corto y festivo (3 notas pentatónicas) para el INICIO del
+   * mini-juego. Molde de `found()` pero breve y alegre.
+   */
+  gameStart(): void {
+    if (!this.ensure()) return;
+    const ctx = this.ctx!;
+    const now = ctx.currentTime;
+    const notes = [440.0, 587.33, 880.0]; // A4, D5, A5 — subida limpia
+    for (let i = 0; i < notes.length; i++) {
+      const when = now + i * 0.09;
+      const osc = ctx.createOscillator();
+      osc.type = "triangle";
+      osc.frequency.value = notes[i];
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0.0001, when);
+      g.gain.exponentialRampToValueAtTime(0.1, when + 0.01);
+      g.gain.exponentialRampToValueAtTime(0.0001, when + 0.4);
+      osc.connect(g);
+      g.connect(this.bus!);
+      g.connect(this.delay!);
+      this.engine.voiceOn();
+      osc.start(when);
+      osc.stop(when + 0.45);
+      osc.onended = () => {
+        osc.disconnect();
+        g.disconnect();
+        this.engine.voiceOff();
+      };
+    }
+  }
+
+  /**
+   * Acorde resolutivo suave para el FIN del mini-juego (molde de `found()` más
+   * tenue): tríada de La menor sostenida y cálida que cierra la ronda.
+   */
+  gameEnd(): void {
+    if (!this.ensure()) return;
+    const ctx = this.ctx!;
+    const now = ctx.currentTime;
+    const chord = [440.0, 523.25, 659.25]; // A4, C5, E5 — La menor
+    for (let i = 0; i < chord.length; i++) {
+      const osc = ctx.createOscillator();
+      osc.type = "sine";
+      osc.frequency.value = chord[i];
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0.0001, now);
+      g.gain.exponentialRampToValueAtTime(0.08, now + 0.05);
+      g.gain.exponentialRampToValueAtTime(0.0001, now + 1.8);
+      osc.connect(g);
+      g.connect(this.bus!);
+      g.connect(this.delay!);
+      this.engine.voiceOn();
+      osc.start(now);
+      osc.stop(now + 1.9);
+      osc.onended = () => {
+        osc.disconnect();
+        g.disconnect();
+        this.engine.voiceOff();
+      };
+    }
+  }
+
   // ---- found del tótem: acorde-campana ceremonial dorado ----
 
   /** Único por sesión: arpegio pentatónico con cola larga — encontraste a Paqo. */

@@ -7,6 +7,60 @@ import { mulberry32 } from "./rng";
 
 type WindUniform = { value: number };
 
+// ============================================================================
+// [EQUIPO FLORA] CONTEO Y DENSIDAD — knobs para la ronda de arte.
+// Poblamos TODA la isla (claro r≈5 → filo orgánico r≈49..63) por ANILLOS
+// concéntricos: densidad plena cerca del tótem, decae hacia el filo y usa
+// geometría más barata lejos (LOD). El área r≤56 es ~5.4× la de r≤24, pero NO
+// escalamos 5× "a lo bruto": los anillos de densidad + el LOD + el fog exp2 de
+// la escena hacen el trabajo pesado. Todo procedural, sin texturas ni deps.
+// ============================================================================
+
+/** Filo base de la isla (espejo de IslandField.EDGE_BASE, solo para muestreo). */
+const ISLAND_EDGE_BASE = 56;
+
+/**
+ * Pasto por anillos (radios en u de mundo). Cada anillo = 1 InstancedMesh.
+ * `target` = hojas a posar (se reintenta hasta alcanzarlo o agotar el guard);
+ * el conteo real se reporta en build. Total objetivo ~40–55k en 3 draw calls.
+ */
+const GRASS_RINGS = [
+  // cercano: pradera densa que abraza el claro/tótem (sensación actual, +un pelín).
+  { rMin: 5, rMax: 26, target: 16000, detailed: true, align: 0.7, edgeLimited: false },
+  // medio: ~60% densidad, misma hoja detallada, alineación más suave.
+  { rMin: 26, rMax: 42, target: 15500, detailed: true, align: 0.5, edgeLimited: false },
+  // lejano: ~35% densidad, hoja BARATA (cruz de 2 quads), vertical, hasta filo−margen.
+  { rMin: 42, rMax: 58, target: 11000, detailed: false, align: 0.0, edgeLimited: true },
+] as const;
+/** El anillo lejano se detiene a `edgeRadiusAt(x,z) − margen` (no cuelga del filo). */
+const GRASS_EDGE_MARGIN = 3;
+/**
+ * Tolerancia de voladizo del pasto (u): cuánto puede sobresalir la huella de la
+ * base sobre una convexidad del terreno antes de rechazar. Las hojas son diminutas
+ * y toon; una tolerancia pequeña (en vez de ~0 en la esfera) evita rechazar casi
+ * todo el pasto sobre el terreno ondulado/ridged de la isla entera.
+ */
+const GRASS_OVERHANG_TOL = 0.14;
+/** Tope de intentos por anillo = target × este factor (corta si el anillo se satura). */
+const GRASS_TRIES_FACTOR = 7;
+
+// Conteos base de las demás piezas (~×3 de la versión "solo centro" para cubrir
+// la isla entera). Se multiplican por la densidad del preset dentro de cada build,
+// así los knobs de arte (paqo.json) siguen mandando y aterrizamos en ~3×.
+const TREE_COUNT = 210; // × trees.density (~0.35 → ~73 árboles)
+const FERN_COUNT = 620; // × shrubs.density (~0.4 → ~248 helechos)
+const SHRUB_COUNT = 400; // × shrubs.density (~0.4 → ~160 matas)
+const FLOWER_COUNT = 2600; // × flowers.density (~0.15 → ~390 flores)
+const ROCK_SCATTER = 120; // × rockScatter.density (~0.3 → ~36) + menhires
+const MENHIR_COUNT = 6; // menhires altos repartidos (era 4)
+const CLUMP_ANCHORS = 46; // anclas de agrupación por TODA la isla (era 16)
+
+// Corredores del cañón (±X): mantenerlos transitables. Los árboles densos evitan
+// la franja angular alrededor de ±X en el rango radial de los pasos.
+const CANYON_HALF_ANGLE = 0.5; // rad (~±28°, algo más ancho que IslandField.gateSigma)
+const CANYON_R_MIN = 12;
+const CANYON_R_MAX = 52;
+
 /**
  * Vegetación instanciada del valle de Paqo (isla flotante), fiel a la ficha:
  * pasto alto denso (cards con viento en shader), árboles "guardianes" retorcidos
@@ -21,9 +75,16 @@ type WindUniform = { value: number };
  */
 export class Vegetation {
   readonly group = new THREE.Group();
-  private windUniforms: WindUniform[] = [];
+  /** Tiempo compartido por TODOS los materiales con viento (una escritura/frame). */
+  private windTime: WindUniform = { value: 0 };
+  /** Escala global de amplitud del viento (setWindScale): 1 = normal; tormenta 0.7–2.4. */
+  private windScale: WindUniform = { value: 1 };
   private meshes: THREE.InstancedMesh[] = [];
   private ramp = makeToonRamp();
+
+  /** Conteos finales por pieza/anillo (para el reporte de build). */
+  private grassCounts: number[] = [];
+  private counts: Record<string, number> = {};
 
   private readonly excludeRadius = 5; // u libres alrededor del tótem (origen)
   /** Pendiente máxima (rad) donde aún se planta pasto alto (~40°). */
@@ -49,14 +110,27 @@ export class Vegetation {
   ) {}
 
   build(): void {
+    const hasPerf = typeof performance !== "undefined";
+    const t0 = hasPerf ? performance.now() : 0;
     const rand = mulberry32(0x9a3c1);
     this.buildGrass(rand);
-    const clumps = this.clumpAnchors(rand, 16);
+    const clumps = this.clumpAnchors(rand, CLUMP_ANCHORS);
     this.buildShrubs(rand, clumps);
     this.buildFerns(rand, clumps);
     this.buildFlowers(rand);
     this.buildTrees(rand);
     this.buildRocks(rand);
+    if (hasPerf) {
+      const ms = performance.now() - t0;
+      const grass = this.grassCounts.reduce((a, b) => a + b, 0);
+      console.debug(
+        `[EQUIPO FLORA] Vegetation.build ${ms.toFixed(1)}ms — pasto ${grass} (${this.grassCounts.join(
+          "+",
+        )}) · ${Object.entries(this.counts)
+          .map(([k, v]) => `${k} ${v}`)
+          .join(" · ")} · draw calls ${this.meshes.length}`,
+      );
+    }
   }
 
   addTo(scene: THREE.Scene): void {
@@ -64,7 +138,16 @@ export class Vegetation {
   }
 
   update(_dt: number, t: number): void {
-    for (const u of this.windUniforms) u.value = t;
+    this.windTime.value = t;
+  }
+
+  /**
+   * Escala global de la amplitud del viento sobre TODO material con windShader
+   * (pasto de los 3 anillos, helechos, matas, flores, musgo). Un único uniform
+   * compartido `uWindScale` (default 1); Atmos lo empuja a 0.7–2.4 en tormenta.
+   */
+  setWindScale(s: number): void {
+    this.windScale.value = s;
   }
 
   // ---- helpers de colocación ----
@@ -127,15 +210,18 @@ export class Vegetation {
   }
 
   /**
-   * Anclas de agrupación en el anillo de bordes del claro (13..22 u): donde se
-   * agolpan árboles y rocas. Helechos y matas cuelgan de estas anclas.
+   * Anclas de agrupación repartidas por TODA la isla (del borde del claro al
+   * filo): donde se agolpan helechos y matas. Muestreo área-uniforme + rechazo
+   * fuera de isla / dentro del claro, con un margen al filo para no colgar.
    */
   private clumpAnchors(rand: () => number, n: number): THREE.Vector2[] {
     const anchors: THREE.Vector2[] = [];
-    const minR = Math.max(13, this.excludeRadius);
+    const minR = Math.max(11, this.excludeRadius);
     let guard = 0;
-    while (anchors.length < n && guard++ < n * 12) {
-      const p = this.randAnnulus(rand, minR, 22);
+    while (anchors.length < n && guard++ < n * 24) {
+      const p = this.randAnnulus(rand, minR, ISLAND_EDGE_BASE - 4);
+      const r = Math.hypot(p.x, p.y);
+      if (r > this.field.edgeRadiusAt(p.x, p.y) - 4) continue;
       if (this.field.clearingMask(p.x, p.y) > 0.25) continue;
       anchors.push(p.clone());
     }
@@ -281,17 +367,41 @@ export class Vegetation {
     return merged;
   }
 
+  /**
+   * Hoja BARATA para el anillo lejano: dos quads verticales cruzados (8 vért,
+   * 4 tri) en vez del bladeCross detallado (10 vért, 6 tri). El fog + la lejanía
+   * ocultan la simplicidad; el ahorro de vértices ×miles de instancias cuenta.
+   */
+  private bladeQuadCross(w: number, h: number): THREE.BufferGeometry {
+    const half = w / 2;
+    const quad = new THREE.BufferGeometry();
+    quad.setAttribute(
+      "position",
+      new THREE.Float32BufferAttribute([-half, 0, 0, half, 0, 0, -half, h, 0, half, h, 0], 3),
+    );
+    quad.setAttribute("uv", new THREE.Float32BufferAttribute([0, 0, 1, 0, 0, 1, 1, 1], 2));
+    quad.setIndex([0, 1, 2, 2, 1, 3]);
+    quad.computeVertexNormals();
+    const other = quad.clone();
+    other.rotateY(Math.PI / 2);
+    const merged = mergeGeometries([quad, other], false)!;
+    quad.dispose();
+    other.dispose();
+    return merged;
+  }
+
   private windShader(mat: THREE.MeshToonMaterial, height: number, amp: number): void {
     mat.onBeforeCompile = (shader) => {
-      shader.uniforms.uTime = { value: 0 };
+      // Uniforms COMPARTIDOS por referencia: una escritura mueve todo el viento.
+      shader.uniforms.uTime = this.windTime;
+      shader.uniforms.uWindScale = this.windScale;
       shader.uniforms.uWindH = { value: height };
       shader.uniforms.uWindAmp = { value: amp };
-      this.windUniforms.push(shader.uniforms.uTime as WindUniform);
       shader.vertexShader = shader.vertexShader
         .replace(
           "#include <common>",
           `#include <common>
-           uniform float uTime; uniform float uWindH; uniform float uWindAmp;`,
+           uniform float uTime; uniform float uWindH; uniform float uWindAmp; uniform float uWindScale;`,
         )
         .replace(
           "#include <begin_vertex>",
@@ -305,8 +415,9 @@ export class Vegetation {
            float h01 = clamp(position.y / uWindH, 0.0, 1.0);
            float bend = h01 * h01;
            float sway = sin(uTime * 1.4 + ph) * 0.18 + sin(uTime * 2.7 + ph * 1.7) * 0.06;
-           transformed.x += sway * bend * uWindAmp;
-           transformed.z += cos(uTime * 1.05 + ph) * 0.10 * bend * uWindAmp;`,
+           float wAmp = uWindAmp * uWindScale;
+           transformed.x += sway * bend * wAmp;
+           transformed.z += cos(uTime * 1.05 + ph) * 0.10 * bend * wAmp;`,
         );
     };
     mat.needsUpdate = true;
@@ -322,10 +433,25 @@ export class Vegetation {
   // ---- pasto ----
 
   private buildGrass(rand: () => number): void {
+    for (const ring of GRASS_RINGS) this.buildGrassRing(rand, ring);
+  }
+
+  /**
+   * Posa un anillo de pasto (1 InstancedMesh). Optimización clave: la normal del
+   * terreno se muestrea UNA sola vez por candidato y de ahí salen tanto la
+   * pendiente (rechazo) como el `up` de alineación — evita el doble muestreo de
+   * heightAt (slopeAt + placeMatrix) de la versión previa. El anillo lejano usa
+   * hoja barata, sin alineación ni chequeo de voladizo (fog + lejanía perdonan).
+   */
+  private buildGrassRing(
+    rand: () => number,
+    ring: { rMin: number; rMax: number; target: number; detailed: boolean; align: number; edgeLimited: boolean },
+  ): void {
     const g = this.preset.vegetation?.grass ?? {};
-    const count = Math.round(8500 * (g.density ?? 0.85));
     const height = g.height ?? 1.4;
-    const geo = this.upNormals(this.bladeCross(0.16, height));
+    const geo = ring.detailed
+      ? this.upNormals(this.bladeCross(0.16, height))
+      : this.upNormals(this.bladeQuadCross(0.14, height));
     const mat = new THREE.MeshToonMaterial({
       gradientMap: this.ramp,
       side: THREE.DoubleSide,
@@ -333,29 +459,54 @@ export class Vegetation {
     });
     this.windShader(mat, height, g.windSway ?? 0.6);
 
-    const mesh = new THREE.InstancedMesh(geo, mat, count);
+    const mesh = new THREE.InstancedMesh(geo, mat, ring.target);
     const cAccent = new THREE.Color(this.preset.palette.accent);
     const cSage = new THREE.Color(this.preset.palette.secondary);
     const cDeep = new THREE.Color(this.preset.palette.primary);
     const col = new THREE.Color();
+    const maxSlope = Vegetation.MAX_GRASS_SLOPE;
 
+    // Se reintenta hasta alcanzar `target` o agotar el guard (satura → corta y
+    // reporta lo posado, sin colgarse). Coste dominado por heightAt (fBm); el
+    // guard acota el peor caso.
     let placed = 0;
-    let guard = 0;
-    while (placed < count && guard++ < count * 8) {
-      const p = this.randAnnulus(rand, this.excludeRadius, 24);
+    let tries = 0;
+    const maxTries = ring.target * GRASS_TRIES_FACTOR;
+    while (placed < ring.target && tries++ < maxTries) {
+      const p = this.randAnnulus(rand, ring.rMin, ring.rMax);
       const x = p.x;
       const z = p.y;
-      const yaw = rand() * Math.PI * 2;
+      // Filo orgánico: el anillo lejano no rebasa `edgeRadiusAt − margen` (barato,
+      // antes que cualquier heightAt).
+      if (ring.edgeLimited && Math.hypot(x, z) > this.field.edgeRadiusAt(x, z) - GRASS_EDGE_MARGIN)
+        continue;
       const mask = this.field.clearingMask(x, z);
       const inClearing = mask > 0.4;
       if (inClearing && rand() > 0.3) continue;
-      if (this.field.slopeAt(x, z) > Vegetation.MAX_GRASS_SLOPE) continue;
+      // Normal UNA vez → pendiente + up de alineación.
+      this.field.surfaceNormal(x, z, this._nrm);
+      if (Math.acos(THREE.MathUtils.clamp(this._nrm.y, -1, 1)) > maxSlope) continue;
       const sc = 0.7 + rand() * 0.6;
       const ySc = inClearing ? 0.22 + rand() * 0.07 : 0.85 + rand() * 0.4;
       this._s.set(sc, ySc, sc);
       const sink = 0.06 + 0.05 * sc;
-      this.placeMatrix(x, z, yaw, this._s, sink, this._m, 0.7);
-      if (this.footprintOverhang(this._m, 0.08) > 0.001) continue;
+      // Compón la matriz reutilizando la normal ya calculada (sin re-muestrear).
+      this._pos.set(x, this.field.heightAt(x, z), z);
+      if (ring.align > 0) {
+        this._up
+          .copy(Vegetation.UP)
+          .multiplyScalar(1 - ring.align)
+          .addScaledVector(this._nrm, ring.align)
+          .normalize();
+      } else {
+        this._up.copy(Vegetation.UP);
+      }
+      this._pos.addScaledVector(this._up, -sink);
+      this._q.setFromUnitVectors(Vegetation.UP, this._up);
+      this._yaw.setFromAxisAngle(this._up, rand() * Math.PI * 2);
+      this._q.premultiply(this._yaw);
+      this._m.compose(this._pos, this._q, this._s);
+      if (ring.detailed && this.footprintOverhang(this._m, 0.08) > GRASS_OVERHANG_TOL) continue;
       mesh.setMatrixAt(placed, this._m);
       col.copy(cSage).lerp(cAccent, inClearing ? 0.45 + rand() * 0.4 : rand() * 0.7);
       if (!inClearing && rand() < 0.25) col.lerp(cDeep, 0.4);
@@ -365,13 +516,14 @@ export class Vegetation {
     mesh.count = placed;
     if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
     this.registerMesh(mesh);
+    this.grassCounts.push(placed);
   }
 
   // ---- helechos ----
 
   private buildFerns(rand: () => number, clumps: THREE.Vector2[]): void {
     const s = this.preset.vegetation?.shrubs;
-    const count = Math.round(200 * (s?.density ?? 0.4));
+    const count = Math.round(FERN_COUNT * (s?.density ?? 0.4));
     const geo = this.fernPlant();
     const mat = new THREE.MeshToonMaterial({ gradientMap: this.ramp, side: THREE.DoubleSide });
     this.windShader(mat, 0.4, 0.28);
@@ -380,36 +532,38 @@ export class Vegetation {
     const cAccent = new THREE.Color(this.preset.palette.accent);
     const col = new THREE.Color();
 
+    // Cuelgan de las anclas (repartidas por toda la isla): se elige un ancla al
+    // azar por intento hasta llenar el conteo, así la cobertura no depende del nº
+    // de anclas y el bosquecillo respira alrededor de cada una.
     let placed = 0;
-    for (let a = 0; a < clumps.length && placed < count; a++) {
-      const anchor = clumps[a];
-      const per = 2 + ((rand() * 3) | 0);
-      for (let k = 0; k < per && placed < count; k++) {
-        const rr = rand() * 1.8;
-        const ang = rand() * Math.PI * 2;
-        const x = anchor.x + Math.cos(ang) * rr;
-        const z = anchor.y + Math.sin(ang) * rr;
-        if (this.field.clearingMask(x, z) > 0.3) continue;
-        const yaw = rand() * Math.PI * 2;
-        const sc = 0.85 + rand() * 0.7;
-        this._s.set(sc, sc * (0.85 + rand() * 0.35), sc);
-        const sink = 0.05 + 0.05 * sc;
-        mesh.setMatrixAt(placed, this.placeMatrix(x, z, yaw, this._s, sink, this._m, 0.65));
-        col.copy(cSage).lerp(cAccent, 0.2 + rand() * 0.45);
-        mesh.setColorAt(placed, col);
-        placed++;
-      }
+    let guard = 0;
+    while (placed < count && guard++ < count * 8 && clumps.length > 0) {
+      const anchor = clumps[(rand() * clumps.length) | 0];
+      const rr = rand() * 1.8;
+      const ang = rand() * Math.PI * 2;
+      const x = anchor.x + Math.cos(ang) * rr;
+      const z = anchor.y + Math.sin(ang) * rr;
+      if (this.field.clearingMask(x, z) > 0.3) continue;
+      const yaw = rand() * Math.PI * 2;
+      const sc = 0.85 + rand() * 0.7;
+      this._s.set(sc, sc * (0.85 + rand() * 0.35), sc);
+      const sink = 0.05 + 0.05 * sc;
+      mesh.setMatrixAt(placed, this.placeMatrix(x, z, yaw, this._s, sink, this._m, 0.65));
+      col.copy(cSage).lerp(cAccent, 0.2 + rand() * 0.45);
+      mesh.setColorAt(placed, col);
+      placed++;
     }
     mesh.count = placed;
     if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
     this.registerMesh(mesh);
+    this.counts.helechos = placed;
   }
 
   // ---- matas / arbustos ----
 
   private buildShrubs(rand: () => number, clumps: THREE.Vector2[]): void {
     const s = this.preset.vegetation?.shrubs;
-    const count = Math.round(130 * (s?.density ?? 0.4));
+    const count = Math.round(SHRUB_COUNT * (s?.density ?? 0.4));
     const geo = this.shrubBlob();
     const mat = new THREE.MeshToonMaterial({ gradientMap: this.ramp });
     this.windShader(mat, 0.5, 0.12);
@@ -420,34 +574,33 @@ export class Vegetation {
     const sizes = [0.75, 1.05, 1.5];
 
     let placed = 0;
-    for (let a = 0; a < clumps.length && placed < count; a++) {
-      const anchor = clumps[a];
-      const per = 1 + ((rand() * 2) | 0);
-      for (let k = 0; k < per && placed < count; k++) {
-        const rr = rand() * 2.2;
-        const ang = rand() * Math.PI * 2;
-        const x = anchor.x + Math.cos(ang) * rr;
-        const z = anchor.y + Math.sin(ang) * rr;
-        if (this.field.clearingMask(x, z) > 0.25) continue;
-        const base = sizes[(rand() * sizes.length) | 0];
-        const yaw = rand() * Math.PI * 2;
-        this._s.set(base * (0.9 + rand() * 0.2), base * (0.85 + rand() * 0.3), base * (0.9 + rand() * 0.2));
-        mesh.setMatrixAt(placed, this.placeMatrix(x, z, yaw, this._s, base * 0.26, this._m, 0.6));
-        col.copy(cDeep).lerp(cSage, 0.35 + rand() * 0.4);
-        mesh.setColorAt(placed, col);
-        placed++;
-      }
+    let guard = 0;
+    while (placed < count && guard++ < count * 8 && clumps.length > 0) {
+      const anchor = clumps[(rand() * clumps.length) | 0];
+      const rr = rand() * 2.2;
+      const ang = rand() * Math.PI * 2;
+      const x = anchor.x + Math.cos(ang) * rr;
+      const z = anchor.y + Math.sin(ang) * rr;
+      if (this.field.clearingMask(x, z) > 0.25) continue;
+      const base = sizes[(rand() * sizes.length) | 0];
+      const yaw = rand() * Math.PI * 2;
+      this._s.set(base * (0.9 + rand() * 0.2), base * (0.85 + rand() * 0.3), base * (0.9 + rand() * 0.2));
+      mesh.setMatrixAt(placed, this.placeMatrix(x, z, yaw, this._s, base * 0.26, this._m, 0.6));
+      col.copy(cDeep).lerp(cSage, 0.35 + rand() * 0.4);
+      mesh.setColorAt(placed, col);
+      placed++;
     }
     mesh.count = placed;
     if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
     this.registerMesh(mesh);
+    this.counts.matas = placed;
   }
 
   // ---- flores ----
 
   private buildFlowers(rand: () => number): void {
     const f = this.preset.vegetation?.flowers;
-    const count = Math.round(850 * (f?.density ?? 0.15));
+    const count = Math.round(FLOWER_COUNT * (f?.density ?? 0.15));
     const stemH = 0.22;
     const stemGeo = this.flowerStem(stemH);
     const corGeo = this.flowerCorolla(stemH);
@@ -471,10 +624,13 @@ export class Vegetation {
     let placed = 0;
     let guard = 0;
     while (placed < count && guard++ < count * 8) {
-      // Centro de mata en el ANILLO del borde del claro (arco ~9..16 u).
-      const center = this.randAnnulus(rand, Math.max(9, this.excludeRadius), 16).clone();
+      // Matas de flores por TODA la isla (del borde del claro al filo). Evita el
+      // centro pelado del claro (mask>0.9) y el filo (para no colgar del vacío).
+      const center = this.randAnnulus(rand, Math.max(9, this.excludeRadius), ISLAND_EDGE_BASE - 6).clone();
+      const cr = Math.hypot(center.x, center.y);
+      if (cr > this.field.edgeRadiusAt(center.x, center.y) - 5) continue;
       const mask = this.field.clearingMask(center.x, center.y);
-      if (mask < 0.08 || mask > 0.9) continue;
+      if (mask > 0.9) continue;
       const clusterColor = palette[(rand() * palette.length) | 0];
       const mixed = rand() < 0.3;
       const clusterSize = 3 + ((rand() * 3) | 0);
@@ -500,13 +656,30 @@ export class Vegetation {
     if (corollas.instanceColor) corollas.instanceColor.needsUpdate = true;
     this.registerMesh(stems);
     this.registerMesh(corollas);
+    this.counts.flores = placed;
+  }
+
+  /**
+   * ¿(x,z) cae en un corredor del cañón (±X)? Se usa para NO plantar árboles
+   * densos y mantener los dos pasos transitables (el check de pendiente ayuda,
+   * pero los troncos taparían la salida). Réplica ligera del gateMask privado de
+   * IslandField: franja angular alrededor de ±X en el rango radial de los pasos.
+   */
+  private inCanyonCorridor(x: number, z: number): boolean {
+    const r = Math.hypot(x, z);
+    if (r < CANYON_R_MIN || r > CANYON_R_MAX) return false;
+    const az = Math.atan2(z, x);
+    const d0 = Math.abs(Math.atan2(Math.sin(az), Math.cos(az))); // dist angular a +X
+    const d1 = Math.abs(Math.atan2(Math.sin(az - Math.PI), Math.cos(az - Math.PI))); // a −X
+    return Math.min(d0, d1) < CANYON_HALF_ANGLE;
   }
 
   // ---- árboles guardianes + musgo colgante ----
 
   private buildTrees(rand: () => number): void {
     const tp = this.preset.vegetation?.trees;
-    const treeCount = Math.round(70 * (tp?.density ?? 0.35));
+    const treeCount = Math.round(TREE_COUNT * (tp?.density ?? 0.35));
+    const maxTreeSlope = THREE.MathUtils.degToRad(45);
 
     const trunkGeo = new THREE.CylinderGeometry(0.14, 0.34, 2.6, 6, 3).toNonIndexed();
     trunkGeo.translate(0, 1.3, 0);
@@ -540,13 +713,30 @@ export class Vegetation {
     let ci = 0;
     let mi = 0;
     let guard = 0;
-    while (ti < treeCount && guard++ < treeCount * 8) {
-      // Guardianes agrupados en bordes/cornisas del anfiteatro (~15..24 u).
-      const clusterAtEdges = tp?.clusterAtEdges !== false;
-      const minR = clusterAtEdges ? Math.max(15, this.excludeRadius) : this.excludeRadius;
-      const p = this.randAnnulus(rand, minR, 24);
-      const x = p.x;
-      const z = p.y;
+    const clusterAtEdges = tp?.clusterAtEdges !== false;
+    while (ti < treeCount && guard++ < treeCount * 10) {
+      // Guardianes que ABRAZAN el filo de la isla (bosquecillos sobre el acantilado
+      // — dramático con la caída al vacío), más algunos bosquetes interiores.
+      const az = rand() * Math.PI * 2;
+      let x: number;
+      let z: number;
+      if (clusterAtEdges && rand() < 0.7) {
+        // edgeRadiusAt sólo depende del azimut (normaliza dentro): eval en el rayo.
+        const edge = this.field.edgeRadiusAt(Math.cos(az), Math.sin(az));
+        const r = edge - (2 + rand() * 11); // 2..13 u tierra adentro del filo
+        x = Math.cos(az) * r;
+        z = Math.sin(az) * r;
+      } else {
+        const r = 12 + rand() * 34; // bosquete interior repartido
+        x = Math.cos(az) * r;
+        z = Math.sin(az) * r;
+      }
+      if (!this.field.insideIsland(x, z)) continue;
+      if (this.field.clearingMask(x, z) > 0.25) continue;
+      // Corredores del cañón: densidad muy baja (deja los pasos transitables).
+      if (this.inCanyonCorridor(x, z) && rand() < 0.85) continue;
+      // Nada de guardianes colgando de paredes de acantilado.
+      if (this.field.slopeAt(x, z) > maxTreeSlope) continue;
       const yaw = rand() * Math.PI * 2;
       const scale = 1.4 + rand() * 1.3;
       const lean = 0.12 + rand() * 0.14;
@@ -612,6 +802,7 @@ export class Vegetation {
       if (m.instanceColor) m.instanceColor.needsUpdate = true;
       this.registerMesh(m);
     }
+    this.counts.arboles = ti;
   }
 
   // ---- rocas-menhir musgosas ----
@@ -619,8 +810,8 @@ export class Vegetation {
   private buildRocks(rand: () => number): void {
     const rs = this.preset.terrain.rockScatter;
     const density = rs && "density" in rs ? (rs as { density: number }).density : 0.3;
-    const menhirCount = 4;
-    const count = Math.round(40 * density) + menhirCount;
+    const menhirCount = MENHIR_COUNT;
+    const count = Math.round(ROCK_SCATTER * density) + menhirCount;
     const facets = rs && "lowPolyFacets" in rs ? (rs as { lowPolyFacets: number }).lowPolyFacets : 7;
     const detail = facets >= 12 ? 2 : 1;
     const geo = new THREE.IcosahedronGeometry(0.8, detail);
@@ -641,9 +832,11 @@ export class Vegetation {
     let guard = 0;
     while (placed < count && guard++ < count * 10) {
       const isMenhir = placed < menhirCount;
-      const p = this.randAnnulus(rand, this.excludeRadius, 22);
+      // Menhires en el anillo interior (protagonistas), guijarros por toda la isla.
+      const p = this.randAnnulus(rand, this.excludeRadius, isMenhir ? 22 : ISLAND_EDGE_BASE - 3);
       const x = p.x;
       const z = p.y;
+      if (Math.hypot(x, z) > this.field.edgeRadiusAt(x, z) - 3) continue;
       if (this.field.clearingMask(x, z) > 0.15) continue;
       toRock.set(x, 0, z).sub(spawnP);
       const dist = toRock.length();
@@ -664,6 +857,7 @@ export class Vegetation {
     mesh.count = placed;
     if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
     this.registerMesh(mesh);
+    this.counts.rocas = placed;
   }
 
   dispose(): void {

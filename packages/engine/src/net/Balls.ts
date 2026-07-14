@@ -56,11 +56,29 @@ const THROW_ARC = 4.6;
 /** Fracción de la velocidad del jugador que hereda la pelota al lanzarla. */
 const THROW_INHERIT = 0.5;
 
+/**
+ * Radio (u, plano XZ desde el origen) de la ZONA CENTRAL de juego. El claro llega
+ * a ~15 u y el anfiteatro a r=20; 18 deja jugar en el claro sin que las pelotas se
+ * pierdan monte arriba. La regla de zona está SIEMPRE activa (con o sin partida):
+ * una pelota cuyo centro salga de r>ZONE_RADIUS (o caiga bajo el claro) respawnea
+ * instantáneamente a su "slot casa" determinista.
+ */
+const ZONE_RADIUS = 18;
+/** Margen de caída (u) bajo el nivel del claro que también dispara el respawn. */
+const ZONE_FALL_MARGIN = 8;
+
 interface Ball {
   pos: THREE.Vector3;
   vel: THREE.Vector3;
   grounded: boolean;
   kickCd: number;
+  /**
+   * true si esta pelota fue LANZADA por el jugador local (throwBall) y sigue
+   * "viva" (aún no durmió, ni fue agarrada, ni respawneó). El mini-juego usa esta
+   * bandera como autoridad del lanzador: sólo este cliente detecta el golpe a Paqo
+   * de SUS pelotas; los remotos se enteran por el evento de red.
+   */
+  thrownLive: boolean;
   /** Reconciliación de red: objetivo + tiempo restante de blend. */
   recPos?: THREE.Vector3;
   recVel?: THREE.Vector3;
@@ -77,6 +95,8 @@ export class Balls {
   private mesh!: THREE.InstancedMesh;
   private balls: Ball[] = [];
   private kickCbs = new Set<(id: number, s: BallState) => void>();
+  private throwCbs = new Set<(id: number) => void>();
+  private respawnCbs = new Set<(id: number, s: BallState, reason: "out" | "hit") => void>();
 
   // --- agarrar / lanzar ---
   /** Índice de la pelota agarrada, o -1 si no llevas ninguna (solo una a la vez). */
@@ -111,17 +131,14 @@ export class Balls {
     this.mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
 
     for (let i = 0; i < BALL_COUNT; i++) {
-      // Anillo esparcido en el claro (4..9 u del tótem), altura = terreno.
-      const a = (i / BALL_COUNT) * Math.PI * 2 + 0.4;
-      const r = 4 + (i % 3) * 1.7;
-      const x = Math.cos(a) * r;
-      const z = Math.sin(a) * r;
-      const y = this.field.heightAt(x, z) + RADIUS;
+      // Anillo esparcido en el claro (slot casa determinista, 4..9 u del tótem).
+      const home = this.homeSlot(i, new THREE.Vector3());
       this.balls.push({
-        pos: new THREE.Vector3(x, y, z),
+        pos: home,
         vel: new THREE.Vector3(),
         grounded: true,
         kickCd: 0,
+        thrownLive: false,
         recTimer: 0,
       });
       this.mesh.setColorAt(i, new THREE.Color(BALL_COLOR));
@@ -139,7 +156,22 @@ export class Balls {
    * cámara sin coste; la flotación la aplica `update`. Oculto hasta que hay una
    * pelota agarrable cerca y no llevas ninguna. Cero DOM.
    */
+  /**
+   * Posición "slot casa" determinista de la pelota `i`: el mismo anillo de build
+   * (a=(i/9)·2π+0.4, r=4+(i%3)·1.7), anclado a la altura del terreno. Es adonde
+   * respawnea al salir de la zona o al golpear a Paqo — igual en todos los clientes.
+   */
+  homeSlot(i: number, out: THREE.Vector3): THREE.Vector3 {
+    const a = (i / BALL_COUNT) * Math.PI * 2 + 0.4;
+    const r = 4 + (i % 3) * 1.7;
+    const x = Math.cos(a) * r;
+    const z = Math.sin(a) * r;
+    return out.set(x, this.field.heightAt(x, z) + RADIUS, z);
+  }
+
   private buildEHint(): void {
+    // Sin DOM (SSR/tests) no hay sprite E: el resto de la física funciona igual.
+    if (typeof document === "undefined") return;
     this.eTex = this.makeKeyTexture("E");
     const mat = new THREE.SpriteMaterial({
       map: this.eTex,
@@ -255,6 +287,66 @@ export class Balls {
     return () => this.kickCbs.delete(cb);
   }
 
+  /** Suscribe LANZAMIENTOS locales (throwBall). Distinto de la patada al caminar. */
+  onThrow(cb: (id: number) => void): () => void {
+    this.throwCbs.add(cb);
+    return () => this.throwCbs.delete(cb);
+  }
+
+  /**
+   * Suscribe RESPAWNS de pelota (salida de zona o golpe a Paqo). `reason` distingue
+   * el motivo; `s` es el nuevo estado (slot casa) para FX/sonido. La difusión de red
+   * reutiliza `onKick` (respawnToHome emite también por ahí), así que los remotos
+   * reconcilian sin un canal nuevo.
+   */
+  onRespawn(cb: (id: number, s: BallState, reason: "out" | "hit") => void): () => void {
+    this.respawnCbs.add(cb);
+    return () => this.respawnCbs.delete(cb);
+  }
+
+  /** Nº de pelotas. */
+  get count(): number {
+    return this.balls.length;
+  }
+
+  /** ¿La pelota `id` fue lanzada por el jugador local y sigue viva? */
+  isThrownLive(id: number): boolean {
+    return this.balls[id]?.thrownLive === true;
+  }
+
+  /** Copia la posición actual de la pelota `id` en `out`. */
+  positionOf(id: number, out: THREE.Vector3): THREE.Vector3 {
+    const b = this.balls[id];
+    return b ? out.copy(b.pos) : out.set(0, 0, 0);
+  }
+
+  /**
+   * Teleporta la pelota `id` a su slot casa (respawn INSTANTÁNEO, sin lerp). Si la
+   * llevabas agarrada, se te esfuma de las manos (force-drop). Limpia velocidad,
+   * reconciliación y la bandera `thrownLive`. Emite `onRespawn` (FX/sonido) y
+   * reutiliza `onKick` para que la red difunda el nuevo estado a los remotos.
+   */
+  respawnToHome(id: number, reason: "out" | "hit"): void {
+    const b = this.balls[id];
+    if (!b) return;
+    if (id === this.heldId) {
+      this.heldId = -1;
+      if (this.eSprite) this.eSprite.visible = false;
+    }
+    this.homeSlot(id, b.pos);
+    b.vel.set(0, 0, 0);
+    b.grounded = true;
+    b.thrownLive = false;
+    b.kickCd = 0;
+    b.recPos = undefined;
+    b.recVel = undefined;
+    b.recTimer = 0;
+    const s = this.stateOf(id);
+    for (const cb of this.respawnCbs) cb(id, s, reason);
+    // Difusión de red: reutiliza el canal de patadas para que los remotos snap a casa.
+    for (const cb of this.kickCbs) cb(id, s);
+  }
+
   // ---- agarrar / lanzar ----
 
   /**
@@ -302,6 +394,7 @@ export class Balls {
     this.heldId = id;
     b.vel.set(0, 0, 0);
     b.grounded = false;
+    b.thrownLive = false; // agarrarla cancela el estado de "lanzada viva"
     b.recPos = undefined;
     b.recVel = undefined;
     b.recTimer = 0;
@@ -330,9 +423,13 @@ export class Balls {
     );
     b.grounded = false;
     b.kickCd = KICK_COOLDOWN;
+    // Marca de LANZAMIENTO local: sólo este cliente sabe que él la lanzó. El
+    // mini-juego la usa como autoridad para detectar el golpe a Paqo.
+    b.thrownLive = true;
 
     const s = this.stateOf(id);
     for (const cb of this.kickCbs) cb(id, s);
+    for (const cb of this.throwCbs) cb(id);
     return true;
   }
 
@@ -341,9 +438,60 @@ export class Balls {
     const b = this.balls[id];
     if (!b) return;
     if (id === this.heldId) return; // la pelota agarrada la manda el portador local
+    // Reconciliación entrante FUERA de zona: en vez de lerp hacia el monte, snap al
+    // slot casa. Así todos los clientes convergen sin pelearse por una pelota perdida.
+    if (Math.hypot(s.pos[0], s.pos[2]) > ZONE_RADIUS) {
+      this.homeSlot(id, b.pos);
+      b.vel.set(0, 0, 0);
+      b.grounded = true;
+      b.thrownLive = false;
+      b.recPos = undefined;
+      b.recVel = undefined;
+      b.recTimer = 0;
+      return;
+    }
     b.recPos = new THREE.Vector3(s.pos[0], s.pos[1], s.pos[2]);
     b.recVel = new THREE.Vector3(s.vel[0], s.vel[1], s.vel[2]);
     b.recTimer = RECONCILE_TIME;
+  }
+
+  /**
+   * Rebote horizontal simple contra un cilindro vertical (centro cx,cz, radio r):
+   * refleja la componente horizontal de la velocidad con restitución y empuja la
+   * pelota justo fuera del cilindro. Lo usa el mini-juego para el "cariño" de Paqo
+   * cuando NO hay partida (Paqo reacciona un poco sin puntuar ni respawnear).
+   */
+  deflect(id: number, cx: number, cz: number, radius: number, restitution: number): void {
+    const b = this.balls[id];
+    if (!b) return;
+    let nx = b.pos.x - cx;
+    let nz = b.pos.z - cz;
+    let d = Math.hypot(nx, nz);
+    if (d < 1e-4) {
+      // Encimada al eje: usa la velocidad inversa como normal, o +X por defecto.
+      nx = -b.vel.x;
+      nz = -b.vel.z;
+      d = Math.hypot(nx, nz);
+      if (d < 1e-4) {
+        nx = 1;
+        nz = 0;
+        d = 1;
+      }
+    }
+    nx /= d;
+    nz /= d;
+    const vn = b.vel.x * nx + b.vel.z * nz;
+    if (vn < 0) {
+      // Se movía HACIA el tótem: refleja esa componente con restitución.
+      const j = -(1 + restitution) * vn;
+      b.vel.x += j * nx;
+      b.vel.z += j * nz;
+    }
+    // Sácala justo al borde del cilindro (no la dejes penetrando).
+    b.pos.x = cx + nx * radius;
+    b.pos.z = cz + nz * radius;
+    b.vel.y += 0.4; // saltito juguetón
+    b.grounded = false;
   }
 
   /** Estado actual de una pelota (para el smoke test / difusión). */
@@ -381,6 +529,12 @@ export class Balls {
 
       // --- pelota agarrada: sigue el punto de agarre (frente/manos), sin física ---
       if (i === this.heldId) {
+        // Si te llevas la pelota FUERA de la zona central se te esfuma de las manos
+        // (force-drop) y respawnea a casa. La zona está siempre activa.
+        if (holdTarget && Math.hypot(holdTarget.x, holdTarget.z) > ZONE_RADIUS) {
+          this.respawnToHome(i, "out");
+          continue;
+        }
         if (holdTarget) b.pos.copy(holdTarget);
         b.vel.set(0, 0, 0);
         b.grounded = false;
@@ -431,9 +585,19 @@ export class Balls {
         if (horiz < SLEEP_SPEED && Math.abs(b.vel.y) < BOUNCE_STOP) {
           b.vel.set(0, 0, 0);
           b.pos.y = groundY;
+          b.thrownLive = false; // durmió: ya no cuenta como lanzamiento vivo
         }
       } else {
         b.grounded = false;
+      }
+
+      // --- ZONA CENTRAL (siempre activa): fuera de r>18 o caída al vacío → casa ---
+      if (
+        Math.hypot(b.pos.x, b.pos.z) > ZONE_RADIUS ||
+        b.pos.y < this.field.clearLevel - ZONE_FALL_MARGIN
+      ) {
+        this.respawnToHome(i, "out");
+        continue;
       }
 
       // --- patada por contacto con el jugador ---
@@ -525,6 +689,8 @@ export class Balls {
 
   dispose(): void {
     this.kickCbs.clear();
+    this.throwCbs.clear();
+    this.respawnCbs.clear();
     this.mesh.geometry.dispose();
     (this.mesh.material as THREE.Material).dispose();
     this.mesh.dispose();

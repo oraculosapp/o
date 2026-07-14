@@ -14,6 +14,8 @@ export class Atmosphere {
   private fogMats: THREE.ShaderMaterial[] = [];
   private disposables: (THREE.BufferGeometry | THREE.Material | THREE.Texture)[] = [];
   private fogShells: THREE.Mesh[] = [];
+  /** Opacidades base de cada capa de niebla (capturadas la 1ª vez que se escala). */
+  private fogOpacityBase?: number[];
 
   constructor(
     private field: IslandField,
@@ -27,6 +29,17 @@ export class Atmosphere {
 
   addTo(scene: THREE.Scene): void {
     scene.add(this.group);
+  }
+
+  /** Escala global de la densidad/opacidad del shell de niebla (1=por defecto). */
+  setDensityScale(s: number): void {
+    // Captura las opacidades base la primera vez (baseline = escala 1).
+    if (!this.fogOpacityBase) {
+      this.fogOpacityBase = this.fogMats.map((m) => m.uniforms.uOpacity.value as number);
+    }
+    for (let i = 0; i < this.fogMats.length; i++) {
+      this.fogMats[i].uniforms.uOpacity.value = this.fogOpacityBase[i] * s;
+    }
   }
 
   update(dt: number, t: number): void {

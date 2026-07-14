@@ -26,6 +26,7 @@ import type {
 import { ensureAnonSession, getSupabaseBrowserClient } from "./supabase";
 import { getStoredArchetype, getStoredPrimaryTint } from "./avatar-store";
 import { isArchetypeId } from "./avatars";
+import type { GameEventUi, WorldGameHooks } from "./world-ui";
 
 // --- Contrato con el engine (lo implementa el equipo PaqoWorld) --------------
 export interface WorldNetHooks {
@@ -107,6 +108,12 @@ export interface BiosphereRealtimeOptions extends RealtimeCallbacks {
   biosphereId: string;
   /** Getter perezoso del world.net del engine (puede no existir todavía). */
   getWorldNet?: () => WorldNetHooks | null | undefined;
+  /**
+   * Getter perezoso del mini-juego `world.game` (equipo Juego). Puede no existir
+   * todavía; se engancha al MISMO canal `biosphere:<id>` (broadcast "game"), sin
+   * crear una segunda suscripción. Si falta, el juego funciona 100% local.
+   */
+  getWorldGame?: () => WorldGameHooks | null | undefined;
   displayName: string;
   tint: string;
 }
@@ -150,6 +157,57 @@ interface BallPayload {
   vel: [number, number, number];
 }
 
+/** Sobre del evento del mini-juego por broadcast: el GameEvent + el id del emisor. */
+type GamePayload = GameEventUi & { id: string };
+
+/** ¿`n` es un número finito? (los broadcasts no son de fiar; M-5). */
+function isFiniteNum(n: unknown): n is number {
+  return typeof n === "number" && Number.isFinite(n);
+}
+
+/** ¿`v` es una terna [x,y,z] de números finitos? */
+function isVec3(v: unknown): v is [number, number, number] {
+  return Array.isArray(v) && v.length === 3 && v.every(isFiniteNum);
+}
+
+/**
+ * Valida y normaliza un evento de mini-juego recibido por broadcast (M-5): tipo en
+ * lista blanca, números finitos, `scores` sano (objeto ≤64 claves con valores
+ * finitos), strings cortos. Devuelve un {@link GameEventUi} limpio (sin el `id` del
+ * sobre) o null si algo no cuadra. NUNCA confía en la forma del payload entrante.
+ */
+function parseGameEvent(payload: unknown): GameEventUi | null {
+  if (!payload || typeof payload !== "object") return null;
+  const p = payload as Record<string, unknown>;
+  const short = (s: unknown): s is string => typeof s === "string" && s.length <= 64;
+  switch (p.type) {
+    case "start":
+      if (!short(p.by) || !isFiniteNum(p.endsAt)) return null;
+      return { type: "start", by: p.by, endsAt: p.endsAt };
+    case "stop":
+      if (!short(p.by)) return null;
+      return { type: "stop", by: p.by };
+    case "hit":
+      if (!short(p.by) || !isFiniteNum(p.ballId) || !isVec3(p.hitPos)) return null;
+      return { type: "hit", by: p.by, ballId: p.ballId, hitPos: p.hitPos };
+    case "state": {
+      if (!short(p.startedBy) || !isFiniteNum(p.endsAt)) return null;
+      const raw = p.scores;
+      if (!raw || typeof raw !== "object") return null;
+      const entries = Object.entries(raw as Record<string, unknown>);
+      if (entries.length > 64) return null;
+      const scores: Record<string, number> = {};
+      for (const [k, v] of entries) {
+        if (k.length > 64 || !isFiniteNum(v)) return null;
+        scores[k] = v;
+      }
+      return { type: "state", endsAt: p.endsAt, scores, startedBy: p.startedBy };
+    }
+    default:
+      return null;
+  }
+}
+
 export class BiosphereRealtime {
   private supabase: SupabaseClient | null = null;
   private channel: RealtimeChannel | null = null;
@@ -167,6 +225,8 @@ export class BiosphereRealtime {
   private netRetryTimer: ReturnType<typeof setTimeout> | null = null;
   private netUnsubs: Array<() => void> = [];
   private netWired = false;
+  private gameWired = false;
+  private gameRetryTimer: ReturnType<typeof setTimeout> | null = null;
   private disposed = false;
 
   constructor(private readonly opts: BiosphereRealtimeOptions) {}
@@ -221,6 +281,7 @@ export class BiosphereRealtime {
         archetype?: string;
       }>;
       const members: RosterMember[] = [];
+      const names: Record<string, string> = {};
       this.presentIds.clear();
       for (const key of Object.keys(state)) {
         const meta = state[key][0];
@@ -230,15 +291,20 @@ export class BiosphereRealtime {
         // registramos AMBOS por si el meta.id difiere, para el guard de pos/ball.
         this.presentIds.add(id);
         this.presentIds.add(key);
+        const display_name = meta.display_name ?? "Viajero";
+        names[id] = display_name;
         members.push({
           id,
-          display_name: meta.display_name ?? "Viajero",
+          display_name,
           tint: meta.tint,
           // Sólo ids de arquetipo válidos (lista blanca) llegan al engine (M-5).
           archetype: safeArchetype(meta.archetype),
         });
       }
       this.opts.onRoster?.(members);
+      // El mini-juego resuelve nombres SIN una segunda suscripción: le pasamos el
+      // roster de presence (sticky en BallGame) para pintar el marcador.
+      this.game()?.mergeNames?.(names);
     });
 
     // (b) Broadcast "pos" — avatares remotos
@@ -267,6 +333,15 @@ export class BiosphereRealtime {
       this.net()?.applyBallState(payload.ballId, { pos: payload.pos, vel: payload.vel });
     });
 
+    // (c2) Broadcast "game" — eventos del mini-juego ¡Dale a Paqo!
+    channel.on("broadcast", { event: "game" }, ({ payload }: { payload: GamePayload }) => {
+      if (!payload || payload.id === me.sessionId) return;
+      // Anti-griefing (M-5): sólo emisores presentes; y valida la forma del evento.
+      if (typeof payload.id !== "string" || !this.presentIds.has(payload.id)) return;
+      const event = parseGameEvent(payload);
+      if (event) this.game()?.applyRemote?.(event);
+    });
+
     // (d) postgres_changes — chat público
     channel.on(
       "postgres_changes",
@@ -293,6 +368,7 @@ export class BiosphereRealtime {
           archetype: me.archetype,
         });
         this.wireWorldNet();
+        this.wireGame();
         this.startSweep();
       } else if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
         this.opts.onStatus?.("error");
@@ -304,6 +380,10 @@ export class BiosphereRealtime {
 
   private net(): WorldNetHooks | null {
     return this.opts.getWorldNet?.() ?? null;
+  }
+
+  private game(): WorldGameHooks | null {
+    return this.opts.getWorldGame?.() ?? null;
   }
 
   /** Engancha los hooks del engine; reintenta si world.net aún no existe. */
@@ -353,6 +433,41 @@ export class BiosphereRealtime {
     });
 
     this.netUnsubs.push(stopTick, stopKick);
+  }
+
+  /**
+   * Engancha el mini-juego `world.game` al MISMO canal (broadcast "game"); reintenta
+   * si el engine aún no lo montó. Registra al jugador local, siembra su nombre y
+   * reenvía cada evento local con el id del emisor. Igual patrón de retry que
+   * {@link wireWorldNet}.
+   */
+  private wireGame(retry = 0): void {
+    if (this.disposed || this.gameWired) return;
+    const game = this.game();
+    const me = this.identity;
+    if (!game || !me) {
+      if (retry < NET_RETRY_MAX) {
+        this.gameRetryTimer = setTimeout(() => this.wireGame(retry + 1), NET_RETRY_MS);
+      }
+      return;
+    }
+    this.gameWired = true;
+
+    game.setLocalPlayer?.(me.sessionId);
+    // Siembra mi propio nombre para que el marcador me muestre bien desde el primer
+    // frame (el resto del roster llega por presence sync → mergeNames).
+    game.mergeNames?.({ [me.sessionId]: me.displayName });
+
+    const stopGame = game.onLocalEvent?.((e) => {
+      const ch = this.channel;
+      if (!ch) return;
+      void ch.send({
+        type: "broadcast",
+        event: "game",
+        payload: { ...e, id: me.sessionId } satisfies GamePayload,
+      });
+    });
+    if (stopGame) this.netUnsubs.push(stopGame);
   }
 
   /** Retira avatares remotos que dejaron de emitir hace >5 s. */
@@ -437,6 +552,7 @@ export class BiosphereRealtime {
   disconnect(): void {
     this.disposed = true;
     if (this.netRetryTimer) clearTimeout(this.netRetryTimer);
+    if (this.gameRetryTimer) clearTimeout(this.gameRetryTimer);
     if (this.sweepTimer) clearInterval(this.sweepTimer);
     for (const off of this.netUnsubs) {
       try {
