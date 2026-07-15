@@ -48,7 +48,7 @@ export class PixelSwarm {
    */
   private reduced = false;
 
-  constructor(field: HeightField, preset: BiospherePreset, count = 560) {
+  constructor(field: HeightField, _preset: BiospherePreset, count = 560) {
     this.count = count;
     this.base = new Float32Array(count * 3);
     this.phase = new Float32Array(count);
@@ -59,11 +59,10 @@ export class PixelSwarm {
     const sizes = new Float32Array(count);
     const colors = new Float32Array(count * 3);
 
-    // Paleta oro / rosa / púrpura / turquesa / naranja (del preset si viene,
-    // con fallback místico). El oro sigue siendo el rey de los emisivos.
-    const pixelEntry = preset.particles?.find((p) => (p.colors?.length ?? 0) > 0);
-    const hexes = pixelEntry?.colors ?? ["#E3B063", "#F2A6B8", "#B18BC9", "#37D6C4", "#FF9E6B"];
-    const palette = hexes.map((h) => new THREE.Color(h));
+    // Pedido de dirección de arte (2026-07-14): TODAS las partículas blancas.
+    // Blanco cálido (el de las pelotas) con leve variación de brillo por píxel;
+    // la paleta de colores del preset queda dormida por si se quiere revivir.
+    const white = new THREE.Color(0xf4f1ea);
     const clear = field.clearLevel;
 
     for (let i = 0; i < count; i++) {
@@ -94,10 +93,10 @@ export class PixelSwarm {
       // Dos tamaños de píxel (pequeño mayoritario, alguno grande que brilla más).
       sizes[i] = Math.random() < 0.78 ? 2.4 : 4.6;
 
-      const c = palette[(Math.random() * palette.length) | 0];
-      colors[i * 3] = c.r;
-      colors[i * 3 + 1] = c.g;
-      colors[i * 3 + 2] = c.b;
+      const brillo = 0.82 + Math.random() * 0.18;
+      colors[i * 3] = white.r * brillo;
+      colors[i * 3 + 1] = white.g * brillo;
+      colors[i * 3 + 2] = white.b * brillo;
     }
 
     this.geo = new THREE.BufferGeometry();
