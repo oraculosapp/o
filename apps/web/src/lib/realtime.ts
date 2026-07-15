@@ -23,6 +23,7 @@ import type {
   RealtimePresenceState,
   SupabaseClient,
 } from "@supabase/supabase-js";
+import { isEmoteId } from "@phygitalia/engine";
 import { ensureAnonSession, getSupabaseBrowserClient } from "./supabase";
 import { getStoredArchetype, getStoredPrimaryTint } from "./avatar-store";
 import { isArchetypeId, isAvatarId } from "./avatars";
@@ -66,6 +67,21 @@ export interface WorldNetHooks {
   /** Fija el id del jugador local (desempate de robos por id). */
   setLocalId?(id: string): void;
   onZoneSignal(cb: (signal: "far" | "mid" | "near" | "found") => void): () => void;
+  /**
+   * EMOTES (equipo Avatar). Opcionales (`?`) para degradar con gracia si el engine
+   * aún no los expone: se suscribe a los emotes LOCALES (para difundir "emote") y
+   * se aplican los emotes REMOTOS al avatar correspondiente.
+   */
+  onLocalEmote?(cb: (emote: string) => void): () => void;
+  applyRemoteEmote?(id: string, emote: string): void;
+  /**
+   * DIBUJAR (equipo Vuelo/Mandos). Opcionales (`?`) para degradar con gracia si el
+   * engine aún no los expone: se suscribe a los LOTES locales del trazo arcoíris
+   * (para difundir "draw", ≤40 puntos cada ~0.5 s) y se aplican los lotes REMOTOS
+   * al mismo sistema de pintado (DrawTrail).
+   */
+  onDrawBatch?(cb: (b: { stroke: number; points: number[] }) => void): () => void;
+  applyDrawBatch?(by: string, b: { stroke: number; points: number[] }): void;
 }
 
 // --- Tipos de dominio --------------------------------------------------------
@@ -135,16 +151,17 @@ const NET_RETRY_MS = 600;
 const NET_RETRY_MAX = 20; // ~12 s intentando enganchar world.net
 
 /**
- * Valida que un `archetype` recibido por broadcast sea (a) uno de los 9 ids
- * PROCEDURALES viejos, o (b) un id de avatar MODELADO `"<arquetipo>-<f|m|n>"`
- * (M-5). El broadcast no es de fiar: al aceptar SÓLO ids de una lista blanca fija
- * (nunca una URL arbitraria), un emisor malicioso no puede inducir descargas
- * externas — el engine sólo resuelve el id a `/assets/avatars/gen/…` same-origin
- * (o construye el chibi en código). Devuelve el id si es válido, o `undefined`.
+ * Valida que un `archetype` recibido por broadcast sea (a) el diseño "nube"
+ * (S8, el avatar por defecto de todos), (b) uno de los 9 ids PROCEDURALES viejos,
+ * o (c) un id de avatar MODELADO `"<arquetipo>-<f|m|n>"` (M-5). El broadcast no es
+ * de fiar: al aceptar SÓLO ids de una lista blanca fija (nunca una URL arbitraria),
+ * un emisor malicioso no puede inducir descargas externas — el engine sólo resuelve
+ * el id a `/assets/avatars/gen/…` same-origin (o construye el chibi en código).
+ * Devuelve el id si es válido, o `undefined`.
  */
 function safeArchetype(id: string | undefined): string | undefined {
   if (!id || typeof id !== "string") return undefined;
-  return isArchetypeId(id) || isAvatarId(id) ? id : undefined;
+  return id === "nube" || isArchetypeId(id) || isAvatarId(id) ? id : undefined;
 }
 
 /** ¿Están las env vars públicas de Supabase presentes? (decide si hay chat). */
@@ -177,6 +194,22 @@ interface BallGrabPayload {
   ballId: number;
   t: number;
 }
+/** Sobre de "emote": quién disparó qué emote sobre su propio avatar. */
+interface EmotePayload {
+  id: string;
+  emote: string;
+}
+/**
+ * [DIBUJO — equipo Vuelo/Mandos] Sobre de "draw": un LOTE de puntos del trazo
+ * arcoíris del emisor. `stroke` identifica el trazo (monótono por emisor) para que
+ * los lotes sucesivos se unan en una línea continua; `points` es plano
+ * [x,y,z, x,y,z, …] con ≤ DRAW_BATCH_MAX_POINTS puntos (batch cada ~0.5 s).
+ */
+interface DrawPayload {
+  id: string;
+  stroke: number;
+  points: number[];
+}
 
 /** Sobre del evento del mini-juego por broadcast: el GameEvent + el id del emisor. */
 type GamePayload = GameEventUi & { id: string };
@@ -189,6 +222,28 @@ function isFiniteNum(n: unknown): n is number {
 /** ¿`v` es una terna [x,y,z] de números finitos? */
 function isVec3(v: unknown): v is [number, number, number] {
   return Array.isArray(v) && v.length === 3 && v.every(isFiniteNum);
+}
+
+// ---- [DIBUJO — equipo Vuelo/Mandos] validación M-5 del flujo "draw" ----------
+
+/** Tope de puntos por lote de dibujo (el engine emite ≤40; el broadcast no es de fiar). */
+const DRAW_BATCH_MAX_POINTS = 40;
+
+/**
+ * Valida un lote de dibujo recibido por broadcast (M-5): `stroke` finito, `points`
+ * array plano de números FINITOS, longitud múltiplo de 3 y ≤ 40 puntos (120
+ * números). Devuelve el lote limpio o null. NUNCA confía en la forma entrante.
+ */
+function parseDrawBatch(payload: unknown): { stroke: number; points: number[] } | null {
+  if (!payload || typeof payload !== "object") return null;
+  const p = payload as Record<string, unknown>;
+  if (!isFiniteNum(p.stroke)) return null;
+  const pts = p.points;
+  if (!Array.isArray(pts)) return null;
+  if (pts.length === 0 || pts.length % 3 !== 0) return null;
+  if (pts.length > DRAW_BATCH_MAX_POINTS * 3) return null;
+  if (!pts.every(isFiniteNum)) return null;
+  return { stroke: p.stroke, points: pts as number[] };
 }
 
 /**
@@ -372,6 +427,27 @@ export class BiosphereRealtime {
       if (event) this.game()?.applyRemote?.(event);
     });
 
+    // (c3) [EMOTE — equipo Avatar] Broadcast "emote" — emote sobre el propio
+    // avatar del emisor. Lista blanca EMOTE_IDS del engine (M-5).
+    channel.on("broadcast", { event: "emote" }, ({ payload }: { payload: EmotePayload }) => {
+      if (!payload || payload.id === me.sessionId) return;
+      // Anti-griefing (M-5): emisor presente + emote en la lista blanca.
+      if (typeof payload.id !== "string" || !this.presentIds.has(payload.id)) return;
+      if (typeof payload.emote !== "string" || !isEmoteId(payload.emote)) return;
+      this.net()?.applyRemoteEmote?.(payload.id, payload.emote);
+    });
+
+    // (c4) [DIBUJO — equipo Vuelo/Mandos] Broadcast "draw" — lotes del trazo
+    // arcoíris de cada emisor. Misma defensa M-5 que pos/ball: emisor presente +
+    // forma validada (≤40 puntos [x,y,z] finitos por lote). Los trazos remotos se
+    // pintan con el MISMO DrawTrail (segmentos independientes por emisor+stroke).
+    channel.on("broadcast", { event: "draw" }, ({ payload }: { payload: DrawPayload }) => {
+      if (!payload || payload.id === me.sessionId) return;
+      if (typeof payload.id !== "string" || !this.presentIds.has(payload.id)) return;
+      const batch = parseDrawBatch(payload);
+      if (batch) this.net()?.applyDrawBatch?.(payload.id, batch);
+    });
+
     // (d) postgres_changes — chat público
     channel.on(
       "postgres_changes",
@@ -478,8 +554,36 @@ export class BiosphereRealtime {
       });
     });
 
+    // [EMOTE — equipo Avatar] Reenvía cada EMOTE local (el jugador emotea sobre
+    // su propio avatar) como "emote".
+    const stopEmote = net.onLocalEmote?.((emote) => {
+      const me = this.identity;
+      const ch = this.channel;
+      if (!me || !ch) return;
+      void ch.send({
+        type: "broadcast",
+        event: "emote",
+        payload: { id: me.sessionId, emote } satisfies EmotePayload,
+      });
+    });
+
+    // [DIBUJO — equipo Vuelo/Mandos] Reenvía cada LOTE local del trazo arcoíris
+    // como "draw" (el engine ya lo emite troceado: ≤40 puntos cada ~0.5 s).
+    const stopDraw = net.onDrawBatch?.((b) => {
+      const me = this.identity;
+      const ch = this.channel;
+      if (!me || !ch) return;
+      void ch.send({
+        type: "broadcast",
+        event: "draw",
+        payload: { id: me.sessionId, stroke: b.stroke, points: b.points } satisfies DrawPayload,
+      });
+    });
+
     this.netUnsubs.push(stopTick, stopKick);
     if (stopGrab) this.netUnsubs.push(stopGrab);
+    if (stopEmote) this.netUnsubs.push(stopEmote);
+    if (stopDraw) this.netUnsubs.push(stopDraw);
   }
 
   /**

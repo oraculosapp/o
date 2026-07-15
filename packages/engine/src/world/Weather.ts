@@ -44,6 +44,8 @@ export interface SkyUniforms {
   uStar: { value: number };
   /** Color de la banda de fusión del horizonte: lo SIGUE el color de fog vivo. */
   uHorizon: { value: THREE.Color };
+  /** Visibilidad del planeta gaseoso (bruma lo atenúa, tormenta lo oculta). */
+  uPlanet: { value: number };
 }
 
 /**
@@ -94,6 +96,7 @@ interface WeatherState {
   moonOpacity: number;
   cloud: number;
   star: number;
+  planet: number;
 }
 
 function cloneState(s: WeatherState): WeatherState {
@@ -113,6 +116,7 @@ function cloneState(s: WeatherState): WeatherState {
     moonOpacity: s.moonOpacity,
     cloud: s.cloud,
     star: s.star,
+    planet: s.planet,
   };
 }
 
@@ -169,6 +173,7 @@ export class WeatherDirector {
       moonOpacity: skyUniforms.uMoonOpacity.value,
       cloud: skyUniforms.uCloud.value,
       star: skyUniforms.uStar.value,
+      planet: skyUniforms.uPlanet.value,
     };
   }
 
@@ -201,6 +206,7 @@ export class WeatherDirector {
     bruma.cloud = 1.7;
     bruma.moonOpacity = 0.4;
     bruma.star = 0.2;
+    bruma.planet = 0.4; // el planeta se atenúa en la bruma (atmosférico)
 
     // ── ocaso: horizonte naranja más profundo, luz más cálida ─────────────
     const ocaso = from();
@@ -216,6 +222,7 @@ export class WeatherDirector {
     ocaso.cloud = 1.0;
     ocaso.moonOpacity = 0.85;
     ocaso.star = 0.5;
+    ocaso.planet = 0.9; // planeta bien visible al ocaso
 
     // ── cenit: mediodía luminoso, aire limpio ─────────────────────────────
     const cenit = from();
@@ -234,6 +241,7 @@ export class WeatherDirector {
     cenit.cloud = 0.5;
     cenit.moonOpacity = 0.25;
     cenit.star = 0.0;
+    cenit.planet = 1.0; // aire limpio: planeta nítido
 
     // ── tormenta: pizarra-púrpura amenazante pero LEGIBLE ─────────────────
     const tormenta = from();
@@ -252,6 +260,7 @@ export class WeatherDirector {
     tormenta.cloud = 2.2;
     tormenta.moonOpacity = 0.0;
     tormenta.star = 0.0;
+    tormenta.planet = 0.0; // tormenta oculta el planeta tras el cielo pizarra
 
     return { pradera, bruma, ocaso, cenit, tormenta };
   }
@@ -305,6 +314,7 @@ export class WeatherDirector {
       moonOpacity: lerp(this.from.moonOpacity, this.to.moonOpacity, k),
       cloud: lerp(this.from.cloud, this.to.cloud, k),
       star: lerp(this.from.star, this.to.star, k),
+      planet: lerp(this.from.planet, this.to.planet, k),
     };
   }
 
@@ -331,6 +341,7 @@ export class WeatherDirector {
     skyUniforms.uMoonOpacity.value = lerp(from.moonOpacity, to.moonOpacity, k);
     skyUniforms.uCloud.value = lerp(from.cloud, to.cloud, k);
     skyUniforms.uStar.value = lerp(from.star, to.star, k);
+    skyUniforms.uPlanet.value = lerp(from.planet, to.planet, k);
 
     // scene.background SIGUE al top del cielo (mismo color).
     const bg = scene.background as THREE.Color | null;

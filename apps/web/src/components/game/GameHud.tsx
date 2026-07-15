@@ -19,6 +19,15 @@ const IDLE_SNAP: GameSnapshotUi = {
   localId: "",
 };
 
+/**
+ * Radio (u) del claro de Paqo alrededor del origen (0,0). La píldora "Comenzar
+ * juego" (idle) sólo aparece si el avatar está DENTRO de este claro; una vez que
+ * el juego corre, el marcador se muestra estés donde estés.
+ */
+const CLEARING_RADIUS = 9;
+/** Cadencia del sondeo de posición para el gating (2 Hz: ligero y robusto). */
+const POSITION_POLL_MS = 500;
+
 /** Nombre visible de un id (con fallback "Tú" para el local, "Anónimo" si falta). */
 function nameOf(snap: GameSnapshotUi, id: string): string {
   if (snap.names[id]) return snap.names[id];
@@ -38,6 +47,8 @@ export function GameHud({ getWorld }: GameHudProps) {
   const [snap, setSnap] = useState<GameSnapshotUi>(IDLE_SNAP);
   const [gameReady, setGameReady] = useState(false);
   const [nowMs, setNowMs] = useState(() => Date.now());
+  // ¿El avatar está dentro del claro de Paqo? Sólo se sondea en IDLE (barato).
+  const [inClearing, setInClearing] = useState(false);
 
   // Engancha world.game.onChange en cuanto exista (reintento acotado, como
   // MobileControls: el engine monta world.game tras start()).
@@ -75,6 +86,26 @@ export function GameHud({ getWorld }: GameHudProps) {
     return () => clearInterval(id);
   }, [snap.phase]);
 
+  // Gating por posición: SÓLO en idle sondeamos ligeramente (2 Hz) el controller
+  // del mundo para saber si el avatar pisa el claro de Paqo. Fuera de idle no hace
+  // falta (el marcador running/results se muestra siempre). Distancia XZ al origen.
+  useEffect(() => {
+    if (snap.phase !== "idle") return;
+    let cancelled = false;
+    const sample = () => {
+      if (cancelled) return;
+      const pos = getWorld?.()?.controller?.position;
+      // Si el mundo aún no expone el controller, no cambiamos el estado (degrada).
+      if (pos) setInClearing(Math.hypot(pos.x, pos.z) < CLEARING_RADIUS);
+    };
+    sample();
+    const id = setInterval(sample, POSITION_POLL_MS);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, [snap.phase, getWorld]);
+
   const onStart = useCallback(() => getWorld?.()?.game?.start?.(), [getWorld]);
   const onStop = useCallback(() => getWorld?.()?.game?.stop?.(), [getWorld]);
 
@@ -98,12 +129,18 @@ export function GameHud({ getWorld }: GameHudProps) {
   const topScore = players.length > 0 ? players[0].points : 0;
 
   if (snap.phase === "idle") {
+    // La píldora sólo se ofrece DENTRO del claro de Paqo. Se mantiene montada y se
+    // muestra/oculta por clase para que la aparición/desaparición sea suave (fade +
+    // leve slide) al entrar/salir del claro. Oculta = no enfocable ni clicable.
+    const show = inClearing;
     return (
       <button
         type="button"
-        className={styles.startPill}
+        className={`${styles.startPill} ${show ? styles.startPillVisible : styles.startPillHidden}`}
         onClick={onStart}
         disabled={!gameReady}
+        aria-hidden={!show}
+        tabIndex={show ? undefined : -1}
         aria-label="Comenzar juego: lánzale las pelotas a Paqo"
       >
         <span className={styles.startDot} aria-hidden>

@@ -160,6 +160,19 @@ export type BuildId = (typeof BUILD_IDS)[number];
 export const GEN_AVATAR_PREFIX = "/assets/avatars/gen/";
 
 /**
+ * Avatar "nube" (S8): el ÚNICO diseño NEUTRO tipo plastilina. Un solo GLB
+ * (materiales body+eyes, esqueleto Mixamo) que se tinta por color en el engine.
+ * Reemplaza a los 9 arquetipos + builds como diseño por defecto de todos.
+ */
+export const NUBE_ID = "nube";
+export const NUBE_GLB_URL = `${GEN_AVATAR_PREFIX}nube.glb`;
+
+/** ¿Es `id` el diseño "nube"? */
+export function isNubeId(id: string): boolean {
+  return id === NUBE_ID;
+}
+
+/**
  * Parsea un id de avatar MODELADO `"<arquetipo>-<f|m|n>"` (p.ej. `"vampiro-f"`,
  * `"dedo-verde-n"`) en sus partes. Devuelve `null` si no encaja (incluye los 9
  * ids de arquetipo "pelados" viejos como `"vampiro"`, que NO son ids de avatar).
@@ -184,6 +197,7 @@ export function isAvatarId(id: string): boolean {
 
 /** URL same-origin del GLB modelado de un id de avatar, o `null` si el id no es válido. */
 export function avatarGlbUrl(id: string): string | null {
+  if (isNubeId(id)) return NUBE_GLB_URL; // el diseño "nube" → su único GLB
   const p = parseAvatarId(id);
   return p ? `${GEN_AVATAR_PREFIX}${p.archetype}-${p.build}.glb` : null;
 }

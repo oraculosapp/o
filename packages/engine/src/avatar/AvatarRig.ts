@@ -4,6 +4,7 @@ import { DRACOLoader } from "three/examples/jsm/loaders/DRACOLoader.js";
 import { MeshoptDecoder } from "three/examples/jsm/libs/meshopt_decoder.module.js";
 import { AnimationDriver, type Locomotion } from "./AnimationDriver";
 import { ProceduralLocomotion, type LocomotionQA } from "./ProceduralLocomotion";
+import { EmoteDriver, isEmoteId } from "./EmoteDriver";
 import { TintController, toToonMaterial, avatarToonRamp, type HueBand } from "./tint";
 import type { AvatarDriveState, IAvatarRig, PropSocket, TintZone } from "./types";
 
@@ -70,6 +71,8 @@ export class AvatarRig implements IAvatarRig {
   private driver?: AnimationDriver;
   /** Animador procedural cuando el GLB no trae clips de locomoción utilizables. */
   private loco?: ProceduralLocomotion;
+  /** Animador procedural de emotes (one-shot que se mezcla y vuelve a idle). */
+  private emote?: EmoteDriver;
   private tint = new TintController();
   private sockets: Record<PropSocket, THREE.Object3D>;
   private ramp: THREE.DataTexture;
@@ -107,6 +110,9 @@ export class AvatarRig implements IAvatarRig {
         runRefSpeed: opts?.runRefSpeed,
       });
     }
+
+    // Emotes procedurales (si el esqueleto mapea como humanoide Mixamo).
+    this.emote = EmoteDriver.tryCreate(this.root) ?? undefined;
 
     // ── Normalización de escala ──────────────────────────────────────────────
     // Modelos fuera de rango humano (Mixamo suele venir a ~1.16 u) se escalan a la
@@ -241,6 +247,10 @@ export class AvatarRig implements IAvatarRig {
 
   /** Clasifica un material en una de las 5 zonas por palabras clave; null si no hay match. */
   private guessZone(name: string): TintZone | null {
+    // Avatar "nube": el cuerpo (material "body") ES la zona de tinte principal;
+    // los ojos ("eyes") van a su propia zona (negro, sin tinte primary).
+    if (name === "body") return "primary";
+    if (name === "eyes") return "accent";
     if (name === "hair" || HAIR_KW.some((k) => name.includes(k))) return "hair";
     if (name === "skin" || SKIN_KW.some((k) => name.includes(k))) return "skin";
     if (name === "accent" || ACCENT_KW.some((k) => name.includes(k))) return "accent";
@@ -293,8 +303,19 @@ export class AvatarRig implements IAvatarRig {
 
   update(dt: number, state: AvatarDriveState): void {
     if (this.disposed) return;
+    // Mientras un emote está activo, ÉL conduce los huesos; la locomoción cede y
+    // retoma al terminar (los huesos vuelven al reposo con la envolvente del emote).
+    if (this.emote?.isActive) {
+      this.emote.update(dt);
+      return;
+    }
     if (this.loco) this.loco.update(dt, state);
     else this.driver?.update(dt, state);
+  }
+
+  playEmote(id: string): void {
+    if (this.disposed || !this.emote) return;
+    if (isEmoteId(id)) this.emote.play(id);
   }
 
   setTint(palette: Partial<Record<TintZone, THREE.Color>>): void {

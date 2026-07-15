@@ -3,6 +3,8 @@
    entrada píldora. Se puede expandir a columna de todo lo alto pegada a la
    derecha. Móvil: a la derecha (el joystick ocupa la mitad izquierda). */
 
+/* Launcher DISCRETO (problema 5): más chico y translúcido, en reposo a ~0.6 de
+   opacidad para no estorbar la jugabilidad; recupera plena presencia al hover/foco. */
 .launcher {
   position: fixed;
   right: 16px;
@@ -10,26 +12,31 @@
   z-index: 30;
   display: inline-flex;
   align-items: center;
-  gap: 0.5rem;
-  padding: 0.6rem 0.95rem;
-  border: 1px solid var(--line);
+  gap: 0.4rem;
+  padding: 0.4rem 0.7rem;
+  border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: var(--radius-pill);
-  background: var(--panel-hud);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  box-shadow: var(--shadow);
+  background: rgba(13, 15, 24, 0.5);
+  backdrop-filter: blur(18px) saturate(1.4);
+  -webkit-backdrop-filter: blur(18px) saturate(1.4);
+  box-shadow: var(--shadow), inset 0 1px 0 rgba(255, 255, 255, 0.08);
   color: var(--text);
   font-family: var(--font-display);
-  font-size: 0.78rem;
-  letter-spacing: 0.14em;
+  font-size: 0.68rem;
+  letter-spacing: 0.12em;
   text-transform: uppercase;
   cursor: pointer;
+  opacity: 0.6;
   transition:
+    opacity var(--dur-fast) var(--ease-brand),
     transform var(--dur-fast) var(--ease-brand),
     border-color var(--dur-fast) var(--ease-brand),
     box-shadow var(--dur-fast) var(--ease-brand);
 }
-.launcher:hover {
+.launcher:hover,
+.launcher:focus-visible,
+.launcher:focus-within {
+  opacity: 1;
   transform: translateY(-3px);
   border-color: var(--gold-dim);
   box-shadow:
@@ -73,17 +80,39 @@
   background: var(--terra);
 }
 
-/* --- Dock abierto: base común (columna o flotante) -------------------------- */
+/* --- Dock abierto: base común (columna, flotante, hoja o panel) -------------- */
+/* GLASSMORPHISM elevado — SÓLO en el chat. Vidrio mucho más translúcido sobre el
+   mundo brillante, blur+saturación altos, borde blanco 10 %, sombra suave y
+   highlight superior sutil (inset). Los valores viven en variables locales para
+   caer con gracia bajo prefers-reduced-transparency (más abajo). El texto lleva un
+   text-shadow sutil para mantener legibilidad (AA) sobre biósferas claras. */
 .dock {
+  /* Vidrio del chat (tokens locales). El alpha del fondo sube a 0.80 para que el
+     texto #ece7dd pase AA (4.5:1) compuesto SOBRE el mundo brillante (~#f0f0f0):
+     la burbuja se apila sobre este dock. El blur (20px) y el highlight se mantienen
+     — el look glass vive del blur, no del alpha. Las burbujas ámbar (mine/oracle)
+     suben sólo lo justo: más alpha ámbar las ACLARA sobre el dock ya oscuro y BAJA
+     el contraste con el texto claro, así que se calibran para no bajar de 4.5:1. */
+  --chat-glass-bg: rgba(13, 15, 24, 0.8);
+  --chat-glass-blur: 20px;
+  --chat-glass-sat: 1.4;
+  --chat-glass-border: rgba(255, 255, 255, 0.1);
+  --chat-glass-highlight: rgba(255, 255, 255, 0.09);
+  --chat-glass-shadow: 0 18px 50px -18px rgba(0, 0, 0, 0.6);
+  --chat-bubble-bg: rgba(30, 34, 52, 0.65);
+  --chat-bubble-mine: linear-gradient(180deg, rgba(227, 176, 99, 0.32), rgba(227, 176, 99, 0.16));
+  --chat-bubble-oracle: linear-gradient(180deg, rgba(227, 176, 99, 0.22), rgba(227, 176, 99, 0.1));
+  --chat-text-shadow: 0 1px 2px rgba(0, 0, 0, 0.55);
+
   position: fixed;
   z-index: 30;
   display: flex;
   flex-direction: column;
-  border: 1px solid var(--line);
-  background: var(--panel-hud);
-  backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
-  box-shadow: var(--shadow);
+  border: 1px solid var(--chat-glass-border);
+  background: var(--chat-glass-bg);
+  backdrop-filter: blur(var(--chat-glass-blur)) saturate(var(--chat-glass-sat));
+  -webkit-backdrop-filter: blur(var(--chat-glass-blur)) saturate(var(--chat-glass-sat));
+  box-shadow: var(--chat-glass-shadow), inset 0 1px 0 var(--chat-glass-highlight);
   overflow: hidden;
   color: var(--text);
   animation: dockIn var(--dur-slow) var(--ease-brand);
@@ -124,32 +153,35 @@
   }
 }
 
-/* --- MÓVIL: HOJA INFERIOR (bottom sheet) -----------------------------------
-   Full-width anclada abajo, arrastrable por el asa, con áreas seguras. Sustituye
-   a la columna lateral en móvil para NO tapar los botones de acción (problema 4).
-   Alturas en dvh (problema 2) y respeta env(safe-area-*) (problema 5). Se aplica
-   por JS (useIsMobileHud) alineado con la misma media query CSS (problema 8). */
+/* --- MÓVIL PORTRAIT: HOJA SUPERIOR (top sheet) ------------------------------
+   Cuelga desde ARRIBA (top:0), full-width, con el asa ABAJO. Así se juega en la
+   mitad inferior mientras se lee arriba, y los botones de acción (abajo) no chocan
+   (problema 4). Alturas en dvh (crecen hacia abajo) y respeta env(safe-area-*):
+   el notch superior con padding-top; el borde inferior lo maneja el composer.
+   Se aplica por JS (isTopSheet) alineado con la media query CSS (problema 8). */
 .sheet {
-  top: auto;
+  top: 0;
   left: 0;
   right: 0;
-  bottom: 0;
+  bottom: auto;
   width: 100%;
   max-width: 100%;
-  padding-top: 0;
-  /* Áreas seguras laterales (landscape); el borde inferior lo maneja el composer
-     con env(safe-area-inset-bottom) para no descontarlo dos veces. */
+  /* El notch queda arriba: reserva el área segura superior + la banda del clúster
+     del HUD (mute/campanita/FAB, top-right, ~56px en portrait) para que la cabecera
+     de la hoja no colisione con esos controles. */
+  padding-top: calc(env(safe-area-inset-top) + 56px);
   padding-left: env(safe-area-inset-left);
   padding-right: env(safe-area-inset-right);
   border: none;
-  border-top: 1px solid var(--gold-dim);
-  border-top-left-radius: var(--radius);
-  border-top-right-radius: var(--radius);
-  border-bottom-left-radius: 0;
-  border-bottom-right-radius: 0;
-  box-shadow: 0 -20px 50px -18px rgba(0, 0, 0, 0.72);
+  border-bottom: 1px solid var(--chat-glass-border);
+  border-top-left-radius: 0;
+  border-top-right-radius: 0;
+  border-bottom-left-radius: var(--radius);
+  border-bottom-right-radius: var(--radius);
+  /* Sombra hacia abajo + highlight superior (inset) del vidrio del chat. */
+  box-shadow: var(--chat-glass-shadow), inset 0 1px 0 var(--chat-glass-highlight);
   transition: height var(--dur-slow) var(--ease-brand);
-  animation: sheetIn var(--dur-slow) var(--ease-brand);
+  animation: sheetInTop var(--dur-slow) var(--ease-brand);
 }
 .sheetPeek {
   height: 42dvh;
@@ -161,23 +193,57 @@
 .dragging {
   transition: none;
 }
-@keyframes sheetIn {
+/* La hoja superior entra deslizándose desde el borde de ARRIBA. */
+@keyframes sheetInTop {
   from {
-    transform: translateY(100%);
+    transform: translateY(-100%);
   }
   to {
     transform: none;
   }
 }
 
-/* Asa de arrastre de la hoja. Área táctil generosa; el asa visible es una píldora. */
+/* --- MÓVIL LANDSCAPE: PANEL LATERAL izquierdo ------------------------------
+   La hoja vertical no sirve en apaisado (poca altura). En su lugar, una columna
+   IZQUIERDA angosta (~40 %), full-height y colapsable, tipo columna de escritorio
+   pero compacta. Empuja el juego con {left}. Áreas seguras (notch lateral/superior).
+   Se aplica por JS (isSidePanel) desde (orientation: landscape) and (pointer:coarse). */
+.sidePanel {
+  top: 0;
+  left: 0;
+  bottom: 0;
+  right: auto;
+  width: min(42vw, 340px);
+  padding-top: env(safe-area-inset-top);
+  padding-left: env(safe-area-inset-left);
+  padding-bottom: env(safe-area-inset-bottom);
+  border: none;
+  border-right: 1px solid var(--chat-glass-border);
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+  border-top-right-radius: var(--radius);
+  border-bottom-right-radius: var(--radius);
+  box-shadow: var(--chat-glass-shadow), inset 0 1px 0 var(--chat-glass-highlight);
+  animation: sidePanelIn var(--dur-slow) var(--ease-brand);
+}
+@keyframes sidePanelIn {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: none;
+  }
+}
+
+/* Asa de arrastre de la hoja superior: ABAJO. Área táctil generosa; el asa visible
+   es una píldora. Respeta el área segura inferior (queda pegada al borde de abajo). */
 .grabberWrap {
   flex: 0 0 auto;
   display: flex;
   align-items: center;
   justify-content: center;
   min-height: 30px;
-  padding: 10px 0 6px;
+  padding: 6px 0 max(6px, env(safe-area-inset-bottom));
   touch-action: none;
   cursor: grab;
 }
@@ -293,26 +359,6 @@
   min-width: 0;
 }
 
-/* Aviso deshabilitado cuando aún no hay sesión (viajero sin nombre): la voz sólo
-   se une si el usuario se identificó. Mismo vocabulario glass del HUD. */
-.voiceHint {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.4rem;
-  min-height: 32px;
-  padding: 0 0.7rem;
-  border: 1px dashed var(--line);
-  border-radius: var(--radius-pill);
-  background: transparent;
-  color: var(--text-faint);
-  font-family: var(--font-display);
-  font-size: 0.6rem;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  white-space: nowrap;
-  cursor: not-allowed;
-}
-
 /* Sólo para lectores de pantalla (fuera de vista, sin ocupar espacio). */
 .srOnly {
   position: absolute;
@@ -388,6 +434,7 @@
   padding: 1rem;
   color: var(--text-dim);
   font-size: 0.85rem;
+  text-shadow: var(--chat-text-shadow);
 }
 .emptyHint {
   color: var(--text-faint);
@@ -419,6 +466,7 @@
   display: inline-flex;
   align-items: center;
   gap: 0.4rem;
+  text-shadow: var(--chat-text-shadow);
 }
 .authorOracle {
   color: var(--gold-bright);
@@ -453,12 +501,14 @@
   margin: 0;
   padding: 0.55rem 0.72rem;
   border-radius: var(--radius-sm);
-  background: var(--panel-hi);
+  background: var(--chat-bubble-bg);
   color: var(--text);
   font-size: 0.9rem;
   line-height: 1.4;
   overflow-wrap: anywhere;
   border: 1px solid var(--line-soft);
+  /* Burbuja translúcida sobre el mundo brillante: sombra sutil de texto para AA. */
+  text-shadow: var(--chat-text-shadow);
 }
 /* Cola de la burbuja (ajeno/Paqo: a la izquierda). */
 .bubble::before {
@@ -477,7 +527,7 @@
 
 /* Paqo (oráculo): borde dorado, velo cálido y cola dorada. */
 .rowOracle .bubble {
-  background: linear-gradient(180deg, rgba(227, 176, 99, 0.13), rgba(227, 176, 99, 0.05));
+  background: var(--chat-bubble-oracle);
   border: 1px solid var(--gold-dim);
 }
 .rowOracle .bubble::before {
@@ -501,7 +551,7 @@
   padding-right: 0.5rem;
 }
 .rowMine .bubble {
-  background: linear-gradient(180deg, rgba(227, 176, 99, 0.22), rgba(227, 176, 99, 0.1));
+  background: var(--chat-bubble-mine);
   border: 1px solid var(--line);
 }
 .rowMine .bubble::before {
@@ -600,14 +650,16 @@
   font-size: 0.92rem;
   line-height: 1.4;
   overflow-wrap: anywhere;
+  /* Legibilidad sobre el vidrio translúcido del chat. */
+  text-shadow: var(--chat-text-shadow);
 }
 .paqoTurnOracle .paqoText {
-  background: rgba(222, 121, 78, 0.13);
+  background: rgba(222, 121, 78, 0.16);
   border: 1px solid rgba(222, 121, 78, 0.3);
   color: var(--text);
 }
 .paqoTurnUser .paqoText {
-  background: var(--panel-hi);
+  background: var(--chat-bubble-bg);
   color: var(--text);
 }
 .caret {
@@ -672,10 +724,15 @@
   padding: 0.55rem;
   border-top: 1px solid var(--line-soft);
 }
+/* nameChip: sigue siendo el lugar para CAMBIAR el nombre. Más descubrible con un
+   icono de lápiz ✎ que se realza al pasar/enfocar. */
 .nameChip {
   flex: 0 0 auto;
-  max-width: 5.5rem;
-  padding: 0.3rem 0.55rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  max-width: 6.5rem;
+  padding: 0.3rem 0.5rem 0.3rem 0.55rem;
   border: 1px solid var(--line);
   border-radius: var(--radius-pill);
   background: transparent;
@@ -685,12 +742,31 @@
   letter-spacing: 0.08em;
   text-transform: uppercase;
   cursor: pointer;
+  transition:
+    border-color var(--dur-fast) var(--ease-brand),
+    background var(--dur-fast) var(--ease-brand);
+}
+.nameChipText {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.nameChip:hover {
+.nameChipPencil {
+  flex: 0 0 auto;
+  font-size: 0.72rem;
+  line-height: 1;
+  color: var(--gold-dim);
+  transition: color var(--dur-fast) var(--ease-brand);
+}
+.nameChip:hover,
+.nameChip:focus-visible {
   border-color: var(--gold-dim);
+  background: rgba(227, 176, 99, 0.08);
+}
+.nameChip:hover .nameChipPencil,
+.nameChip:focus-visible .nameChipPencil {
+  color: var(--gold-bright);
 }
 .input {
   flex: 1 1 auto;
@@ -785,10 +861,7 @@
   }
   .nameChip {
     min-height: 44px;
-    max-width: 6.5rem;
-  }
-  .voiceHint {
-    min-height: 44px;
+    max-width: 7.5rem;
   }
   .sendBtn {
     min-height: 44px;
@@ -808,6 +881,7 @@
 @media (prefers-reduced-motion: reduce) {
   .dock,
   .sheet,
+  .sidePanel,
   .launcher,
   .sendBtn,
   .caret,
@@ -816,8 +890,35 @@
   }
   .dock,
   .sheet,
+  .sidePanel,
   .launcher,
   .sendBtn {
     transition: none;
+  }
+}
+
+/* --- Accesibilidad: TRANSPARENCIA REDUCIDA ---------------------------------
+   Si el usuario pide menos transparencia, el vidrio elevado del chat cae al glass
+   previo (casi opaco, blur moderado, borde dorado tenue) y las burbujas se vuelven
+   opacas. Se hace redefiniendo los tokens locales del .dock (todo lo hereda). */
+@media (prefers-reduced-transparency: reduce) {
+  .dock {
+    --chat-glass-bg: var(--panel-hud);
+    --chat-glass-blur: 14px;
+    --chat-glass-sat: 1;
+    --chat-glass-border: var(--line);
+    --chat-glass-highlight: transparent;
+    --chat-glass-shadow: var(--shadow);
+    --chat-bubble-bg: var(--panel-hi);
+    --chat-bubble-mine: linear-gradient(180deg, rgba(227, 176, 99, 0.22), rgba(227, 176, 99, 0.1));
+    --chat-bubble-oracle: linear-gradient(180deg, rgba(227, 176, 99, 0.13), rgba(227, 176, 99, 0.05));
+    --chat-text-shadow: none;
+  }
+  /* El launcher (fuera del .dock) también recupera su glass casi opaco. */
+  .launcher {
+    background: var(--panel-hud);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border-color: var(--line);
   }
 }

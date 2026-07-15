@@ -771,6 +771,15 @@ export class ChibiAvatar implements IAvatarRig {
     this.driver.update(dt, state);
   }
 
+  /**
+   * Emotes: no-op. El chibi tiene un esqueleto de 5 huesos (hips/spine/head/
+   * armR/armL) que no mapea los nombres Mixamo del {@link EmoteDriver}. En la
+   * dirección actual (avatar "nube") los emotes viven en {@link AvatarRig}.
+   */
+  playEmote(_id: string): void {
+    /* sin soporte de emotes en el esqueleto chibi */
+  }
+
   setTint(palette: Partial<Record<TintZone, THREE.Color>>): void {
     for (const zone of Object.keys(palette) as TintZone[]) {
       const c = palette[zone];

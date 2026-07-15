@@ -109,7 +109,7 @@
   transform: none;
 }
 
-@media (max-width: 640px) {
+@media (pointer: coarse), (max-width: 640px) {
   /* Fila 1 (izquierda): avatar; campanita+cuenta a su derecha. Áreas seguras. */
   .cluster {
     top: calc(12px + env(safe-area-inset-top));

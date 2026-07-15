@@ -1,12 +1,28 @@
 /**
- * Catálogo de arquetipos de avatar (única fuente de verdad para selector, mundo,
- * presencia y laboratorio /dev/avatar).
+ * Catálogo de avatares (única fuente de verdad para selector, mundo, presencia
+ * y laboratorio /dev/avatar).
  *
- * Convención de archivos (docs/avatares-tripo3d.md §5):
- *   `<arquetipo>-<m|f>.glb` en `apps/web/public/assets/avatars/`.
- * Miniaturas (generadas por tools/assets/gen-avatar-thumbs.mjs desde las láminas):
- *   `apps/web/public/assets/avatars/thumbs/<arquetipo>.webp`.
+ * NUEVA DIRECCIÓN (S8): un ÚNICO diseño NEUTRO tipo plastilina — "nube" — para
+ * todos los viajeros; la personalización es SÓLO el color (tinte del engine).
+ * GLB: `apps/web/public/assets/avatars/gen/nube.glb` (tools/avatars/generate.py).
+ * Miniatura: `thumbs/gen/nube.webp`.
+ *
+ * Los 9 arquetipos + builds S7 quedan como CATÁLOGO LEGADO (compat de ids viejos
+ * en localStorage/presencia y el laboratorio /dev/avatar); sus GLBs están
+ * respaldados en `assets/avatares-respaldo-s7/` FUERA de public (ya no sirven).
  */
+
+// --- Avatar "nube" (S8): el único diseño --------------------------------------
+
+/** Id del único diseño de avatar (S8). */
+export const NUBE_ID = "nube";
+
+/** URL pública del GLB del avatar nube. */
+export function nubeGlbUrl(): string {
+  return "/assets/avatars/gen/nube.glb";
+}
+
+// --- Catálogo LEGADO S7 (compat + /dev/avatar) ---------------------------------
 
 export type Gender = "m" | "f";
 
@@ -118,11 +134,12 @@ export function genGlbUrl(archetype: string, build: BuildId): string {
 }
 
 /**
- * URL pública de la miniatura MODELADA (render Blender por build). Reemplaza a las
- * viejas miniaturas de láminas: `/assets/avatars/thumbs/gen/<arq>-<build>.webp`.
+ * URL pública de la miniatura del avatar. Con el diseño único "nube" (S8) hay
+ * UNA sola miniatura: `/assets/avatars/thumbs/gen/nube.webp` (las miniaturas por
+ * arquetipo-build S7 se retiraron de public junto con sus GLBs).
  */
-export function thumbUrl(archetype: string, build: BuildId = DEFAULT_BUILD): string {
-  return `/assets/avatars/thumbs/gen/${archetype}-${build}.webp`;
+export function thumbUrl(): string {
+  return "/assets/avatars/thumbs/gen/nube.webp";
 }
 
 /**

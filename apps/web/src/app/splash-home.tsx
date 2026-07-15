@@ -1,14 +1,14 @@
 "use client";
 
+// ⚠️ DESCONECTADO (S8, dirección "nube"): la raíz (page.tsx) ya redirige directo
+// a /b/paqo con color+nombre aleatorios. Este splash ceremonial (ruleta 3D de
+// arquetipos) se conserva por si se reactiva como página de marca más adelante;
+// solo se adaptó al nuevo avatar-store `{ color }` para que siga compilando.
+
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ARCHETYPES } from "@/lib/avatars";
-import {
-  defaultSelection,
-  getStoredAvatar,
-  storeAvatar,
-  type AvatarTint,
-} from "@/lib/avatar-store";
+import { defaultSelection, getStoredAvatar, storeAvatar } from "@/lib/avatar-store";
 import { getStoredName, storeName } from "@/lib/oracle-client";
 import type { AvatarCarousel } from "./avatar-carousel";
 import styles from "./page.module.css";
@@ -46,10 +46,9 @@ const NICK_MAX = 20;
 export default function SplashHome() {
   const router = useRouter();
   const stored = typeof window !== "undefined" ? getStoredAvatar() : null;
-  const initialIndex = Math.max(
-    0,
-    ARCHETYPES.findIndex((a) => a.id === (stored?.archetype ?? ARCHETYPES[0].id)),
-  );
+  // Con el diseño único "nube" ya no hay arquetipo guardado: la ruleta (dead
+  // code decorativo) arranca siempre en el primero.
+  const initialIndex = 0;
 
   const [nick, setNick] = useState("");
   const [index, setIndex] = useState<number>(initialIndex);
@@ -64,8 +63,8 @@ export default function SplashHome() {
   // Índice más reciente disponible dentro del callback del carousel (sin stale closure).
   const indexRef = useRef(index);
   indexRef.current = index;
-  // Guarda el tinte de la selección previa (o el por defecto) para conservarlo.
-  const tintRef = useRef<AvatarTint>(stored?.tint ?? defaultSelection().tint);
+  // Conserva el color de la selección previa (o uno pastel aleatorio).
+  const colorRef = useRef<string>(stored?.color ?? defaultSelection().color);
 
   // Prefill del nick guardado (cliente).
   useEffect(() => {
@@ -162,9 +161,8 @@ export default function SplashHome() {
     }
     setEntering(true);
     storeName(clean);
-    // El splash elige arquetipo + color; el build se conserva de la selección
-    // previa (o neutro), y se puede afinar luego en el selector del mundo.
-    storeAvatar({ archetype, build: stored?.build ?? "n", tint: tintRef.current });
+    // S8: el avatar es único ("nube"); solo se persiste el color del viajero.
+    storeAvatar({ color: colorRef.current });
     router.push("/b/paqo");
   };
 

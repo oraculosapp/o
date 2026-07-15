@@ -11,7 +11,7 @@ import {
 } from "@/lib/profile";
 import { Bell } from "@/components/notifications/Bell";
 import { AvatarPicker } from "@/components/avatar-picker/AvatarPicker";
-import { ARCHETYPES, thumbUrl } from "@/lib/avatars";
+import { thumbUrl } from "@/lib/avatars";
 import {
   getStoredAvatar,
   saveAvatarToProfile,
@@ -191,32 +191,30 @@ export function ProfileForm({ userId, initial, progress }: ProfileFormProps) {
           </label>
         </section>
 
-        {/* --- Avatar --------------------------------------------------------- */}
+        {/* --- Avatar (S8: diseño único "nube", personalización = color) ------- */}
         <section className={styles.panel}>
           <h2 className={styles.panelTitle}>Avatar</h2>
           <p className={styles.panelLead}>
-            Tu arquetipo y su color te acompañan por todas las Biósferas.
+            Tu color te acompaña por todas las Biósferas.
           </p>
           <div className={styles.avatarRow}>
             <div className={styles.avatarPreview}>
               {avatarSel ? (
                 // eslint-disable-next-line @next/next/no-img-element
-                <img src={thumbUrl(avatarSel.archetype, avatarSel.build)} alt="" className={styles.avatarThumb} />
+                <img src={thumbUrl()} alt="" className={styles.avatarThumb} />
               ) : (
                 <span className={styles.avatarEmpty} aria-hidden />
               )}
             </div>
             <div className={styles.avatarMeta}>
               <span className={styles.avatarName}>
-                {avatarSel
-                  ? (ARCHETYPES.find((a) => a.id === avatarSel.archetype)?.name ?? avatarSel.archetype)
-                  : "Sin elegir todavía"}
+                {avatarSel ? "Nube" : "Sin elegir todavía"}
               </span>
               {avatarSel && (
                 <span
                   className={styles.avatarTint}
-                  title="Color primario"
-                  style={{ background: avatarSel.tint.primary }}
+                  title="Tu color"
+                  style={{ background: avatarSel.color }}
                   aria-hidden
                 />
               )}
@@ -226,7 +224,7 @@ export function ProfileForm({ userId, initial, progress }: ProfileFormProps) {
               className={styles.avatarBtn}
               onClick={() => setPickerOpen(true)}
             >
-              Cambiar avatar
+              Cambiar color
             </button>
           </div>
         </section>

@@ -6,8 +6,12 @@
 /* --- IDLE: píldora discreta -------------------------------------------------- */
 .startPill {
   position: fixed;
-  left: 16px;
-  bottom: 72px;
+  /* Centro-abajo: se eleva sobre la hoja del chat (--chat-sheet-h, publicado por
+     ChatDock) y se centra para NO caer sobre el joystick (mitad izquierda) ni sobre
+     los mandos táctiles (derecha). El translateX(-50%) se conserva en cada estado. */
+  left: 50%;
+  bottom: calc(72px + var(--chat-sheet-h, 0px));
+  transform: translateX(-50%);
   z-index: 26;
   display: inline-flex;
   align-items: center;
@@ -25,21 +29,35 @@
   letter-spacing: 0.12em;
   text-transform: uppercase;
   cursor: pointer;
-  opacity: 0.55;
   transition:
-    opacity var(--dur-fast) var(--ease-brand),
-    transform var(--dur-fast) var(--ease-brand),
+    opacity var(--dur-slow) var(--ease-brand),
+    transform var(--dur-slow) var(--ease-brand),
+    visibility var(--dur-slow) var(--ease-brand),
     border-color var(--dur-fast) var(--ease-brand),
     box-shadow var(--dur-fast) var(--ease-brand);
+}
+/* DENTRO del claro de Paqo: discreta (0.55) → plena en hover/foco. */
+.startPillVisible {
+  opacity: 0.55;
+  transform: translateX(-50%) translateY(0);
+  visibility: visible;
+  pointer-events: auto;
+}
+/* FUERA del claro: aparición suave (fade + leve slide), sin interacción. */
+.startPill.startPillHidden {
+  opacity: 0;
+  transform: translateX(-50%) translateY(8px);
+  visibility: hidden;
+  pointer-events: none;
 }
 .startPill:hover:not(:disabled),
 .startPill:focus-visible {
   opacity: 1;
-  transform: translateY(-2px);
+  transform: translateX(-50%) translateY(-2px);
   border-color: var(--gold-dim);
   box-shadow: var(--shadow), 0 0 20px var(--glow);
 }
-.startPill:disabled {
+.startPillVisible:disabled {
   opacity: 0.3;
   cursor: default;
 }

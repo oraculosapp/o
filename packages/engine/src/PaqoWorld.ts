@@ -17,6 +17,8 @@ import { WorldNet } from "./net/WorldNet";
 import { Soundscape } from "./audio/Soundscape";
 import { WeatherDirector, type WeatherId } from "./world/Weather";
 import { AmbientLife } from "./world/AmbientLife";
+import { MotionTrail } from "./world/MotionTrail";
+import { DrawTrail } from "./world/DrawTrail";
 import { BallGame } from "./game/BallGame";
 import type { MoodId } from "./postfx/MoodGrading";
 import type { BiospherePreset } from "./planet/types";
@@ -81,6 +83,7 @@ export class PaqoWorld {
     uCloudColor: { value: THREE.Color };
     uStar: { value: number };
     uHorizon: { value: THREE.Color };
+    uPlanet: { value: number };
   };
   private keyLight!: THREE.DirectionalLight;
   private hemiLight!: THREE.HemisphereLight;
@@ -107,6 +110,13 @@ export class PaqoWorld {
   /** Vida ambiente (mariposas/semillas). Disponible tras start(). */
   private ambientLife!: AmbientLife;
 
+  /** Estela de partículas compartida (jugador local + remotos). Tras start(). */
+  private motionTrail!: MotionTrail;
+  /** Modo DIBUJAR: estela arcoíris persistente. Tras start(). */
+  private drawTrail!: DrawTrail;
+  /** Acumulador de cadencia de la estela del jugador local (s). */
+  private trailAcc = 0;
+
   /** Mini-juego ¡Dale a Paqo! Público (como `net`): la red programa contra él. */
   game!: BallGame;
 
@@ -131,6 +141,7 @@ export class PaqoWorld {
   private _fwd = new THREE.Vector3();
   private _right = new THREE.Vector3();
   private _worldDir = new THREE.Vector3();
+  private _lookDir = new THREE.Vector3();
   private _ray = new THREE.Raycaster();
   private _ndc = new THREE.Vector2();
   private _pointerNdc = new THREE.Vector2();
@@ -180,6 +191,14 @@ export class PaqoWorld {
     this.pixels = new PixelSwarm(this.island.field, this.preset);
     this.pixels.addTo(this.scene);
 
+    // [VUELO/MANDOS] Estela de partículas compartida (local + remotos, 1 draw call)
+    // y modo DIBUJAR (estela arcoíris persistente). Se construyen antes de la red
+    // para inyectar la estela como pool compartido de los remotos.
+    this.motionTrail = new MotionTrail();
+    this.motionTrail.addTo(this.scene);
+    this.drawTrail = new DrawTrail();
+    this.drawTrail.addTo(this.scene);
+
     // Arranca SIEMPRE con el maniquí (mundo vivo al instante). Si hay un
     // arquetipo elegido, se carga en segundo plano y sustituye al maniquí; si el
     // GLB no existe aún, se queda el maniquí (con su tinte). Cambiar de avatar en
@@ -214,10 +233,14 @@ export class PaqoWorld {
       playerPosition: this.controller.position,
       playerForward: (out) => this.controller.getForward(out),
       playerGrounded: () => this.controller.isGrounded(),
+      playerFlying: () => this.controller.isFlying(),
       playerFeetY: () => this.controller.feetY,
       field: this.island.field,
+      motionTrail: this.motionTrail, // [VUELO] estela compartida de los remotos
     });
     this.net.start();
+    // [DIBUJO] Puente hacia el DrawTrail para la difusión de trazos por red.
+    this.net.setDrawTrail(this.drawTrail);
 
     // Director de clima (equipo Atmos): modula fog/cielo/luces y, vía callbacks,
     // el viento de la vegetación y la densidad del shell de niebla. Stub no-op.
@@ -370,6 +393,16 @@ export class PaqoWorld {
     this.weather?.setWeather(id);
   }
 
+  /** Contrato UI (equipo Vuelo) — activa/desactiva el modo DIBUJAR. */
+  setDrawing(on: boolean): void {
+    this.drawTrail?.setDrawing(on);
+  }
+
+  /** Contrato UI (equipo Vuelo) — ¿el modo DIBUJAR está activo? */
+  isDrawing(): boolean {
+    return this.drawTrail?.isDrawing() ?? false;
+  }
+
   /**
    * Contrato A — recentra el encuadre en el ÁREA VISIBLE cuando el HUD ocupa
    * márgenes del lienzo (p.ej. `{ right: 360 }` para el chat en columna a la
@@ -469,6 +502,7 @@ export class PaqoWorld {
       uCloudColor: { value: new THREE.Color("#FBD9DE") }, // crema-rosa
       uStar: { value: 1 },
       uHorizon: { value: new THREE.Color(this.preset.fog.color) }, // banda de fusión = fog lila
+      uPlanet: { value: 1 }, // visibilidad del planeta gaseoso (bruma lo atenúa, tormenta lo oculta)
     };
     const skyMat = new THREE.ShaderMaterial({
       side: THREE.BackSide,
@@ -486,9 +520,11 @@ export class PaqoWorld {
         uniform float uMoonOpacity;
         uniform vec3 uCloudColor; uniform float uCloud;
         uniform float uStar;
+        uniform float uPlanet;
         varying vec3 vPos;
 
         float hash21(vec2 p){ p = fract(p * vec2(123.34, 345.45)); p += dot(p, p + 34.345); return fract(p.x * p.y); }
+        vec2  hash22(vec2 p){ return vec2(hash21(p), hash21(p + 37.2)); }
         float vnoise(vec2 p){
           vec2 i = floor(p), f = fract(p);
           float a = hash21(i), b = hash21(i + vec2(1.0, 0.0));
@@ -501,19 +537,95 @@ export class PaqoWorld {
           for (int k = 0; k < 3; k++){ v += a * vnoise(p); p = p * 2.03 + vec2(11.1, 17.7); a *= 0.5; }
           return v;
         }
-        // Luna: disco toon con terminador simple (fase). 'ang' = radio angular (rad),
-        // 'phase' en [-1,1] desplaza el borde luz/sombra. Devuelve color sombreado y
-        // setea 'alpha' por el disco (para el mix contra el cielo).
+        // Ruido celular (Worley F1): distancia al punto-feature más cercano en una
+        // rejilla 3x3. Base de los cráteres procedurales de la luna protagonista.
+        float worley(vec2 p){
+          vec2 i = floor(p), f = fract(p);
+          float md = 1.0;
+          for (int y = -1; y <= 1; y++){
+            for (int x = -1; x <= 1; x++){
+              vec2 g = vec2(float(x), float(y));
+              vec2 o = hash22(i + g);
+              vec2 r = g + o - f;
+              md = min(md, dot(r, r));
+            }
+          }
+          return sqrt(md);
+        }
+        // Luna menor: disco toon con terminador simple (fase) + oscurecimiento de
+        // limbo (z) y moteado tenue. 'ang' = radio angular (rad); 'phase' desplaza
+        // el borde luz/sombra. Setea 'alpha' por el disco (mix contra el cielo).
         vec3 moon(vec3 dir, vec3 mdir, vec3 mcol, float ang, float phase, out float alpha){
           float d = dot(dir, mdir);
           float edge = cos(ang);
-          alpha = smoothstep(edge, mix(edge, 1.0, 0.03), d);
+          alpha = smoothstep(edge, mix(edge, 1.0, 0.04), d);
           if (alpha <= 0.0) return vec3(0.0);
           vec3 t = normalize(cross(vec3(0.0, 1.0, 0.0), mdir));
           vec3 b = cross(mdir, t);
           vec2 lp = vec2(dot(dir, t), dot(dir, b)) / sin(ang);
-          float lit = smoothstep(phase - 0.35, phase + 0.35, lp.x);
-          return mcol * mix(0.22, 1.0, lit);
+          float z = sqrt(max(1.0 - dot(lp, lp), 0.0));
+          float lit = smoothstep(phase - 0.4, phase + 0.4, lp.x);
+          float mott = 0.9 + 0.1 * vnoise(lp * 4.0);
+          return mcol * mix(0.18, 1.0, lit) * mix(0.7, 1.0, z) * mott;
+        }
+        // Luna PROTAGONISTA: disco grande con cráteres procedurales (fbm de maria +
+        // 2 octavas de Worley), terminador con banda de penumbra cálida, limbo
+        // iluminado del lado del sol (rim) y halo exterior tenue (out 'halo'). Se
+        // sombrea con 'sunCol' del lado 'sdir' (dirección del sol).
+        vec3 bigMoon(vec3 dir, vec3 mdir, vec3 sdir, vec3 sunCol, vec3 tint,
+                     float ang, float phase, out float alpha, out float halo){
+          float d = dot(dir, mdir);
+          float edge = cos(ang);
+          halo = smoothstep(cos(ang * 2.3), edge, d);   // glow desde ~2.3x el radio
+          alpha = smoothstep(edge, mix(edge, 1.0, 0.02), d);
+          halo *= (1.0 - alpha);                          // anillo exterior (no bajo el disco)
+          if (alpha <= 0.0) return vec3(0.0);
+          vec3 t = normalize(cross(vec3(0.0, 1.0, 0.0), mdir));
+          vec3 b = cross(mdir, t);
+          vec2 lp = vec2(dot(dir, t), dot(dir, b)) / sin(ang);
+          float r2 = dot(lp, lp);
+          float z = sqrt(max(1.0 - r2, 0.0));
+          // Relieve: maria (fbm) + cráteres (Worley 2 octavas): cuencas oscuras + rims claros.
+          float maria = fbm(lp * 2.2 + 5.0);
+          float c1 = worley(lp * 3.0 + 2.0);
+          float c2 = worley(lp * 6.5 + 9.0);
+          float basin = smoothstep(0.30, 0.0, c1) * 0.18 + smoothstep(0.16, 0.0, c2) * 0.08;
+          float rim   = smoothstep(0.30, 0.5, c1) * (1.0 - smoothstep(0.5, 0.7, c1)) * 0.12;
+          float relief = 1.0 - basin + rim - maria * 0.08;
+          // Terminador con penumbra cálida (banda ancha centrada en la fase).
+          float tt = clamp((lp.x - phase) / 0.7, -1.0, 1.0);
+          float term = tt * 0.5 + 0.5;                    // 0 sombra → 1 luz
+          float penumbra = 1.0 - abs(tt);                 // pico en el terminador
+          // Limbo iluminado: borde del disco que mira al sol (proyección de sdir).
+          vec2 sp = vec2(dot(sdir, t), dot(sdir, b));
+          float limbRim = smoothstep(0.65, 1.0, r2) * max(dot(normalize(lp + 1e-4), normalize(sp)), 0.0);
+          float shade = mix(0.12, 1.0, term) * relief * mix(0.68, 1.0, z);
+          vec3 c = tint * shade;
+          c += sunCol * penumbra * term * 0.10;           // banda de penumbra cálida (lado iluminado)
+          c += sunCol * limbRim * 0.55;                   // limbo brillante del lado del sol
+          return c;
+        }
+        // Planeta gigante gaseoso: disco grande con BANDAS horizontales (fbm 1D
+        // estirado por latitud), paleta lila-rosa-crema, oscurecido hacia el limbo.
+        vec3 planet(vec3 dir, vec3 pdir, float ang, out float alpha){
+          float d = dot(dir, pdir);
+          float edge = cos(ang);
+          alpha = smoothstep(edge, mix(edge, 1.0, 0.05), d);
+          if (alpha <= 0.0) return vec3(0.0);
+          vec3 t = normalize(cross(vec3(0.0, 1.0, 0.0), pdir));
+          vec3 b = cross(pdir, t);
+          vec2 lp = vec2(dot(dir, t), dot(dir, b)) / sin(ang);
+          float z = sqrt(max(1.0 - dot(lp, lp), 0.0));
+          // Bandas: fbm 1D estirado a lo largo de la latitud (lp.y), deriva muy lenta.
+          float lat = lp.y;
+          float bnd = fbm(vec2(lat * 5.0, uTime * 0.0015)) + 0.4 * fbm(vec2(lat * 12.0, 3.0));
+          bnd = clamp(bnd, 0.0, 1.0);
+          vec3 lilac = vec3(0.70, 0.58, 0.85);
+          vec3 pink  = vec3(0.96, 0.74, 0.83);
+          vec3 cream = vec3(0.99, 0.94, 0.88);
+          vec3 c = mix(lilac, pink, smoothstep(0.30, 0.60, bnd));
+          c = mix(c, cream, smoothstep(0.62, 0.92, bnd));
+          return c * mix(0.42, 1.0, z);                   // oscurecimiento de limbo
         }
 
         void main(){
@@ -528,15 +640,37 @@ export class PaqoWorld {
           float star = step(0.986, rnd) * (0.5 + 0.5 * sin(uTime * 1.7 + rnd * 40.0));
           col += vec3(0.9, 0.92, 1.0) * star * hi * 0.5 * uStar;
 
-          // Lunas (detrás de las nubes): una grande rosada, una pequeña turquesa,
-          // una mediana lila. Dirección/tamaño/fase fijos; el clima sólo las funde.
-          float a1, a2, a3;
-          vec3 m1 = moon(dir, normalize(vec3(-0.55, 0.50, -0.62)), vec3(0.91, 0.66, 0.78), 0.105, -0.2, a1);
-          vec3 m2 = moon(dir, normalize(vec3( 0.60, 0.72,  0.22)), vec3(0.56, 0.88, 0.84), 0.045,  0.35, a2);
-          vec3 m3 = moon(dir, normalize(vec3( 0.12, 0.86, -0.50)), vec3(0.80, 0.72, 0.91), 0.062,  0.10, a3);
-          col = mix(col, m1, a1 * uMoonOpacity);
+          // PLANETA gigante gaseoso: disco grande y bajo en el horizonte OPUESTO al
+          // sol, con bandas horizontales lila-rosa-crema. Muy tenue: se atenúa con
+          // uPlanet (bruma/tormenta) y su parte baja se funde con la niebla vía la
+          // banda de horizonte (abajo). Se dibuja primero → detrás de todo.
+          float ap;
+          vec3 pl = planet(dir, normalize(vec3(-0.78, 0.16, -0.58)), 0.24, ap);
+          col = mix(col, pl, ap * uPlanet * 0.85);
+
+          // LUNA PROTAGONISTA (grande y cercana, radio ~1.5x): cráteres, terminador
+          // con penumbra cálida, limbo iluminado del lado del sol y halo exterior.
+          float aBig, halo;
+          vec3 big = bigMoon(dir, normalize(vec3(-0.55, 0.50, -0.62)), uSunDir, uSunColor,
+                             vec3(0.93, 0.81, 0.83), 0.16, -0.15, aBig, halo);
+          col += mix(vec3(0.93, 0.81, 0.83), vec3(1.0), 0.5) * halo * 0.06 * uMoonOpacity;
+          col = mix(col, big, aBig * uMoonOpacity);
+
+          // LUNAS MENORES (4): turquesa, lila, ámbar y una verdosa pálida en ÓRBITA
+          // LENTA (su dirección gira con uTime — deriva perceptible en minutos).
+          float orb = uTime * 0.0016;
+          float co = cos(orb), so = sin(orb);
+          vec3 gBase = vec3(-0.34, 0.58, 0.56);
+          vec3 gDir = vec3(gBase.x * co - gBase.z * so, gBase.y, gBase.x * so + gBase.z * co);
+          float a2, a3, a4, a5;
+          vec3 m2 = moon(dir, normalize(vec3( 0.60, 0.72,  0.22)), vec3(0.56, 0.88, 0.84), 0.045,  0.35, a2); // turquesa
+          vec3 m3 = moon(dir, normalize(vec3( 0.12, 0.86, -0.50)), vec3(0.80, 0.72, 0.91), 0.060,  0.10, a3); // lila
+          vec3 m4 = moon(dir, normalize(vec3( 0.74, 0.34, -0.30)), vec3(0.96, 0.75, 0.46), 0.050, -0.30, a4); // ámbar
+          vec3 m5 = moon(dir, normalize(gDir),                     vec3(0.74, 0.90, 0.72), 0.038,  0.50, a5); // verdosa (órbita)
           col = mix(col, m3, a3 * uMoonOpacity);
           col = mix(col, m2, a2 * uMoonOpacity);
+          col = mix(col, m4, a4 * uMoonOpacity);
+          col = mix(col, m5, a5 * uMoonOpacity);
 
           // Sol: halo + disco cálido en la dirección de la key light (coherente con sombras).
           float sd = dot(dir, uSunDir);
@@ -733,11 +867,33 @@ export class PaqoWorld {
     this.ambientLife?.setReducedMotion(this.reducedMotion);
   }
 
+  // ---- click en el PROPIO avatar → emotes ----
+
+  /** Callback de la UI cuando el tap cae sobre el avatar del jugador (abre emotes). */
+  private avatarClickCb: (() => void) | null = null;
+
+  /**
+   * Registra un callback que se dispara cuando el jugador toca/clica su PROPIO
+   * avatar (raycast contra `controller.object` en el handleTap). La UI lo usa para
+   * abrir el menú de emotes. Pasar `null` lo desengancha.
+   */
+  onAvatarClick(cb: (() => void) | null): void {
+    this.avatarClickCb = cb;
+  }
+
   // ---- tap-to-move ----
 
   private handleTap(ndcX: number, ndcY: number): void {
     this._ndc.set(ndcX, ndcY);
     this._ray.setFromCamera(this._ndc, this.camera);
+    // ¿El tap cae sobre el propio avatar? → abre emotes y NO mueve.
+    if (this.avatarClickCb) {
+      const onAvatar = this._ray.intersectObject(this.controller.object, true);
+      if (onAvatar.length > 0) {
+        this.avatarClickCb();
+        return;
+      }
+    }
     const hit = this.island.raycastFrom(this._ray);
     if (!hit) return;
     this.moveTarget = hit.point.clone();
@@ -823,12 +979,24 @@ export class PaqoWorld {
       throttle = Math.min(1, f.moveAxis.length());
     }
 
-    this.controller.update(dt, { worldDir: this._worldDir, throttle, run: f.run, jump: f.jump });
+    // [VUELO] Dirección COMPLETA de la mirada (con pitch): en vuelo, "hacia donde
+    // miras es hacia donde vuelas". El controller sólo la usa en modo vuelo.
+    this.camera.getWorldDirection(this._lookDir);
+    this.controller.update(dt, {
+      worldDir: this._worldDir,
+      throttle,
+      run: f.run,
+      jump: f.jump,
+      lookDir: this._lookDir,
+    });
     this.follow.update(dt);
 
-    // E (teclado o botón móvil): si llevas pelota la lanzas; si no, agarras la
-    // más cercana. La detección de proximidad y el sprite E los lleva Balls.
-    if (f.grab) this.net.grabOrThrow();
+    // E (teclado o botón móvil) CONTEXTUAL: si hay pelota agarrable/en mano →
+    // agarrar/lanzar; si no → alterna el modo DIBUJAR. (Balls lleva la proximidad).
+    if (f.grab) {
+      if (this.net.canGrab() || this.net.isHolding()) this.net.grabOrThrow();
+      else this.drawTrail.setDrawing(!this.drawTrail.isDrawing());
+    }
 
     // Multijugador: interpola remotos, integra pelotas, evalúa zonas.
     this.net.update(dt);
@@ -840,6 +1008,7 @@ export class PaqoWorld {
       holding: this.net.isHolding(),
       grounded: this.controller.isGrounded(),
       canDoubleJump: this.controller.canDoubleJump(),
+      flying: this.controller.isFlying(),
     });
 
     // Audio: cadencia de pasos/salto/aterrizaje atada a la velocidad REAL del
@@ -850,6 +1019,23 @@ export class PaqoWorld {
     this.soundscape.setWaterProximity(0);
     this.soundscape.setMotion(hSpeed, 7, this.controller.isGrounded(), dt);
     this.soundscape.update(dt);
+
+    // [VUELO] Estela de partículas del jugador local: emite desde los pies cuando
+    // se mueve rápido (>2 u/s) o SIEMPRE en vuelo. Cadencia acotada por trailAcc.
+    const flyingNow = this.controller.isFlying();
+    if (hSpeed > 2 || flyingNow) {
+      this.trailAcc += dt;
+      const feetY = this.controller.feetY;
+      while (this.trailAcc >= 0.045) {
+        this.trailAcc -= 0.045;
+        this.motionTrail.emit(this.controller.position.x, feetY, this.controller.position.z);
+      }
+    } else {
+      this.trailAcc = 0;
+    }
+    this.motionTrail.update(dt);
+    // [DIBUJO] Ribbon arcoíris: añade puntos del trazo local y lo funde/reconstruye.
+    this.drawTrail.update(dt, this.controller.position, this.controller.feetY, this.camera);
 
     this.updateFade(dt);
 
@@ -916,6 +1102,8 @@ export class PaqoWorld {
     this.game?.dispose();
     this.weather?.dispose();
     this.ambientLife?.dispose();
+    this.motionTrail?.dispose();
+    this.drawTrail?.dispose();
     this.net?.dispose();
     this.soundscape?.dispose();
     this.input?.dispose();

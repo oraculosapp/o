@@ -14,7 +14,7 @@
  * borra las cachés viejas y los assets se re-piden frescos.
  */
 
-const VERSION = "phy-v1";
+const VERSION = "phy-v2";
 const RUNTIME = `${VERSION}-assets`;
 const SHELL = `${VERSION}-shell`;
 const OFFLINE_URL = "/offline.html";
@@ -96,6 +96,11 @@ self.addEventListener("fetch", (event) => {
 });
 
 // Permite a la página forzar la activación inmediata de un SW nuevo.
+// Acepta tanto el string legado "SKIP_WAITING" como el objeto { type: "SKIP_WAITING" }
+// (forma que emite el flujo de actualización moderno; ver ServiceWorkerRegister).
 self.addEventListener("message", (event) => {
-  if (event.data === "SKIP_WAITING") self.skipWaiting();
+  const data = event.data;
+  if (data === "SKIP_WAITING" || (data && data.type === "SKIP_WAITING")) {
+    self.skipWaiting();
+  }
 });

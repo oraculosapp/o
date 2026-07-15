@@ -1,11 +1,13 @@
 /**
- * validate.mjs — Valida los GLB generados por generate.py.
+ * validate.mjs — Valida el GLB del avatar "nube" generado por generate.py.
  *
- * Comprueba, por cada apps/web/public/assets/avatars/gen/<arq>-<f|m|n>.glb:
- *   · Huesos Mixamo esperados presentes (mínimo de locomoción + cadena completa).
- *   · ≤ 3000 triángulos.
- *   · Los 5 materiales nombrados por zona: primary, secondary, hair, skin, accent.
- *   · Skin presente con JOINTS_0/WEIGHTS_0 en las primitivas.
+ * NUEVA DIRECCIÓN (S8): un ÚNICO diseño NEUTRO tipo plastilina ("nube.glb"),
+ * un solo volumen suave, SÓLO ojos, sin arquetipos/builds. Comprueba, por cada
+ * apps/web/public/assets/avatars/gen/*.glb:
+ *   · Huesos Mixamo esperados presentes (cadena completa + piernas de locomoción).
+ *   · ≤ 6000 triángulos (más denso que S7: la suavidad clay lo pide).
+ *   · Los 2 materiales nombrados: body (cuerpo, zona de tinte) + eyes (negro).
+ *   · Skin presente con JOINTS_0/WEIGHTS_0 en las primitivas (skinning suave).
  *   · Tamaño < 300 KB.
  *
  * Uso:  cd tools/assets && node ../avatars/validate.mjs
@@ -28,9 +30,10 @@ const { MeshoptDecoder } = await importFrom("meshoptimizer");
 const draco3d = (await importFrom("draco3dgltf")).default;
 const GEN_DIR = path.join(REPO, "apps", "web", "public", "assets", "avatars", "gen");
 
-const MAX_TRIS = 3000;
+const MAX_TRIS = 6000;
 const MAX_BYTES = 300 * 1024;
-const ZONES = ["primary", "secondary", "hair", "skin", "accent"];
+// El avatar "nube" tiene 2 materiales nombrados: body (tintable) + eyes (negro).
+const ZONES = ["body", "eyes"];
 // Huesos mínimos que ProceduralLocomotion necesita + cadena razonable.
 const REQUIRED_BONES = [
   "Hips", "Spine", "Spine1", "Spine2", "Neck", "Head",

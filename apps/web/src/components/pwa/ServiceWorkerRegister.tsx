@@ -10,8 +10,14 @@ import { useEffect } from "react";
  * respuestas rompe el HMR de Next, así que en `next dev` nos aseguramos de que
  * no quede ninguno registrado de una visita anterior.
  *
+ * Además, sondea `reg.update()` cada 30 min y al volver a la pestaña
+ * (`visibilitychange`): así el navegador descarga a tiempo un `/sw.js` nuevo,
+ * lo que acelera el descubrimiento de despliegues junto con el UpdateSentinel.
+ *
  * Se monta una vez en el layout raíz. No pinta nada.
  */
+const SW_UPDATE_INTERVAL_MS = 30 * 60 * 1000; // 30 min
+
 export function ServiceWorkerRegister() {
   useEffect(() => {
     if (typeof navigator === "undefined" || !("serviceWorker" in navigator)) return;
@@ -24,17 +30,41 @@ export function ServiceWorkerRegister() {
       return;
     }
 
+    let registration: ServiceWorkerRegistration | null = null;
+    let interval: ReturnType<typeof setInterval> | null = null;
+
+    const pokeUpdate = () => {
+      // Silencioso: un update() fallido nunca debe romper la app.
+      registration?.update().catch(() => {});
+    };
+
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") pokeUpdate();
+    };
+
     const onLoad = () => {
-      navigator.serviceWorker.register("/sw.js").catch((err) => {
-        // Silencioso: un SW que no registra nunca debe romper la app.
-        console.warn("[pwa] registro de service worker falló:", err);
-      });
+      navigator.serviceWorker
+        .register("/sw.js")
+        .then((reg) => {
+          registration = reg;
+          // Sondeo periódico + al volver a la pestaña.
+          interval = setInterval(pokeUpdate, SW_UPDATE_INTERVAL_MS);
+          document.addEventListener("visibilitychange", onVisibility);
+        })
+        .catch((err) => {
+          // Silencioso: un SW que no registra nunca debe romper la app.
+          console.warn("[pwa] registro de service worker falló:", err);
+        });
     };
 
     if (document.readyState === "complete") onLoad();
     else window.addEventListener("load", onLoad, { once: true });
 
-    return () => window.removeEventListener("load", onLoad);
+    return () => {
+      window.removeEventListener("load", onLoad);
+      document.removeEventListener("visibilitychange", onVisibility);
+      if (interval != null) clearInterval(interval);
+    };
   }, []);
 
   return null;

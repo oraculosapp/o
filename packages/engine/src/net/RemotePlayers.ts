@@ -4,9 +4,13 @@ import { loadAvatarRigShared, isAllowedArchetypeUrl } from "../avatar/AvatarGLTF
 import { buildArchetype, isArchetypeId as isProceduralArchetypeId, avatarGlbUrl } from "../avatar/archetypes";
 import type { AvatarDriveState, IAvatarRig } from "../avatar/types";
 import { makeSoftCircleTexture } from "../util/toon";
-import type { NetAnim, RemoteState } from "./types";
+import type { MotionEmitter, NetAnim, RemoteState } from "./types";
 
 const UP = new THREE.Vector3(0, 1, 0);
+/** Velocidad horizontal (u/s) del remoto por encima de la cual deja estela. */
+const TRAIL_SPEED = 2;
+/** Cadencia de emisión de estela por remoto (s). */
+const TRAIL_EMIT_DT = 0.045;
 
 /** Cap del pool de remotos (presupuesto de draw calls / memoria). */
 const MAX_REMOTES = 32;
@@ -39,8 +43,12 @@ function driveStateFor(anim: string): AvatarDriveState {
       return { speed: 3, maxSpeed: 7, grounded: true, jumping: false };
     case "jump":
       return { speed: 3, maxSpeed: 7, grounded: false, jumping: true };
+    // Vuelo: pose de aire (no hay clip "fly"; el air-pose se lee mejor que idle).
+    case "fly":
+      return { speed: 3, maxSpeed: 7, grounded: false, jumping: true };
     case "idle":
     default:
+      // Cualquier string desconocido cae aquí → idle (tolerancia de red).
       return { speed: 0, maxSpeed: 7, grounded: true, jumping: false };
   }
 }
@@ -70,11 +78,20 @@ class RemoteAvatar {
   private puff?: THREE.Points;
   private puffLife = 0;
 
+  // Estela de partículas (equipo Vuelo): emite desde los pies al moverse/volar.
+  private curAnim = "idle";
+  private prevPos = new THREE.Vector3();
+  private hasPrev = false;
+  private trailAcc = 0;
+
   private _a = new THREE.Vector3();
   private _b = new THREE.Vector3();
   private _q = new THREE.Quaternion();
 
-  constructor(scene: THREE.Scene) {
+  constructor(
+    scene: THREE.Scene,
+    private motionTrail?: MotionEmitter,
+  ) {
     // El rig se ancla por su base (pies). El estado de red trae el CENTRO del
     // avatar (igual que getLocalState), así que bajamos el rig media altura.
     this.rig.root.position.set(0, -this.rig.height / 2, 0);
@@ -245,6 +262,26 @@ class RemoteAvatar {
       this.holder.quaternion.slerpQuaternions(a.quat, b.quat, alpha);
     }
 
+    // --- estela de partículas desde los pies (equipo Vuelo) ---
+    // Emite cuando el remoto se mueve rápido (>TRAIL_SPEED) o SIEMPRE en vuelo.
+    if (this.motionTrail && this.fade > 0.5 && dt > 1e-5) {
+      let speed = 0;
+      if (this.hasPrev) speed = this._a.copy(this.holder.position).sub(this.prevPos).length() / dt;
+      this.prevPos.copy(this.holder.position);
+      this.hasPrev = true;
+      if (speed > TRAIL_SPEED || this.curAnim === "fly") {
+        this.trailAcc += dt;
+        // El holder trae el CENTRO del avatar; los pies = centro − media altura.
+        const feetY = this.holder.position.y - this.rig.height / 2;
+        while (this.trailAcc >= TRAIL_EMIT_DT) {
+          this.trailAcc -= TRAIL_EMIT_DT;
+          this.motionTrail.emit(this.holder.position.x, feetY, this.holder.position.z);
+        }
+      } else {
+        this.trailAcc = 0;
+      }
+    }
+
     // Anim directa al AnimationDriver (el estado lo fija setAnim en cada upsert).
     this.rig.update(dt, this.driveState);
 
@@ -282,7 +319,14 @@ class RemoteAvatar {
 
   /** Actualiza la animación objetivo (llamado desde el orquestador con el string). */
   setAnim(anim: string): void {
+    this.curAnim = anim;
     this.driveState = driveStateFor(anim);
+  }
+
+  /** Reproduce un EMOTE en el rig del remoto (se mezcla y vuelve a idle). */
+  playEmote(emote: string): void {
+    if (this.dead) return;
+    this.rig.playEmote(emote);
   }
 
   // ---- etiqueta MSDF-free: sprite de canvas 2D ----
@@ -407,7 +451,11 @@ export class RemotePlayers {
   private map = new Map<string, RemoteAvatar>();
   private _camPos = new THREE.Vector3();
 
-  constructor(private scene: THREE.Scene) {}
+  constructor(
+    private scene: THREE.Scene,
+    /** Estela compartida (equipo Vuelo): cada remoto emite motas en este pool. */
+    private motionTrail?: MotionEmitter,
+  ) {}
 
   /** Nº de remotos vivos (para el smoke test). */
   get count(): number {
@@ -418,7 +466,7 @@ export class RemotePlayers {
     let a = this.map.get(id);
     if (!a) {
       if (this.map.size >= MAX_REMOTES) return; // cap: descarta silenciosamente
-      a = new RemoteAvatar(this.scene);
+      a = new RemoteAvatar(this.scene, this.motionTrail);
       this.map.set(id, a);
     }
     a.setAnim(s.anim);
@@ -428,6 +476,11 @@ export class RemotePlayers {
 
   remove(id: string): void {
     this.map.get(id)?.beginRemove();
+  }
+
+  /** El avatar remoto `id` reproduce un emote (si existe en el pool). */
+  playEmote(id: string, emote: string): void {
+    this.map.get(id)?.playEmote(emote);
   }
 
   /** Posición interpolada actual del holder de un remoto (para QA/__PAQO__). */

@@ -24,7 +24,7 @@
   justify-content: center;
   border-radius: 50%;
 }
-@media (max-width: 640px) {
+@media (pointer: coarse), (max-width: 640px) {
   /* Fila 1 (izquierda): Instalar, con áreas seguras (notch/gestos). */
   .hud {
     top: calc(12px + env(safe-area-inset-top));

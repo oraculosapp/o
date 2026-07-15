@@ -4,6 +4,7 @@ import { Balls } from "./Balls";
 import { ZoneSignals } from "./ZoneSignals";
 import type {
   BallState,
+  DrawBatch,
   LocalState,
   NetAnim,
   RemoteState,
@@ -11,6 +12,16 @@ import type {
   WorldNetHooks,
   ZoneSignal,
 } from "./types";
+
+/**
+ * Puente hacia el sistema de DIBUJO (DrawTrail) para la difusión de trazos por
+ * red. Lo inyecta PaqoWorld tras construir el DrawTrail (`setDrawTrail`). Se
+ * tipa estructuralmente para no acoplar net/ con world/DrawTrail.
+ */
+export interface DrawBridge {
+  onBatch(cb: (b: DrawBatch) => void): () => void;
+  applyRemoteBatch(owner: string, b: DrawBatch): void;
+}
 
 /** Umbrales de velocidad horizontal (u/s) para clasificar la anim local. */
 const IDLE_MAX = 0.84; // ratio 0.12 · runSpeed 7
@@ -33,6 +44,8 @@ export class WorldNet implements WorldNetHooks {
   private zones: ZoneSignals;
 
   private tickSubs = new Set<TickSub>();
+  /** Suscriptores de EMOTES locales (la red los difunde por broadcast "emote"). */
+  private emoteSubs = new Set<(emote: string) => void>();
   private time = 0;
 
   // Estimación de la velocidad del jugador (para patadas y anim), por delta de pos.
@@ -45,10 +58,19 @@ export class WorldNet implements WorldNetHooks {
   private _fwd = new THREE.Vector3();
   private _holdTarget = new THREE.Vector3();
 
+  /** Puente de dibujo (DrawTrail) para la difusión de trazos. Lo fija PaqoWorld. */
+  private drawBridge: DrawBridge | null = null;
+
   constructor(private deps: WorldNetDeps) {
-    this.remotes = new RemotePlayers(deps.scene);
+    // [VUELO/ESTELA] La estela compartida (si la hay) llega a los remotos vía pool.
+    this.remotes = new RemotePlayers(deps.scene, deps.motionTrail);
     this.balls = new Balls(deps.field);
     this.zones = new ZoneSignals(0, 0);
+  }
+
+  /** [VUELO/DIBUJO] Inyecta el DrawTrail para difundir/aplicar trazos por red. */
+  setDrawTrail(bridge: DrawBridge): void {
+    this.drawBridge = bridge;
   }
 
   /** Construye la malla de pelotas y las añade a la escena. */
@@ -107,6 +129,31 @@ export class WorldNet implements WorldNetHooks {
     return this.zones.onSignal(cb);
   }
 
+  // ---- [VUELO/DIBUJO] difusión de trazos ----
+
+  onDrawBatch(cb: (b: DrawBatch) => void): () => void {
+    return this.drawBridge?.onBatch(cb) ?? (() => {});
+  }
+
+  applyDrawBatch(by: string, b: DrawBatch): void {
+    this.drawBridge?.applyRemoteBatch(by, b);
+  }
+
+  // ---- EMOTES (equipo Avatar) ----
+
+  onLocalEmote(cb: (emote: string) => void): () => void {
+    this.emoteSubs.add(cb);
+    return () => this.emoteSubs.delete(cb);
+  }
+
+  emitLocalEmote(emote: string): void {
+    for (const cb of this.emoteSubs) cb(emote);
+  }
+
+  applyRemoteEmote(id: string, emote: string): void {
+    this.remotes.playEmote(id, emote);
+  }
+
   // ---- agarrar / lanzar pelota (E) ----
 
   /** ¿Hay una pelota agarrable al alcance del jugador (y no lleva ninguna)? */
@@ -157,9 +204,11 @@ export class WorldNet implements WorldNetHooks {
     const k = 1 - Math.exp(-12 * dt);
     this.smoothVel.lerp(this.vel, k);
 
-    // Clasifica la animación local.
+    // Clasifica la animación local. Vuelo tiene prioridad (grounded es false en
+    // vuelo, pero queremos "fly", no "jump").
     const horiz = Math.hypot(this.smoothVel.x, this.smoothVel.z);
-    if (!this.deps.playerGrounded()) this.localAnim = "jump";
+    if (this.deps.playerFlying?.()) this.localAnim = "fly";
+    else if (!this.deps.playerGrounded()) this.localAnim = "jump";
     else if (horiz < IDLE_MAX) this.localAnim = "idle";
     else if (horiz < WALK_MAX) this.localAnim = "walk";
     else this.localAnim = "run";
@@ -216,6 +265,7 @@ export class WorldNet implements WorldNetHooks {
 
   dispose(): void {
     this.tickSubs.clear();
+    this.emoteSubs.clear();
     this.remotes.dispose();
     this.balls.dispose();
     this.zones.dispose();

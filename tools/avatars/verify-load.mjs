@@ -28,7 +28,8 @@ function normBone(n) {
   return n.toLowerCase().replace(/^mixamorig[:_]?/, "").replace(/_\d+$/, "");
 }
 const REQUIRED = ["hips", "leftupleg", "rightupleg", "leftleg", "rightleg", "leftfoot", "rightfoot", "head"];
-const ZONES = ["primary", "secondary", "hair", "skin", "accent"];
+// Avatar "nube": 2 materiales nombrados (body tintable + eyes negro).
+const ZONES = ["body", "eyes"];
 
 const file = process.argv[2] || readdirSync(GEN).filter((f) => f.endsWith(".glb")).sort()[0];
 const glbPath = path.isAbsolute(file) ? file : path.join(GEN, file);
@@ -61,7 +62,7 @@ loader.parse(
     const ok = missingBones.length === 0 && missingMats.length === 0 && hasSkeleton;
     if (missingBones.length) console.log(`  FALTAN huesos: ${missingBones.join(", ")}`);
     if (missingMats.length) console.log(`  FALTAN materiales: ${missingMats.join(", ")}`);
-    console.log(ok ? "  => OK: carga como esqueleto skinned con huesos de pierna + 5 zonas" : "  => FALLO");
+    console.log(ok ? "  => OK: carga como esqueleto skinned con huesos de pierna + materiales body/eyes" : "  => FALLO");
     process.exit(ok ? 0 : 1);
   },
   (err) => {

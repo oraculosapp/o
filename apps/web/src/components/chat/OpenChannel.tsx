@@ -134,8 +134,12 @@ export function OpenChannel({ messages, name, sessionId, onSetName, onSend, auto
               setEditingName(true);
             }}
             title="Cambiar tu nombre"
+            aria-label={`Cambiar tu nombre (actual: ${name})`}
           >
-            {name}
+            <span className={styles.nameChipText}>{name}</span>
+            <span className={styles.nameChipPencil} aria-hidden>
+              ✎
+            </span>
           </button>
           <input
             ref={inputRef}

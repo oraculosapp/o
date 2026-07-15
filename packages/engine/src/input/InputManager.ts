@@ -25,6 +25,8 @@ export interface ActionState {
   grounded: boolean;
   /** Puede encadenar un segundo salto en el aire (doble salto). */
   canDoubleJump: boolean;
+  /** En modo VUELO (triple salto): el botón de salto pasa a "Caer". */
+  flying: boolean;
 }
 
 interface PointerRec {
@@ -50,6 +52,8 @@ export class InputManager {
   private keys = new Set<string>();
   private jumpEdge = false;
   private grabEdge = false;
+  /** Correr desde el botón MÓVIL (hold): OR con Shift del teclado. */
+  private mobileRun = false;
   private pointers = new Map<number, PointerRec>();
 
   /**
@@ -67,6 +71,7 @@ export class InputManager {
     holding: false,
     grounded: true,
     canDoubleJump: false,
+    flying: false,
   };
 
   private orbitDX = 0;
@@ -206,6 +211,7 @@ export class InputManager {
       this.joyVec.set(0, 0);
       this.jumpEdge = false;
       this.grabEdge = false;
+      this.mobileRun = false; // suelta el correr móvil al perder el input
     }
   }
 
@@ -227,6 +233,19 @@ export class InputManager {
   }
 
   /**
+   * Botón CORRER móvil en modo HOLD (feel arcade): mantén pulsado para correr,
+   * suelta para caminar. Se combina (OR) con Shift del teclado en `consumeMove`.
+   */
+  setRun(on: boolean): void {
+    this.mobileRun = on;
+  }
+
+  /** Botón CORRER móvil en modo TOGGLE (alterna correr/caminar en cada pulsación). */
+  pressRun(): void {
+    this.mobileRun = !this.mobileRun;
+  }
+
+  /**
    * Suscribe cambios del estado de acción (canGrab/holding/grounded/canDoubleJump).
    * Llama al callback de inmediato con el estado actual y luego sólo en cambios.
    * Devuelve la función para desuscribir.
@@ -244,7 +263,8 @@ export class InputManager {
       p.canGrab === s.canGrab &&
       p.holding === s.holding &&
       p.grounded === s.grounded &&
-      p.canDoubleJump === s.canDoubleJump
+      p.canDoubleJump === s.canDoubleJump &&
+      p.flying === s.flying
     ) {
       return;
     }
@@ -375,7 +395,7 @@ export class InputManager {
       if (this.keys.has("a") || this.keys.has("arrowleft")) this._axis.x -= 1;
       if (this._axis.lengthSq() > 1) this._axis.normalize();
     }
-    const run = this.keys.has("shift");
+    const run = this.keys.has("shift") || this.mobileRun;
     const jump = this.jumpEdge;
     const grab = this.grabEdge;
     this.jumpEdge = false;

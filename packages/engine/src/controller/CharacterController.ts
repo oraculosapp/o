@@ -11,6 +11,14 @@ export interface MoveIntent {
   throttle: number;
   run: boolean;
   jump: boolean;
+  /**
+   * Dirección COMPLETA de la mirada de la cámara (con componente vertical), en
+   * espacio mundo y normalizada. La rellena PaqoWorld con `camera.getWorldDirection`.
+   * Sólo se usa en VUELO: "hacia donde miras es hacia donde vuelas" — el pitch de la
+   * cámara inclina el vuelo hacia arriba/abajo. Opcional: sin ella el vuelo queda
+   * planar (sin ganancia/pérdida de altura por mirada).
+   */
+  lookDir?: THREE.Vector3;
 }
 
 const UP = new THREE.Vector3(0, 1, 0);
@@ -23,7 +31,12 @@ const TMP = {
   normal: new THREE.Vector3(),
   surf: new THREE.Vector3(),
   tangent: new THREE.Vector3(),
+  flyTarget: new THREE.Vector3(),
 };
+/** Frecuencia angular del bob de flotación idle en vuelo (0.5 Hz → 2π·0.5). */
+const FLY_BOB_W = Math.PI;
+/** Amplitud del bob de flotación idle en vuelo (u). */
+const FLY_BOB_AMP = 0.15;
 
 /**
  * Character controller PLANAR de isla flotante: up constante (0,1,0), gravedad
@@ -46,13 +59,24 @@ export class CharacterController {
   private readonly jumpSpeed = 9.2;
   private readonly coyoteTime = 0.12;
   private readonly jumpBuffer = 0.12;
-  // --- doble salto ---
-  /** Máximo de saltos hasta tocar suelo (1 = suelo/coyote, 2 = aire). */
-  private readonly maxJumps = 2;
+  // --- doble/triple salto + vuelo ---
+  /** Máximo de saltos hasta tocar suelo (1 = suelo/coyote, 2 = aire, 3 = ¡vuela!). */
+  private readonly maxJumps = 3;
   /** Impulso del segundo salto relativo al primero (un poco menor, eleva más). */
   private readonly doubleJumpFactor = 0.85;
   /** Saltos consumidos desde el último contacto con el suelo. */
   private jumpsUsed = 0;
+  // --- vuelo (activado por el TERCER salto) ---
+  /** Rapidez de crucero del vuelo (u/s). */
+  private readonly flySpeed = 9;
+  /** Aceleración del vuelo (suavizado hacia la velocidad objetivo). */
+  private readonly flyAccel = 20;
+  /** ¿En modo VUELO? (gravedad off; se mueve hacia donde mira). */
+  private flying = false;
+  /** ¿El vuelo tiene input de movimiento este frame? (para la pose del rig). */
+  private flyMoving = false;
+  /** Reloj del bob de flotación idle (s). */
+  private flyBobT = 0;
   // 8/s (antes 12): giros más pausados — feedback del director en S3b.
   private readonly turnRate = 8;
   private readonly slopeLimitCos = Math.cos(THREE.MathUtils.degToRad(50));
@@ -138,6 +162,8 @@ export class CharacterController {
     this.grounded = true;
     this.onPlatform = false;
     this.jumpsUsed = 0;
+    this.flying = false;
+    this.flyMoving = false;
     this.falling = false;
     this.alignInitial();
   }
@@ -206,9 +232,17 @@ export class CharacterController {
     return this.grounded;
   }
 
-  /** ¿Puede encadenar un segundo salto ahora mismo? (en aire, con 1 salto usado). */
+  /**
+   * ¿Puede encadenar OTRO salto en el aire ahora mismo? Cubre el doble salto Y el
+   * tercero (que activa el vuelo). No aplica en vuelo (ahí el botón sirve para caer).
+   */
   canDoubleJump(): boolean {
-    return !this.grounded && this.jumpsUsed >= 1 && this.jumpsUsed < this.maxJumps;
+    return !this.flying && !this.grounded && this.jumpsUsed >= 1 && this.jumpsUsed < this.maxJumps;
+  }
+
+  /** ¿En modo VUELO? (para el rig, la anim de red y la etiqueta del botón "Caer"). */
+  isFlying(): boolean {
+    return this.flying;
   }
 
   isFalling(): boolean {
@@ -242,22 +276,24 @@ export class CharacterController {
   update(dt: number, intent: MoveIntent): void {
     const field = this.island.field;
 
-    // --- 1. Velocidad horizontal objetivo (XZ) ---
-    TMP.desired.copy(intent.worldDir);
-    TMP.desired.y = 0;
-    const hasInput = TMP.desired.lengthSq() > 1e-6 && intent.throttle > 0.02;
-    if (hasInput) TMP.desired.normalize();
+    // --- 1. Velocidad horizontal objetivo (XZ) — en vuelo la gobierna updateFly ---
+    if (!this.flying) {
+      TMP.desired.copy(intent.worldDir);
+      TMP.desired.y = 0;
+      const hasInput = TMP.desired.lengthSq() > 1e-6 && intent.throttle > 0.02;
+      if (hasInput) TMP.desired.normalize();
 
-    const maxSpeed =
-      (intent.run ? this.runSpeed : this.walkSpeed) * (hasInput ? intent.throttle : 0);
-    TMP.desired.multiplyScalar(maxSpeed);
+      const maxSpeed =
+        (intent.run ? this.runSpeed : this.walkSpeed) * (hasInput ? intent.throttle : 0);
+      TMP.desired.multiplyScalar(maxSpeed);
 
-    this.horizVel.y = 0;
-    const rate = hasInput ? this.accel : this.decel;
-    TMP.move.copy(TMP.desired).sub(this.horizVel);
-    const step = rate * dt;
-    if (TMP.move.length() <= step) this.horizVel.copy(TMP.desired);
-    else this.horizVel.addScaledVector(TMP.move.normalize(), step);
+      this.horizVel.y = 0;
+      const rate = hasInput ? this.accel : this.decel;
+      TMP.move.copy(TMP.desired).sub(this.horizVel);
+      const step = rate * dt;
+      if (TMP.move.length() <= step) this.horizVel.copy(TMP.desired);
+      else this.horizVel.addScaledVector(TMP.move.normalize(), step);
+    }
 
     // --- 2. Gravedad -Y + salto (coyote-time + jump-buffer) ---
     this.timeSinceGround += dt;
@@ -266,7 +302,16 @@ export class CharacterController {
 
     const canCoyote = this.timeSinceGround <= this.coyoteTime;
     const wantsJump = this.timeSinceJumpReq <= this.jumpBuffer;
-    if (wantsJump && this.jumpsUsed === 0 && (this.grounded || canCoyote)) {
+    if (this.flying) {
+      // En VUELO: pulsar salto → CAER (sale del modo, gravedad normal desde reposo
+      // vertical). Aterrizar también sale (§4). Edge crudo (no el buffer).
+      if (intent.jump) {
+        this.flying = false;
+        this.flyMoving = false;
+        this.vertVel = 0;
+        this.timeSinceJumpReq = 999;
+      }
+    } else if (wantsJump && this.jumpsUsed === 0 && (this.grounded || canCoyote)) {
       // Primer salto: desde suelo o dentro del coyote-time (conserva jump-buffer).
       this.vertVel = this.jumpSpeed;
       this.grounded = false;
@@ -279,27 +324,41 @@ export class CharacterController {
       this.jumpsUsed >= 1 &&
       this.jumpsUsed < this.maxJumps
     ) {
-      // Doble salto: NUEVA pulsación de Space en el aire (edge crudo, no el
-      // buffer, para exigir una segunda pulsación real). Impulso 0.85× reiniciado
-      // desde la velocidad actual → desde el ápex eleva por encima de un salto
-      // simple. Máximo 2 saltos hasta volver a tocar suelo.
-      this.vertVel = this.jumpSpeed * this.doubleJumpFactor;
-      this.jumpsUsed += 1;
+      // NUEVA pulsación de Space en el aire (edge crudo, no el buffer, para exigir
+      // una pulsación real). 2º salto = impulso 0.85×; 3er salto = activa VUELO.
       this.timeSinceJumpReq = 999;
+      if (this.jumpsUsed === 1) {
+        // Doble salto: impulso reiniciado desde la velocidad actual → desde el ápex
+        // eleva por encima de un salto simple.
+        this.vertVel = this.jumpSpeed * this.doubleJumpFactor;
+        this.jumpsUsed = 2;
+      } else {
+        // TERCER salto → VUELO: gravedad off, velocidad vertical a cero, bob reiniciado.
+        this.flying = true;
+        this.jumpsUsed = 3;
+        this.vertVel = 0;
+        this.flyBobT = 0;
+      }
     }
-    this.vertVel -= this.gravity * dt;
 
-    // --- 2.5 Muro de pendiente (slide suave, ANTES de integrar) ---
-    // Sobre una copa (tapa plana) no hay slide: se ignora la pendiente del terreno.
-    if (this.grounded && !this.onPlatform) {
-      const nrm = field.surfaceNormal(this.position.x, this.position.z, TMP.normal);
-      if (nrm.y < this.slopeLimitCos) {
-        // Parte horizontal de la normal apunta cuesta ABAJO → uphill = su opuesto.
-        TMP.tangent.set(nrm.x, 0, nrm.z);
-        if (TMP.tangent.lengthSq() > 1e-8) {
-          TMP.tangent.negate().normalize();
-          const vUphill = this.horizVel.dot(TMP.tangent);
-          if (vUphill > 0) this.horizVel.addScaledVector(TMP.tangent, -vUphill);
+    if (this.flying) {
+      // Vuelo: sustituye gravedad + accel horizontal por una velocidad 3D suave.
+      this.updateFly(dt, intent);
+    } else {
+      this.vertVel -= this.gravity * dt;
+
+      // --- 2.5 Muro de pendiente (slide suave, ANTES de integrar) ---
+      // Sobre una copa (tapa plana) no hay slide: se ignora la pendiente del terreno.
+      if (this.grounded && !this.onPlatform) {
+        const nrm = field.surfaceNormal(this.position.x, this.position.z, TMP.normal);
+        if (nrm.y < this.slopeLimitCos) {
+          // Parte horizontal de la normal apunta cuesta ABAJO → uphill = su opuesto.
+          TMP.tangent.set(nrm.x, 0, nrm.z);
+          if (TMP.tangent.lengthSq() > 1e-8) {
+            TMP.tangent.negate().normalize();
+            const vUphill = this.horizVel.dot(TMP.tangent);
+            if (vUphill > 0) this.horizVel.addScaledVector(TMP.tangent, -vUphill);
+          }
         }
       }
     }
@@ -337,7 +396,9 @@ export class CharacterController {
       this.vertVel = 0;
       this.grounded = true;
       this.timeSinceGround = 0;
-      this.jumpsUsed = 0; // al aterrizar se recarga el doble salto
+      this.jumpsUsed = 0; // al aterrizar se recarga el doble/triple salto
+      this.flying = false; // aterrizar SIEMPRE sale del modo vuelo
+      this.flyMoving = false;
       this.onPlatform = standingOnPlatform;
       if (standingOnPlatform) this.groundNormal.copy(UP); // copa: tapa plana
     } else {
@@ -372,14 +433,78 @@ export class CharacterController {
     this.object.quaternion.copy(this.facing);
 
     // --- 6. Conducción del rig de avatar ---
+    // En vuelo: pose de aire ("jump") mientras te mueves; "idle" al flotar quieto
+    // (se ve mejor la flotación). En tierra/salto: pose de aire si no hay suelo.
+    const rigJumping = this.flying ? this.flyMoving : !this.grounded;
     this.rig?.update(dt, {
       speed: this.horizVel.length(),
       maxSpeed: this.runSpeed,
-      grounded: this.grounded,
-      jumping: !this.grounded,
+      grounded: this.grounded && !this.flying,
+      jumping: rigJumping,
     });
 
     this.updateBlob();
+  }
+
+  /**
+   * Física de VUELO: dirección deseada 3D = worldDir plano (horizontal) + una
+   * componente VERTICAL derivada del pitch de la mirada (`intent.lookDir`) por
+   * cuánto el movimiento va "hacia delante" respecto a la cámara. Así, mirar
+   * arriba y avanzar (W) sube; mirar abajo baja; el strafe queda nivelado. La
+   * velocidad 3D se suaviza (flyAccel). Sin input: la velocidad decae a cero y se
+   * añade un bob senoidal sutil (flotación idle). NO hay gravedad aquí.
+   */
+  private updateFly(dt: number, intent: MoveIntent): void {
+    TMP.desired.copy(intent.worldDir);
+    TMP.desired.y = 0;
+    const hasInput = TMP.desired.lengthSq() > 1e-6 && intent.throttle > 0.02;
+    this.flyMoving = hasInput;
+
+    TMP.flyTarget.set(0, 0, 0);
+    if (hasInput) {
+      TMP.desired.normalize();
+      let vy = 0;
+      const look = intent.lookDir;
+      if (look && look.lengthSq() > 1e-6) {
+        // Alineación del movimiento con el frente HORIZONTAL de la cámara: +1 = W
+        // (hacia donde miras), −1 = S. Multiplica el seno del pitch (look.y).
+        const lhLen = Math.hypot(look.x, look.z);
+        let align = 0;
+        if (lhLen > 1e-5) align = (TMP.desired.x * look.x + TMP.desired.z * look.z) / lhLen;
+        align = THREE.MathUtils.clamp(align, -1, 1);
+        vy = look.y * align;
+      }
+      TMP.flyTarget.set(TMP.desired.x, vy, TMP.desired.z);
+      if (TMP.flyTarget.lengthSq() > 1e-8) {
+        TMP.flyTarget.normalize().multiplyScalar(this.flySpeed * Math.min(1, intent.throttle));
+      }
+    }
+
+    // Suaviza la velocidad 3D actual (horizVel.xz + vertVel.y) hacia el objetivo.
+    const step = this.flyAccel * dt;
+    const cx = this.horizVel.x;
+    const cz = this.horizVel.z;
+    const cy = this.vertVel;
+    const dx = TMP.flyTarget.x - cx;
+    const dy = TMP.flyTarget.y - cy;
+    const dz = TMP.flyTarget.z - cz;
+    const dl = Math.hypot(dx, dy, dz);
+    if (dl <= step || dl < 1e-6) {
+      this.horizVel.set(TMP.flyTarget.x, 0, TMP.flyTarget.z);
+      this.vertVel = TMP.flyTarget.y;
+    } else {
+      const k = step / dl;
+      this.horizVel.set(cx + dx * k, 0, cz + dz * k);
+      this.vertVel = cy + dy * k;
+    }
+
+    // Flotación idle: sin input, bob senoidal ±0.15 u @0.5 Hz sumado a la velocidad
+    // vertical (su integral es el desplazamiento senoidal; no acumula deriva porque
+    // la velocidad base decae a 0).
+    if (!hasInput) {
+      this.flyBobT += dt;
+      this.vertVel += FLY_BOB_AMP * FLY_BOB_W * Math.cos(FLY_BOB_W * this.flyBobT);
+    }
   }
 
   // ---- avatar placeholder ----

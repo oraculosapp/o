@@ -11,7 +11,7 @@
   position: fixed;
   top: 16px;
   left: 260px;
-  z-index: 36;
+  z-index: 35;
 }
 
 .button {
@@ -159,7 +159,7 @@
   transform: none;
 }
 
-@media (max-width: 640px) {
+@media (pointer: coarse), (max-width: 640px) {
   /* Fila 1 (derecha del clúster): ánimo/clima, con áreas seguras. */
   .root {
     top: calc(12px + env(safe-area-inset-top));

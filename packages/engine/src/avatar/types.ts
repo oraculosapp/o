@@ -22,6 +22,12 @@ export interface IAvatarRig {
   readonly height: number;
   /** Avanza mixer de animación y elige/mezcla clips según el estado de conducción. */
   update(dt: number, state: AvatarDriveState): void;
+  /**
+   * Reproduce un EMOTE procedural (one-shot) que se mezcla sobre la locomoción y
+   * vuelve a idle: "dance1" | "dance2" | "wave" | "spin" | "jump-cheer". No-op si
+   * el esqueleto del rig no soporta emotes (p.ej. maniquí de 5 huesos).
+   */
+  playEmote(id: string): void;
   /** Recolorea por zonas (la capa "híbrida" de personalización). */
   setTint(palette: Partial<Record<TintZone, THREE.Color>>): void;
   /** Engancha un prop (regadera, catalejo, cayado...) a un socket que sigue la animación. */

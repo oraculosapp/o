@@ -26,6 +26,14 @@
   pointer-events: none;
 }
 
+/* Fila inferior del clúster: Correr (izq) + Saltar (der), lado a lado. */
+.row {
+  display: flex;
+  flex-direction: row;
+  align-items: flex-end;
+  gap: 0.7rem;
+}
+
 .btn {
   pointer-events: auto;
   display: inline-grid;
@@ -66,30 +74,50 @@
   background: linear-gradient(180deg, rgba(227, 176, 99, 0.28), rgba(227, 176, 99, 0.12));
   border-color: var(--gold-dim);
 }
-
-/* Agarrar/Lanzar: más pequeño, aparece sólo cuando hay algo agarrable. */
-.grab {
-  width: 64px;
-  height: 64px;
-  font-size: 0.66rem;
-  animation: grabIn var(--dur-fast) var(--ease-brand);
+/* En vuelo el salto pasa a "Caer": vira a un azul-lila frío para leerse distinto. */
+.flying {
+  background: linear-gradient(180deg, rgba(122, 162, 247, 0.32), rgba(122, 162, 247, 0.14));
+  border-color: rgba(122, 162, 247, 0.7);
+  color: #cfe0ff;
 }
+
+/* Acción (Tomar/Lanzar/Dibuja): siempre visible, un pelín mayor, encabeza el clúster. */
+.action {
+  width: 76px;
+  height: 76px;
+  font-size: 0.68rem;
+}
+/* Con pelota en mano → acento terracota (Lanzar). */
 .holding {
   background: linear-gradient(180deg, rgba(222, 121, 78, 0.3), rgba(222, 121, 78, 0.14));
   border-color: var(--terra);
   color: var(--terra);
 }
-@keyframes grabIn {
-  from {
-    opacity: 0;
-    transform: scale(0.85);
-  }
+/* Modo DIBUJAR activo: encendido dorado con halo (estado "on" persistente). */
+.drawingOn {
+  background: linear-gradient(180deg, rgba(227, 176, 99, 0.55), rgba(227, 176, 99, 0.3));
+  border-color: var(--gold-bright);
+  color: #1a130a;
+  box-shadow: var(--shadow), 0 0 24px var(--glow);
+}
+
+/* Correr: neutro; encendido (hold) resalta con dorado tenue. */
+.run {
+  width: 66px;
+  height: 66px;
+  font-size: 0.64rem;
+}
+.runOn {
+  background: linear-gradient(180deg, rgba(227, 176, 99, 0.34), rgba(227, 176, 99, 0.16));
+  border-color: var(--gold-dim);
+  transform: scale(0.96);
 }
 
 @media (prefers-reduced-motion: reduce) {
   .pad,
   .btn,
-  .grab {
+  .action,
+  .run {
     transition: none;
     animation: none;
   }

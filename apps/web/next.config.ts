@@ -19,6 +19,25 @@ import type { NextConfig } from "next";
  */
 const isDev = process.env.NODE_ENV !== "production";
 
+/**
+ * Build id del despliegue — la "huella" del código que se está sirviendo.
+ *
+ * Se resuelve UNA vez, en build, y se usa en dos sitios que DEBEN coincidir:
+ *   1. `generateBuildId` → el propio build id interno de Next.
+ *   2. `env.NEXT_PUBLIC_BUILD_ID` → inyectado (inline) en el bundle del cliente
+ *      Y legible en el server por `/api/version`.
+ *
+ * Así el cliente lleva su id embebido y `/api/version` sirve el del deploy vivo;
+ * `UpdateSentinel` los compara para saber si la pestaña corre código viejo.
+ *
+ * Prioridad: override explícito → SHA del commit en Vercel → sello temporal
+ * (builds locales). Nunca vacío.
+ */
+const BUILD_ID =
+  process.env.NEXT_PUBLIC_BUILD_ID ||
+  process.env.VERCEL_GIT_COMMIT_SHA?.slice(0, 12) ||
+  `local-${Date.now()}`;
+
 const scriptSrc = ["'self'", "'unsafe-inline'", "'wasm-unsafe-eval'", isDev ? "'unsafe-eval'" : ""]
   .filter(Boolean)
   .join(" ");
@@ -57,6 +76,14 @@ const nextConfig: NextConfig = {
   // El engine y demás paquetes internos se distribuyen como TS puro:
   // Next los transpila en vez de consumir un build propio.
   transpilePackages: ["@phygitalia/engine", "@phygitalia/ui", "@phygitalia/content"],
+  // El build id de Next = nuestra huella de deploy, para que el nombre de los
+  // artefactos y el beacon de versión hablen del mismo despliegue.
+  generateBuildId: async () => BUILD_ID,
+  // Inyecta el build id como env pública: inline en el bundle del cliente
+  // (id embebido de UpdateSentinel) y legible en el server (/api/version).
+  env: {
+    NEXT_PUBLIC_BUILD_ID: BUILD_ID,
+  },
   async headers() {
     return [
       {

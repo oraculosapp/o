@@ -207,6 +207,11 @@ export class TestDummy implements IAvatarRig {
     this.driver.update(dt, state);
   }
 
+  /** Emotes: no-op (el maniquí de 5 huesos no mapea el esqueleto Mixamo del EmoteDriver). */
+  playEmote(_id: string): void {
+    /* sin soporte de emotes */
+  }
+
   setTint(palette: Partial<Record<TintZone, THREE.Color>>): void {
     for (const zone of Object.keys(palette) as TintZone[]) {
       const c = palette[zone];

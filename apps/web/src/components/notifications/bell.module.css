@@ -207,7 +207,7 @@
 }
 
 /* En móvil el panel se ancla a la derecha sin desbordar. */
-@media (max-width: 640px) {
+@media (pointer: coarse), (max-width: 640px) {
   .panel {
     width: min(300px, calc(100vw - 24px));
   }

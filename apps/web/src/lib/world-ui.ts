@@ -30,12 +30,18 @@ export interface WorldActionState {
   grounded: boolean;
   /** Puede encadenar un segundo salto (doble salto). */
   canDoubleJump: boolean;
+  /** En modo VUELO (triple salto): el botón de salto pasa a "Caer". */
+  flying: boolean;
 }
 
 /** Sub-API de input del mundo para botones móviles. */
 export interface WorldInputHooks {
   pressJump?(): void;
   pressGrab?(): void;
+  /** Botón CORRER móvil en HOLD (mantener = correr). */
+  setRun?(on: boolean): void;
+  /** Botón CORRER móvil en TOGGLE (alterna correr/caminar). */
+  pressRun?(): void;
   /** Suscribe cambios de estado de acción; devuelve una función para desuscribir. */
   onActionState?(cb: (s: WorldActionState) => void): () => void;
 }
@@ -80,6 +86,18 @@ export interface WorldGameHooks {
   snapshot?(): GameSnapshotUi;
 }
 
+/**
+ * Espejo ESTRUCTURAL mínimo del `controller` del engine (CharacterController).
+ * Sólo exponemos LO QUE EL HUD lee: la posición del jugador (Vector3 → {x,y,z}).
+ * Se accede con optional-chaining sobre el getter perezoso; PaqoWorld lo publica
+ * tras `start()`. No acopla la app al paquete del engine (igual criterio que el
+ * resto de este contrato).
+ */
+export interface WorldControllerUi {
+  /** Posición mundial del avatar local (metros). El HUD la sondea para el gating. */
+  readonly position: { readonly x: number; readonly y: number; readonly z: number };
+}
+
 /** Superficie del mundo que consume el HUD (todo opcional → degradación elegante). */
 export interface WorldUiHooks {
   setViewportInset?(inset: ViewportInset): void;
@@ -91,6 +109,13 @@ export interface WorldUiHooks {
   setWeather?(id: string): void;
   /** Sub-API del mini-juego (equipo Juego). */
   game?: WorldGameHooks;
+  /** Controlador del personaje (posición del jugador). Sólo lectura para el HUD. */
+  controller?: WorldControllerUi;
+  // ---- DIBUJAR (equipo Vuelo/Mandos): toggle del modo dibujo ----
+  /** Activa/desactiva el modo DIBUJAR (estela arcoíris persistente). */
+  setDrawing?(on: boolean): void;
+  /** ¿El modo DIBUJAR está activo? (para el estado visual del botón). */
+  isDrawing?(): boolean;
 }
 
 /** Getter perezoso del mundo (puede devolver null si aún no montó). */

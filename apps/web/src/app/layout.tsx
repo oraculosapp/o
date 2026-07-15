@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import { ServiceWorkerRegister } from "@/components/pwa/ServiceWorkerRegister";
+import { UpdateSentinel } from "@/components/pwa/UpdateSentinel";
 import { CookieBanner } from "@/components/legal/CookieBanner";
 import { JsonLd } from "@/components/seo/JsonLd";
 
@@ -70,6 +71,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         {children}
         <CookieBanner />
         <ServiceWorkerRegister />
+        <UpdateSentinel />
         <JsonLd />
       </body>
     </html>

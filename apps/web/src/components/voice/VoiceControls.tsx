@@ -6,7 +6,8 @@
  * ciclo de vida vía `useVoiceRoom`. Pensado para montarse en el `voiceSlot` del chat.
  *
  * Estados de UI:
- *   · Sin sesión (`enabled=false`): botón deshabilitado "Voz: inicia sesión".
+ *   · Identidad no lista (`enabled=false`): botón "Unirse a la voz" deshabilitado
+ *     (transitorio; el nombre aleatorio llega al entrar).
  *   · Fuera del canal: botón de marca "Unirse a la voz".
  *   · Dentro: botón de micrófono (mute/unmute, aria-pressed) + indicador de quién
  *     habla (puntos que pulsan) + botón "Salir".
@@ -54,7 +55,9 @@ export function VoiceControls({
   const statusId = useId();
   const containerClass = [styles.voice, className].filter(Boolean).join(" ");
 
-  // --- Gating: sin sesión, la voz está deshabilitada -------------------------
+  // --- Gating: identidad aún no lista → mismo botón "Unirse a la voz", pero
+  // deshabilitado (transitorio; todos reciben un nombre aleatorio al entrar). Sin
+  // leyendas confusas: la etiqueta es siempre la acción real.
   if (!enabled) {
     return (
       <div className={containerClass}>
@@ -63,10 +66,10 @@ export function VoiceControls({
           className={styles.join}
           disabled
           aria-disabled="true"
-          title="Inicia sesión para usar la voz"
+          title="Preparando tu voz…"
         >
           <MicGlyph muted />
-          <span>Voz: inicia sesión</span>
+          <span>Unirse a la voz</span>
         </button>
       </div>
     );

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   ARCHETYPES,
   BUILDS,
+  NUBE_ID,
   archetypeUrl,
   avatarFileNames,
   avatarId,
@@ -10,9 +11,21 @@ import {
   isAvatarAvailable,
   isAvatarId,
   isBuildId,
+  nubeGlbUrl,
   parseAvatarId,
   thumbUrl,
 } from "../avatars";
+
+describe('avatar "nube" (S8, diseño único)', () => {
+  it("expone el id y el GLB del diseño único", () => {
+    expect(NUBE_ID).toBe("nube");
+    expect(nubeGlbUrl()).toBe("/assets/avatars/gen/nube.glb");
+  });
+
+  it("la miniatura única apunta a nube.webp", () => {
+    expect(thumbUrl()).toBe("/assets/avatars/thumbs/gen/nube.webp");
+  });
+});
 
 describe("catálogo de avatares", () => {
   it("tiene los 9 arquetipos con ids en minúsculas/guion", () => {
@@ -34,11 +47,6 @@ describe("catálogo de avatares", () => {
   it("mapea arquetipo+género a la URL del GLB según la convención", () => {
     expect(archetypeUrl("hacker", "m")).toBe("/assets/avatars/hacker-m.glb");
     expect(archetypeUrl("dedo-verde", "f")).toBe("/assets/avatars/dedo-verde-f.glb");
-  });
-
-  it("mapea la miniatura MODELADA por build (gen), con build neutro por defecto", () => {
-    expect(thumbUrl("chaman")).toBe("/assets/avatars/thumbs/gen/chaman-n.webp");
-    expect(thumbUrl("chaman", "f")).toBe("/assets/avatars/thumbs/gen/chaman-f.webp");
   });
 
   it("reconoce ids válidos e inválidos", () => {

@@ -45,7 +45,7 @@
   color: var(--text-faint);
 }
 
-@media (max-width: 640px) {
+@media (pointer: coarse), (max-width: 640px) {
   /* Fila 1 (izquierda): mute tras Instalar, con áreas seguras. */
   .button {
     top: calc(12px + env(safe-area-inset-top));

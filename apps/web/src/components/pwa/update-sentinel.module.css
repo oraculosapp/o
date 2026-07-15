@@ -1,0 +1,87 @@
+/* Píldora "Nueva versión disponible" — glass dorado del design system.
+   Aparece abajo-centro para no chocar con el HUD (instalar arriba-izquierda,
+   controles arriba-derecha, joystick/chat abajo-izquierda). */
+
+.toast {
+  position: fixed;
+  left: 50%;
+  bottom: calc(20px + env(safe-area-inset-bottom));
+  transform: translateX(-50%);
+  z-index: 60;
+
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+  max-width: min(92vw, 30rem);
+  padding: 0.6rem 1.15rem;
+
+  border: 1px solid var(--gold-dim);
+  border-radius: var(--radius-pill);
+  background: var(--panel-hi);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  box-shadow:
+    var(--shadow),
+    0 0 26px var(--glow);
+
+  color: var(--text);
+  cursor: pointer;
+  font-family: var(--font-display);
+  font-size: 0.74rem;
+  font-weight: 500;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  text-align: center;
+
+  animation: toastIn var(--dur-slow) var(--ease-brand);
+  transition:
+    transform var(--dur-fast) var(--ease-brand),
+    border-color var(--dur-fast) var(--ease-brand),
+    box-shadow var(--dur-fast) var(--ease-brand);
+}
+
+.toast:hover {
+  transform: translateX(-50%) translateY(-2px);
+  border-color: var(--gold);
+  box-shadow:
+    var(--shadow),
+    0 0 34px var(--glow);
+}
+
+.toast:focus-visible {
+  outline: 2px solid var(--gold-bright);
+  outline-offset: 2px;
+}
+
+.spark {
+  color: var(--gold-bright);
+}
+
+.action {
+  color: var(--gold-bright);
+}
+
+@media (max-width: 640px) {
+  .toast {
+    bottom: calc(14px + env(safe-area-inset-bottom));
+    font-size: 0.7rem;
+    /* Área táctil holgada (WCAG 2.5.5). */
+    min-height: 44px;
+    white-space: normal;
+  }
+}
+
+@keyframes toastIn {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 12px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .toast {
+    animation: none;
+    transition: none;
+  }
+}

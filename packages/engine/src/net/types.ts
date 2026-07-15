@@ -42,13 +42,41 @@ export interface WorldNetHooks {
   setLocalId(id: string): void;
   /** Suscribe cambios de zona respecto al tótem. Unsub fn. */
   onZoneSignal(cb: (signal: ZoneSignal) => void): () => void;
+  // ---- DIBUJAR (equipo Vuelo/Mandos): difusión de trazos por la red ----
+  /** Suscribe LOTES locales de dibujo (para que la red los difunda "draw"). Unsub fn. */
+  onDrawBatch(cb: (b: DrawBatch) => void): () => void;
+  /** Aplica un lote de dibujo de un trazo REMOTO (mismo sistema de pintado). */
+  applyDrawBatch(by: string, b: DrawBatch): void;
+  // ---- EMOTES (equipo Avatar): difusión de emotes sobre el propio avatar ----
+  /**
+   * Suscribe EMOTES locales (el jugador dispara un emote sobre su propio avatar)
+   * para que la red los difunda ("emote" broadcast). Unsub fn. `emote` = emote id.
+   */
+  onLocalEmote(cb: (emote: string) => void): () => void;
+  /** Notifica un emote local a los suscriptores (lo llama la UI al elegir emote). */
+  emitLocalEmote(emote: string): void;
+  /** Aplica un EMOTE remoto: el avatar del remoto `id` reproduce `emote`. */
+  applyRemoteEmote(id: string, emote: string): void;
 }
 
 /** Terna posicional en espacio mundo. */
 export type Vec3 = [number, number, number];
 
-/** Animación de locomoción sincronizable. */
-export type NetAnim = "idle" | "walk" | "run" | "jump";
+/**
+ * Animación de locomoción sincronizable. "fly" es el modo VUELO (triple salto);
+ * los clientes que no lo conozcan caen a idle (RemotePlayers tolera strings).
+ */
+export type NetAnim = "idle" | "walk" | "run" | "jump" | "fly";
+
+/**
+ * Un lote de puntos de un TRAZO de dibujo para difundir/aplicar (equipo Vuelo).
+ * `stroke` = id del trazo del emisor; `points` = plano [x,y,z, …] (≤40 puntos).
+ * Espejo de {@link import("../world/DrawTrail").DrawBatch}.
+ */
+export interface DrawBatch {
+  stroke: number;
+  points: number[];
+}
 
 /** Estado del jugador local que consume la red. */
 export interface LocalState {
@@ -95,6 +123,8 @@ export interface WorldNetDeps {
   playerForward: (out?: THREE.Vector3) => THREE.Vector3;
   /** ¿El jugador está en el suelo? (para elegir idle/walk/run vs jump). */
   playerGrounded: () => boolean;
+  /** ¿El jugador está VOLANDO? (triple salto) — clasifica la anim de red como "fly". */
+  playerFlying?: () => boolean;
   /**
    * Altura Y de los PIES del jugador (pivote − eyeHeight). La usa el contacto
    * de patada de las pelotas (ventana vertical de piernas). Opcional:
@@ -103,6 +133,18 @@ export interface WorldNetDeps {
   playerFeetY?: () => number;
   /** Campo de altura de la isla (ancla la física de pelotas). */
   field: FieldLike;
+  /**
+   * Estela de partículas COMPARTIDA (equipo Vuelo): RemotePlayers emite motas
+   * desde los pies de cada remoto en el MISMO pool que el jugador local (1 draw
+   * call). Opcional: sin ella, los remotos simplemente no dejan estela.
+   */
+  motionTrail?: MotionEmitter;
+}
+
+/** Emisor de estela de partículas (subconjunto de MotionTrail que usa la red). */
+export interface MotionEmitter {
+  /** Emite UNA mota en (x,y,z) — típicamente los pies del emisor. */
+  emit(x: number, y: number, z: number): void;
 }
 
 /** Subconjunto de IslandField que necesita la física de pelotas y las zonas. */

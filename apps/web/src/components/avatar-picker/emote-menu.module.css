@@ -1,0 +1,96 @@
+/* EmoteMenu — mini-panel de emotes al tocar tu avatar. Glass de la casa. */
+
+.backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: grid;
+  place-items: center;
+  /* Sin velo: el mundo sigue visible; el backdrop sólo captura el clic-fuera. */
+  background: transparent;
+}
+
+.panel {
+  display: flex;
+  gap: 0.45rem;
+  padding: 0.55rem 0.7rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-pill);
+  background: rgba(8, 10, 18, 0.72);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  box-shadow: var(--shadow);
+  animation: emoteIn var(--dur-fast) var(--ease-brand);
+  /* Flota un poco por debajo del centro (el avatar queda arriba, visible). */
+  transform: translateY(22vh);
+}
+@keyframes emoteIn {
+  from {
+    opacity: 0;
+    transform: translateY(calc(22vh + 10px)) scale(0.94);
+  }
+}
+
+.emote {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.15rem;
+  min-width: 58px;
+  padding: 0.45rem 0.5rem;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  transition:
+    background var(--dur-fast) var(--ease-brand),
+    border-color var(--dur-fast) var(--ease-brand),
+    transform var(--dur-fast) var(--ease-brand);
+}
+.emote:hover {
+  background: rgba(227, 176, 99, 0.12);
+  border-color: var(--gold-dim);
+  transform: translateY(-2px);
+}
+
+.icon {
+  font-size: 1.45rem;
+  line-height: 1;
+}
+.label {
+  font-family: var(--font-display);
+  font-size: 0.6rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+
+@media (max-width: 640px) {
+  .panel {
+    flex-wrap: wrap;
+    justify-content: center;
+    max-width: 92vw;
+    border-radius: var(--radius);
+    transform: translateY(16vh);
+  }
+  @keyframes emoteIn {
+    from {
+      opacity: 0;
+      transform: translateY(calc(16vh + 10px)) scale(0.94);
+    }
+  }
+  .emote {
+    min-width: 64px;
+    padding: 0.55rem 0.5rem;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .panel {
+    animation: none;
+  }
+  .emote {
+    transition: none;
+  }
+}

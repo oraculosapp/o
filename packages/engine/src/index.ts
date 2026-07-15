@@ -32,6 +32,9 @@ export {
   ARCHETYPE_SPECS,
   BUILD_IDS,
   GEN_AVATAR_PREFIX,
+  NUBE_ID,
+  NUBE_GLB_URL,
+  isNubeId,
   buildArchetype,
   archetypeSpec,
   isArchetypeId as isProceduralArchetypeId,
@@ -43,6 +46,7 @@ export {
 } from "./avatar/archetypes";
 export { ArchetypePreview, type ArchetypePreviewOptions } from "./avatar/ArchetypePreview";
 export { AnimationDriver, type Locomotion } from "./avatar/AnimationDriver";
+export { EmoteDriver, EMOTE_IDS, isEmoteId, type EmoteId } from "./avatar/EmoteDriver";
 export { ProceduralLocomotion, type LocomotionQA } from "./avatar/ProceduralLocomotion";
 export { TintController, toToonMaterial, avatarToonRamp, type HueBand } from "./avatar/tint";
 export type { IAvatarRig, AvatarDriveState, TintZone, PropSocket, AvatarConfig } from "./avatar/types";
@@ -86,6 +90,10 @@ export { WeatherDirector, WEATHER_IDS, type WeatherId, type WeatherRefs } from "
 export { AmbientLife } from "./world/AmbientLife";
 // Vegetación instanciada (equipo Flora/Tierra): expone platformHeightAt (copas pisables).
 export { Vegetation } from "./world/Vegetation";
+
+// --- Vuelo/Mandos: estela de partículas + modo DIBUJAR ---
+export { MotionTrail } from "./world/MotionTrail";
+export { DrawTrail, type DrawBatch } from "./world/DrawTrail";
 
 // --- Mini-juego ¡Dale a Paqo! (equipo Juego) ---
 export {

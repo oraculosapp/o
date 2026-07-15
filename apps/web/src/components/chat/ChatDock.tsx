@@ -49,6 +49,12 @@ const MARGIN = 12;
 
 /** Media query unificada de "móvil": puntero grueso O pantalla estrecha (problema 8). */
 const COARSE_QUERY = "(pointer: coarse), (max-width: 640px)";
+/**
+ * Móvil en HORIZONTAL: la hoja vertical no sirve (poca altura), así que el chat pasa
+ * a PANEL LATERAL IZQUIERDO. Sólo en dispositivos táctiles (pointer:coarse) para no
+ * capturar un escritorio con ventana apaisada estrecha.
+ */
+const LANDSCAPE_QUERY = "(orientation: landscape) and (pointer: coarse)";
 /** Fracciones de alto de la hoja (deben ir alineadas con .sheetPeek/.sheetFull en CSS). */
 const PEEK_FRACTION = 0.42;
 const FULL_FRACTION = 0.88;
@@ -74,6 +80,24 @@ function useIsMobileHud(): boolean {
     return () => mq.removeEventListener("change", apply);
   }, []);
   return mobile;
+}
+
+/**
+ * ¿Móvil en HORIZONTAL? (orientación apaisada + puntero grueso). Cuando es true, el
+ * chat se dibuja como PANEL LATERAL izquierdo en vez de hoja superior. Reactivo a la
+ * rotación del dispositivo.
+ */
+function useIsLandscapeMobile(): boolean {
+  const [landscape, setLandscape] = useState(false);
+  useEffect(() => {
+    if (typeof matchMedia === "undefined") return;
+    const mq = matchMedia(LANDSCAPE_QUERY);
+    const apply = () => setLandscape(mq.matches);
+    apply();
+    mq.addEventListener("change", apply);
+    return () => mq.removeEventListener("change", apply);
+  }, []);
+  return landscape;
 }
 
 /** Lectura síncrona de "móvil" para inicializar estado sin esperar al efecto. */
@@ -122,12 +146,16 @@ function clampPos(p: Pos, w: number, h: number): Pos {
 }
 
 /**
- * HUD de chat con dos disposiciones:
- *   · COLUMNA lateral derecha (por defecto): full-height. Mientras está abierta,
- *     empuja el juego con `world.setViewportInset({right})` para que el avatar
- *     quede centrado en el área visible; al cerrar/flotar vuelve a {right:0}.
- *   · FLOTANTE: panel arrastrable por su cabecera; recuerda posición en
- *     localStorage y se mantiene dentro del viewport.
+ * HUD de chat con cuatro disposiciones (según dispositivo/orientación):
+ *   · ESCRITORIO — COLUMNA lateral derecha (por defecto): full-height. Empuja el
+ *     juego con `world.setViewportInset({right})`; al cerrar/flotar vuelve a 0.
+ *   · ESCRITORIO — FLOTANTE: panel arrastrable por su cabecera; recuerda posición.
+ *   · MÓVIL PORTRAIT — HOJA SUPERIOR (top sheet): cuelga desde arriba con el asa
+ *     ABAJO, para jugar abajo mientras se lee arriba. Dos anclajes (asomar ~42% /
+ *     expandir ~88%) + arrastre. Empuja el juego con {top} (avatar en la franja
+ *     inferior). Los botones de acción quedan abajo → no chocan.
+ *   · MÓVIL LANDSCAPE — PANEL LATERAL izquierdo, angosto y full-height, colapsable.
+ *     Empuja el juego con {left}. La hoja vertical no sirve en apaisado.
  *
  * Enter (con el foco fuera de un campo) abre el chat y enfoca el mensaje; Escape lo
  * colapsa. Cuando el input del chat gana foco, apaga el input del juego
@@ -138,6 +166,11 @@ function clampPos(p: Pos, w: number, h: number): Pos {
 export function ChatDock({ biosphereId, getWorldNet, getWorld, voiceSlot }: ChatDockProps) {
   const configured = isSupabaseConfigured();
   const isMobile = useIsMobileHud();
+  const isLandscape = useIsLandscapeMobile();
+  // Tres disposiciones móviles: PORTRAIT → hoja superior (top sheet); LANDSCAPE →
+  // panel lateral izquierdo. (Escritorio: columna/flotante, más abajo.)
+  const isTopSheet = isMobile && !isLandscape;
+  const isSidePanel = isMobile && isLandscape;
   // En ESCRITORIO arranca abierto (columna lateral); en MÓVIL arranca COLAPSADO
   // para no abrir el teclado al entrar (problema 3). Escape colapsa; Enter reabre.
   const [open, setOpen] = useState(true);
@@ -189,29 +222,51 @@ export function ChatDock({ biosphereId, getWorldNet, getWorld, voiceSlot }: Chat
 
   // --- Empuje del viewport del juego + chrome móvil ---------------------------
   // Empuja el juego para centrar el avatar en el área visible y publica el alto
-  // de la hoja móvil en `--chat-sheet-h` (px) + `data-chat-sheet` en <html>, que
-  // los botones de acción (MobileControls) leen para reubicarse SIEMPRE por
-  // encima del chat (problema 4). En escritorio empuja por la derecha (columna).
+  // ocupado abajo en `--chat-sheet-h` (px) + `data-chat-sheet` en <html>, que los
+  // botones de acción (MobileControls) leen para reubicarse. Con el chat ARRIBA
+  // (top sheet) o a la IZQUIERDA (panel apaisado) el borde inferior queda libre, así
+  // que los botones NO chocan (var a 0). En escritorio empuja por la derecha.
   const applyChrome = useCallback(() => {
     const root = typeof document !== "undefined" ? document.documentElement : null;
     const world = getWorld?.();
     // OJO: no extraer el método pelón (pierde el `this` del mundo).
     const setInset = world?.setViewportInset ? world.setViewportInset.bind(world) : undefined;
 
-    if (isMobile) {
+    // MÓVIL HORIZONTAL: panel lateral IZQUIERDO (setViewportInset {left}). El borde
+    // inferior queda libre (botones de acción abajo), así que --chat-sheet-h = 0.
+    if (isSidePanel) {
+      const vw = typeof window !== "undefined" ? window.innerWidth : 0;
+      if (open) {
+        const w = panelRef.current
+          ? Math.round(panelRef.current.getBoundingClientRect().width)
+          : Math.round(vw * 0.4);
+        root?.style.setProperty("--chat-sheet-h", "0px");
+        if (root) root.dataset.chatSheet = "side";
+        setInset?.({ left: w, right: 0, top: 0, bottom: 0 });
+      } else {
+        root?.style.setProperty("--chat-sheet-h", "64px");
+        if (root) root.dataset.chatSheet = "closed";
+        setInset?.({ left: 0, right: 0, top: 0, bottom: 0 });
+      }
+      return;
+    }
+
+    // MÓVIL VERTICAL: HOJA SUPERIOR (top sheet). Cuelga desde arriba con {top}: el
+    // avatar se recoloca en la franja visible INFERIOR (tope al 50% para no
+    // aplastarlo al expandir). data-chat-sheet="top" (nunca "full") → los botones
+    // de acción quedan visibles abajo, sin chocar con el chat.
+    if (isTopSheet) {
       const vh = typeof window !== "undefined" ? window.innerHeight : 0;
       if (open) {
         const hPx = Math.round((snap === "full" ? FULL_FRACTION : PEEK_FRACTION) * vh);
-        root?.style.setProperty("--chat-sheet-h", `${hPx}px`);
-        if (root) root.dataset.chatSheet = snap;
-        // La hoja usa {bottom}: el avatar se recoloca en la franja visible superior
-        // (con tope al 50% para no aplastarlo al expandir). El engine lo soporta.
-        setInset?.({ right: 0, bottom: Math.min(hPx, Math.round(vh * 0.5)) });
+        root?.style.setProperty("--chat-sheet-h", "0px");
+        if (root) root.dataset.chatSheet = "top";
+        setInset?.({ top: Math.min(hPx, Math.round(vh * 0.5)), right: 0, bottom: 0, left: 0 });
       } else {
         // Colapsado: reserva sitio para el launcher (los botones quedan por encima).
         root?.style.setProperty("--chat-sheet-h", "64px");
         if (root) root.dataset.chatSheet = "closed";
-        setInset?.({ right: 0, bottom: 0 });
+        setInset?.({ top: 0, right: 0, bottom: 0, left: 0 });
       }
       return;
     }
@@ -223,8 +278,8 @@ export function ChatDock({ biosphereId, getWorldNet, getWorld, voiceSlot }: Chat
       open && mode === "column" && panelRef.current
         ? Math.round(panelRef.current.getBoundingClientRect().width)
         : 0;
-    setInset?.({ right, bottom: 0 });
-  }, [getWorld, isMobile, open, mode, snap]);
+    setInset?.({ right, bottom: 0, top: 0, left: 0 });
+  }, [getWorld, isTopSheet, isSidePanel, open, mode, snap]);
 
   // Recalcula al abrir/cerrar, cambiar de modo/anclaje, redimensionar panel o
   // ventana. Al desmontar o cerrar, libera el empuje y limpia el chrome.
@@ -243,7 +298,7 @@ export function ChatDock({ biosphereId, getWorldNet, getWorld, voiceSlot }: Chat
   useEffect(() => {
     return () => {
       // Al desmontar el dock, no dejes el juego empujado ni el chrome sucio.
-      getWorld?.()?.setViewportInset?.({ right: 0, bottom: 0 });
+      getWorld?.()?.setViewportInset?.({ top: 0, right: 0, bottom: 0, left: 0 });
       const root = typeof document !== "undefined" ? document.documentElement : null;
       root?.style.removeProperty("--chat-sheet-h");
       if (root) root.dataset.chatSheet = "closed";
@@ -254,17 +309,18 @@ export function ChatDock({ biosphereId, getWorldNet, getWorld, voiceSlot }: Chat
   const onFocusIn = (e: React.FocusEvent) => {
     if (!isEditableTarget(e.target)) return;
     getWorld?.()?.setInputEnabled?.(false);
-    // Al escribir en móvil, expande la hoja: máximo sitio sobre el teclado.
-    if (isMobile) setSnap("full");
+    // Al escribir en la hoja superior, expándela: máximo sitio sobre el teclado.
+    // (El panel lateral apaisado no usa anclajes verticales.)
+    if (isTopSheet) setSnap("full");
   };
   const onFocusOut = (e: React.FocusEvent) => {
     if (isEditableTarget(e.target)) getWorld?.()?.setInputEnabled?.(true);
   };
 
-  // --- Arrastre vertical de la hoja móvil (bottom sheet) ----------------------
+  // --- Arrastre vertical de la HOJA SUPERIOR (top sheet) ----------------------
   // Se manipula el alto directo sobre el DOM durante el gesto (sin re-render por
   // frame) y sólo se confirma el anclaje al soltar. Un toque limpio alterna
-  // asomar⇄expandir; arrastrar hacia abajo por debajo del umbral la colapsa.
+  // asomar⇄expandir; arrastrar hacia arriba por debajo del umbral la colapsa.
   const startSheetDrag = (e: React.PointerEvent) => {
     const el = panelRef.current;
     if (!el) return;
@@ -284,12 +340,15 @@ export function ChatDock({ biosphereId, getWorldNet, getWorld, voiceSlot }: Chat
     const d = sheetDragRef.current;
     const el = panelRef.current;
     if (!d || !el) return;
-    const dy = d.startY - e.clientY; // arrastrar hacia arriba agranda
+    // Hoja SUPERIOR: el asa está ABAJO, así que arrastrar hacia ABAJO agranda (el
+    // panel se extiende hacia el borde inferior). Anclada en top:0, basta con el alto.
+    const dy = e.clientY - d.startY;
     if (Math.abs(dy) > 4) d.moved = true;
     const vh = window.innerHeight;
     const h = Math.min(vh * 0.92, Math.max(vh * 0.12, d.startH + dy));
     el.style.height = `${h}px`;
-    document.documentElement.style.setProperty("--chat-sheet-h", `${Math.round(h)}px`);
+    // El chat está arriba: el borde inferior sigue libre, no reservamos alto abajo.
+    document.documentElement.style.setProperty("--chat-sheet-h", "0px");
   };
   const endSheetDrag = (e: React.PointerEvent) => {
     const d = sheetDragRef.current;
@@ -310,7 +369,7 @@ export function ChatDock({ biosphereId, getWorldNet, getWorld, voiceSlot }: Chat
       return;
     }
     if (h < vh * 0.26) {
-      setOpen(false); // arrastrada hacia abajo: colapsa al launcher
+      setOpen(false); // encogida por debajo del umbral: colapsa al launcher
       return;
     }
     setSnap(h > vh * 0.6 ? "full" : "peek");
@@ -442,7 +501,7 @@ export function ChatDock({ biosphereId, getWorldNet, getWorld, voiceSlot }: Chat
 
   const openDock = () => {
     setAutoFocusInput(false);
-    if (isMobile) setSnap("peek"); // la hoja siempre asoma primero, sin teclado
+    if (isTopSheet) setSnap("peek"); // la hoja siempre asoma primero, sin teclado
     setOpen(true);
   };
 
@@ -463,14 +522,19 @@ export function ChatDock({ biosphereId, getWorldNet, getWorld, voiceSlot }: Chat
     );
   }
 
-  // En móvil el chat es una HOJA INFERIOR (bottom sheet): full-width, anclada
-  // abajo, arrastrable, con áreas seguras. En escritorio, columna o flotante.
+  // Disposición según dispositivo/orientación:
+  //   · PORTRAIT móvil → HOJA SUPERIOR (top sheet): cuelga desde arriba, asa abajo,
+  //     con anclajes asomar/expandir. Se juega abajo mientras se lee arriba.
+  //   · LANDSCAPE móvil → PANEL LATERAL izquierdo, angosto, full-height, colapsable.
+  //   · Escritorio → columna lateral derecha o flotante.
   const floating = !isMobile && mode === "floating";
-  const layoutClass = isMobile
-    ? `${styles.sheet} ${snap === "full" ? styles.sheetFull : styles.sheetPeek}`
-    : floating
-      ? styles.dockFloating
-      : styles.dockColumn;
+  const layoutClass = isSidePanel
+    ? styles.sidePanel
+    : isTopSheet
+      ? `${styles.sheet} ${snap === "full" ? styles.sheetFull : styles.sheetPeek}`
+      : floating
+        ? styles.dockFloating
+        : styles.dockColumn;
   const floatStyle =
     floating && pos ? { left: `${pos.x}px`, top: `${pos.y}px` } : undefined;
 
@@ -485,29 +549,6 @@ export function ChatDock({ biosphereId, getWorldNet, getWorld, voiceSlot }: Chat
         onFocusCapture={onFocusIn}
         onBlurCapture={onFocusOut}
       >
-        {/* Asa de arrastre de la hoja móvil: tocar alterna asomar⇄expandir;
-            arrastrar la mueve y, hacia abajo, la colapsa. */}
-        {isMobile && (
-          <div
-            className={styles.grabberWrap}
-            role="button"
-            tabIndex={0}
-            aria-label={snap === "full" ? "Contraer el chat" : "Expandir el chat"}
-            onPointerDown={startSheetDrag}
-            onPointerMove={onSheetDrag}
-            onPointerUp={endSheetDrag}
-            onPointerCancel={endSheetDrag}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" || e.key === " ") {
-                e.preventDefault();
-                setSnap((s) => (s === "peek" ? "full" : "peek"));
-              }
-            }}
-          >
-            <span className={styles.grabber} aria-hidden />
-          </div>
-        )}
-
         <header
           className={`${styles.header} ${floating ? styles.headerDraggable : ""}`}
           onPointerDown={floating ? startDrag : undefined}
@@ -550,27 +591,21 @@ export function ChatDock({ biosphereId, getWorldNet, getWorld, voiceSlot }: Chat
 
           {/* Controles de VOZ en la cabecera. Si el orquestador inyecta un
               voiceSlot, tiene prioridad; si no, el chat monta VoiceControls con la
-              identidad de useBiosphere. Sin sesión (aún sin nombre) muestra un
-              aviso deshabilitado en vez de la voz, para no unir a un anónimo. */}
+              identidad de useBiosphere. Como TODOS reciben un nombre aleatorio al
+              entrar, el botón es directamente "Unirse a la voz" (sin leyendas
+              confusas): mientras la sesión se prepara, VoiceControls lo muestra
+              deshabilitado (enabled={hasSession}). El cambio de nombre vive en el
+              nameChip del composer. */}
           <div className={styles.voiceSlot}>
             {voiceSlot ??
-              (hasSession ? (
+              (bio.sessionId ? (
                 <VoiceControls
                   biosphereId={biosphereId}
-                  identity={bio.sessionId as string}
-                  displayName={bio.name as string}
+                  identity={bio.sessionId}
+                  displayName={bio.name ?? "Viajero"}
+                  enabled={hasSession}
                 />
-              ) : (
-                <button
-                  type="button"
-                  className={styles.voiceHint}
-                  disabled
-                  aria-disabled="true"
-                  title="Escribe tu nombre en el chat para unirte a la voz"
-                >
-                  Voz · escribe tu nombre
-                </button>
-              ))}
+              ) : null)}
           </div>
 
           <div className={styles.headerRight}>
@@ -593,8 +628,9 @@ export function ChatDock({ biosphereId, getWorldNet, getWorld, voiceSlot }: Chat
               className={styles.iconBtn}
               onClick={() => setOpen(false)}
               aria-label="Colapsar el chat"
+              title="Colapsar el chat"
             >
-              ▾
+              {isSidePanel ? "◀" : "▾"}
             </button>
           </div>
         </header>
@@ -625,6 +661,30 @@ export function ChatDock({ biosphereId, getWorldNet, getWorld, voiceSlot }: Chat
             />
           )}
         </div>
+
+        {/* Asa de arrastre de la HOJA SUPERIOR, ABAJO (cuelga desde arriba): tocar
+            alterna asomar⇄expandir; arrastrar hacia abajo agranda y hacia arriba, si
+            baja del umbral, la colapsa. Sólo en portrait; el panel lateral usa ◀. */}
+        {isTopSheet && (
+          <div
+            className={styles.grabberWrap}
+            role="button"
+            tabIndex={0}
+            aria-label={snap === "full" ? "Contraer el chat" : "Expandir el chat"}
+            onPointerDown={startSheetDrag}
+            onPointerMove={onSheetDrag}
+            onPointerUp={endSheetDrag}
+            onPointerCancel={endSheetDrag}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                setSnap((s) => (s === "peek" ? "full" : "peek"));
+              }
+            }}
+          >
+            <span className={styles.grabber} aria-hidden />
+          </div>
+        )}
       </section>
 
       {showRegister && <RegisterModal onClose={() => setShowRegister(false)} />}

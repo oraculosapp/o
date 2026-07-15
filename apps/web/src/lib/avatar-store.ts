@@ -1,99 +1,81 @@
 /**
- * Selección de avatar del viajero: persistencia (localStorage + jsonb del perfil),
- * paletas de tinte y utilidades para el mundo/presencia.
+ * Selección de avatar del viajero (S8, dirección "nube"): persistencia
+ * (localStorage + jsonb del perfil) y utilidades para el mundo/presencia.
  *
- * Contrato de la config del mundo (lo consume PaqoWorld.setAvatar):
- *   { archetype: string; tint?: { primary, secondary, hair } }
+ * El avatar es ÚNICO ("nube", plastilina neutra) y la personalización es SÓLO el
+ * color: la selección se reduce a `{ color }` (+ el nombre, que vive en
+ * `phy:displayName` — lib/oracle-client — y se cambia desde el chat).
  *
- * Los 9 avatares son PROCEDURALES (chibi rigged construidos en código por el
- * engine): se identifican por su `archetype` id (p.ej. "vampiro"), no por una URL
- * de GLB, y todos están disponibles siempre (no hay estado "aún duerme"). Sin
- * género: son 9 avatares distintos.
+ * Contrato con el mundo (PaqoWorld.setAvatar):
+ *   { archetypeUrl: "/assets/avatars/gen/nube.glb", tint: { primary: color } }
+ * El GLB trae materiales "body" (→ zona primary, se tinta) y "eyes" (negro).
  *
  * La selección se guarda en:
  *   · localStorage `phy:avatar` (siempre, también anónimos).
- *   · `phy:tint` (el color primario) — la misma clave que ya usa la presencia del
- *     chat (lib/oracle-client), para que los demás te vean con tu color sin tocar
- *     el chat.
+ *   · `phy:tint` (el color) — la clave que ya usa la presencia del chat
+ *     (lib/oracle-client), para que los demás te vean con tu color.
  *   · columna `avatar` (jsonb) del perfil, sólo si el usuario está registrado.
+ *
+ * COMPAT: los formatos viejos en localStorage/perfil (S7: `{ archetype, build,
+ * tint }`) se NORMALIZAN a "nube": se conserva su color primario si era un color
+ * real (no blanco-fábrica) y, si no, se asigna un color pastel aleatorio.
  */
-import { ARCHETYPES, isArchetypeId, isBuildId, genGlbUrl, avatarId, DEFAULT_BUILD, type BuildId } from "./avatars";
+import { NUBE_ID, nubeGlbUrl } from "./avatars";
+import { randomColor } from "./names";
 import { getSupabaseBrowserClient } from "./supabase";
 
-/** Tinte por las 5 zonas (multiplicador; blanco `#ffffff` = color de fábrica). */
-export interface AvatarTint {
-  primary: string;
-  secondary: string;
-  hair: string;
-  skin: string;
-  accent: string;
-}
-
+/** Selección de avatar del viajero: el diseño es fijo ("nube"), sólo hay color. */
 export interface AvatarSelection {
-  /** id de arquetipo (uno de los 9 de ARCHETYPES). */
-  archetype: string;
-  /** Build de cuerpo del avatar modelado. */
-  build: BuildId;
-  tint: AvatarTint;
+  /** Color del cuerpo (hex `#rrggbb`), de la paleta pastel o el picker libre. */
+  color: string;
 }
 
 /** Config serializable que se pasa a PaqoWorld (hex, no THREE). */
 export interface AvatarWorldConfig {
-  /** URL del GLB modelado del avatar (el mundo lo carga con `loadAvatarRigShared`). */
+  /** URL del GLB del avatar nube (el mundo lo carga con `loadAvatarRigShared`). */
   archetypeUrl: string;
-  tint: AvatarTint;
+  tint: { primary: string };
 }
 
 const KEY = "phy:avatar";
 const TINT_KEY = "phy:tint"; // compartida con la presencia (oracle-client)
 
-/** Blanco = sin tinte (el avatar se ve con los colores de fábrica que modelé). */
+const HEX_RE = /^#[0-9a-fA-F]{6}$/;
+/** Blanco = "fábrica" del formato viejo (no era un color elegido). */
 const WHITE = "#ffffff";
 
-/** Tinte por defecto: fábrica (blanco en las 5 zonas → colores diseñados). */
-const DEFAULT_TINT: AvatarTint = {
-  primary: WHITE,
-  secondary: WHITE,
-  hair: WHITE,
-  skin: WHITE,
-  accent: WHITE,
-};
-
-/** Paletas de marca de acceso rápido para el editor (5 zonas). */
-export const AVATAR_TINTS: { name: string; tint: AvatarTint }[] = [
-  { name: "Fábrica", tint: { ...DEFAULT_TINT } },
-  { name: "Bosque", tint: { primary: "#8fb36a", secondary: "#c9a96b", hair: "#5a4a2e", skin: WHITE, accent: "#e3b063" } },
-  { name: "Vampiro", tint: { primary: "#b0475a", secondary: "#6a6f86", hair: "#7a6f86", skin: WHITE, accent: "#e05a6e" } },
-  { name: "Dorado", tint: { primary: "#e3b063", secondary: "#9aa4d8", hair: "#8a6a4a", skin: WHITE, accent: "#ffd98a" } },
-];
-
-/** Selección por defecto (primer arquetipo, build neutro, colores de fábrica). */
+/** Selección por defecto: color pastel aleatorio (primer ingreso sin fricción). */
 export function defaultSelection(): AvatarSelection {
-  return { archetype: ARCHETYPES[0].id, build: DEFAULT_BUILD, tint: { ...DEFAULT_TINT } };
+  return { color: randomColor() };
 }
 
-/** Normaliza un objeto arbitrario (localStorage/jsonb) a una selección válida.
- *  Tolera el formato VIEJO (sin `build`, tinte de 3 zonas): rellena build neutro
- *  y skin/accent en blanco — así los usuarios con localStorage antiguo siguen. */
-function normalize(raw: unknown): AvatarSelection | null {
+/**
+ * Normaliza un objeto arbitrario (localStorage/jsonb) a una selección válida.
+ * Acepta:
+ *   · formato NUEVO `{ color }` (con o sin `design`),
+ *   · formato VIEJO S7 `{ archetype, build?, tint? }` → conserva `tint.primary`
+ *     si era un color real (≠ blanco-fábrica); si no, color aleatorio.
+ * Devuelve `null` sólo si `raw` no se parece a ninguna selección.
+ */
+export function normalizeSelection(raw: unknown): AvatarSelection | null {
   if (!raw || typeof raw !== "object") return null;
   const r = raw as Record<string, unknown>;
-  if (typeof r.archetype !== "string" || !isArchetypeId(r.archetype)) return null;
-  const build = typeof r.build === "string" && isBuildId(r.build) ? r.build : DEFAULT_BUILD;
-  const t = (r.tint && typeof r.tint === "object" ? r.tint : {}) as Record<string, unknown>;
-  const hex = (v: unknown, fallback: string) =>
-    typeof v === "string" && /^#[0-9a-fA-F]{6}$/.test(v) ? v : fallback;
-  return {
-    archetype: r.archetype,
-    build,
-    tint: {
-      primary: hex(t.primary, DEFAULT_TINT.primary),
-      secondary: hex(t.secondary, DEFAULT_TINT.secondary),
-      hair: hex(t.hair, DEFAULT_TINT.hair),
-      skin: hex(t.skin, DEFAULT_TINT.skin),
-      accent: hex(t.accent, DEFAULT_TINT.accent),
-    },
-  };
+
+  // Formato nuevo: { color } (design opcional, siempre "nube").
+  if (typeof r.color === "string" && HEX_RE.test(r.color)) {
+    return { color: r.color.toLowerCase() };
+  }
+
+  // Formato viejo S7: { archetype, build?, tint? } → normaliza a nube.
+  if (typeof r.archetype === "string") {
+    const t = (r.tint && typeof r.tint === "object" ? r.tint : {}) as Record<string, unknown>;
+    const primary = typeof t.primary === "string" && HEX_RE.test(t.primary) ? t.primary.toLowerCase() : null;
+    // Blanco era "sin tinte" (colores de fábrica del arquetipo): no es un color
+    // elegido → color pastel aleatorio. Un color real se respeta.
+    return { color: primary && primary !== WHITE ? primary : randomColor() };
+  }
+
+  return null;
 }
 
 /** Lee la selección de localStorage (o null si no hay/está corrupta). */
@@ -101,7 +83,7 @@ export function getStoredAvatar(): AvatarSelection | null {
   if (typeof window === "undefined") return null;
   try {
     const raw = window.localStorage.getItem(KEY);
-    return raw ? normalize(JSON.parse(raw)) : null;
+    return raw ? normalizeSelection(JSON.parse(raw)) : null;
   } catch {
     return null;
   }
@@ -111,37 +93,32 @@ export function getStoredAvatar(): AvatarSelection | null {
 export function storeAvatar(sel: AvatarSelection): void {
   if (typeof window === "undefined") return;
   try {
-    window.localStorage.setItem(KEY, JSON.stringify(sel));
-    window.localStorage.setItem(TINT_KEY, sel.tint.primary);
+    window.localStorage.setItem(KEY, JSON.stringify({ design: NUBE_ID, color: sel.color }));
+    window.localStorage.setItem(TINT_KEY, sel.color);
   } catch {
     /* cuota llena / modo privado: no es crítico */
   }
 }
 
-/**
- * Config del mundo derivada de una selección: la URL del GLB MODELADO (arquetipo
- * + build) para que el mundo lo cargue, y el tinte de 5 zonas. Si el GLB fallara,
- * el llamador (page) cae con gracia al chibi procedural del arquetipo.
- */
+/** Config del mundo derivada de una selección: el GLB nube + su color. */
 export function worldConfigFromSelection(sel: AvatarSelection): AvatarWorldConfig {
   return {
-    archetypeUrl: genGlbUrl(sel.archetype, sel.build),
-    tint: sel.tint,
+    archetypeUrl: nubeGlbUrl(),
+    tint: { primary: sel.color },
   };
 }
 
 /**
- * Id de avatar almacenado (`"<arquetipo>-<build>"`, p.ej. `"vampiro-f"`) — lo
- * transmite la presencia para que los remotos carguen el MISMO GLB modelado.
+ * Id de avatar que transmite la presencia (para que los remotos carguen el MISMO
+ * diseño). Con el diseño único siempre es `"nube"`.
  */
 export function getStoredArchetype(): string | undefined {
-  const sel = getStoredAvatar();
-  return sel ? avatarId(sel.archetype, sel.build) : undefined;
+  return NUBE_ID;
 }
 
-/** Color primario almacenado (o undefined) — la usa la presencia. */
+/** Color almacenado (o undefined) — lo usa la presencia como `tint`. */
 export function getStoredPrimaryTint(): string | undefined {
-  return getStoredAvatar()?.tint.primary;
+  return getStoredAvatar()?.color;
 }
 
 /** Guarda la selección en el perfil (jsonb `avatar`) si el usuario está registrado. */
@@ -153,7 +130,7 @@ export async function saveAvatarToProfile(sel: AvatarSelection): Promise<void> {
     if (!user || user.is_anonymous) return; // anónimo: sólo localStorage
     await supabase
       .from("profiles")
-      .update({ avatar: { archetype: sel.archetype, build: sel.build, tint: sel.tint } })
+      .update({ avatar: { design: NUBE_ID, color: sel.color } })
       .eq("id", user.id);
   } catch (err) {
     console.warn("[avatar] no se pudo guardar el avatar en el perfil:", err);
@@ -165,7 +142,7 @@ export async function loadAvatarFromProfile(): Promise<AvatarSelection | null> {
   try {
     const supabase = getSupabaseBrowserClient();
     const { data } = await supabase.from("profiles").select("avatar").maybeSingle();
-    return normalize(data?.avatar);
+    return normalizeSelection(data?.avatar);
   } catch {
     return null;
   }

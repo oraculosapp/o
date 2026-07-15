@@ -140,6 +140,84 @@
   right: 0.4rem;
 }
 
+/* ── Retrato nube tintado (S8) ── */
+.nubeStage {
+  display: grid;
+  place-items: center;
+  margin-bottom: 1rem;
+  padding: 0.8rem 0;
+  border-radius: var(--radius-sm);
+  background:
+    radial-gradient(60% 55% at 50% 45%, rgba(227, 176, 99, 0.1), transparent 70%),
+    var(--bg-1);
+  border: 1px solid var(--line-soft);
+}
+.nubeFigure {
+  position: relative;
+  width: min(230px, 56vw);
+  aspect-ratio: 1;
+}
+.nubeImg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  filter: drop-shadow(0 10px 22px rgba(8, 10, 18, 0.45));
+}
+/* Overlay del color: multiplica sobre el body blanco de la miniatura, recortado
+   por la propia imagen (mask). Ojos negros × color = siguen oscuros. */
+.nubeTint {
+  position: absolute;
+  inset: 0;
+  mix-blend-mode: multiply;
+  -webkit-mask-size: contain;
+  mask-size: contain;
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+  -webkit-mask-position: center;
+  mask-position: center;
+  pointer-events: none;
+}
+
+/* ── Paleta de chips pastel (S8) ── */
+.chips {
+  display: grid;
+  grid-template-columns: repeat(8, 1fr);
+  gap: 0.5rem;
+}
+.chip {
+  aspect-ratio: 1;
+  width: 100%;
+  padding: 0;
+  border: 2px solid var(--line);
+  border-radius: 50%;
+  cursor: pointer;
+  transition:
+    transform var(--dur-fast) var(--ease-brand),
+    border-color var(--dur-fast) var(--ease-brand),
+    box-shadow var(--dur-fast) var(--ease-brand);
+}
+.chip:hover {
+  transform: scale(1.12);
+  border-color: var(--gold);
+}
+.chipActive {
+  border-color: var(--gold-bright);
+  box-shadow: 0 0 10px -2px var(--glow);
+  transform: scale(1.1);
+}
+.freePick {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin-top: 0.3rem;
+  cursor: pointer;
+}
+.freePick .pickerInput {
+  width: 72px;
+  height: 36px;
+}
+
 /* ── Controles ── */
 .controlGroup {
   display: flex;
@@ -328,6 +406,28 @@
   .pickerInput {
     height: 48px;
   }
+  .chips {
+    grid-template-columns: repeat(8, 1fr);
+    gap: 0.4rem;
+  }
+}
+
+/* Puntero grueso (táctil), a cualquier ancho: los controles circulares del
+   selector suben a 44px (WCAG 2.5.5) sin forzar el bottom-sheet de ≤640px. */
+@media (pointer: coarse) {
+  .close,
+  .arrow {
+    width: 44px;
+    height: 44px;
+  }
+}
+
+/* ≤400px: 8 chips por fila quedan por debajo de 44px → baja a 6 columnas para
+   que cada chip sea un objetivo táctil ≥44px (problema 7). */
+@media (max-width: 400px) {
+  .chips {
+    grid-template-columns: repeat(6, 1fr);
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -339,6 +439,7 @@
   .confirm,
   .preset,
   .pickerInput,
+  .chip,
   .arrow {
     transition: none;
   }
