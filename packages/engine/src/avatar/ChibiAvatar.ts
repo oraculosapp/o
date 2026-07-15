@@ -207,6 +207,8 @@ export class ChibiAvatar implements IAvatarRig {
     this.tint.patchZone(primaryMat, "primary");
     this.tint.patchZone(secondaryMat, "secondary");
     this.tint.patchZone(hairMat, "hair");
+    this.tint.patchZone(skinMat, "skin");
+    this.tint.patchZone(accentMat, "accent");
 
     const torsoMat = spec.bareTorso ? skinMat : primaryMat;
     const torsoW = wide ? 0.74 : 0.58;

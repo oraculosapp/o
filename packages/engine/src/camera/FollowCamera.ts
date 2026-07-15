@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import type { CharacterController } from "../controller/CharacterController";
+import type { IslandField } from "../island/IslandField";
 
 /**
  * Cámara de tercera persona PLANAR (up constante (0,1,0)), estilo Messenger.
@@ -27,8 +28,14 @@ export class FollowCamera {
   private distance = 7.5;
   private readonly minDist = 4;
   private readonly maxDist = 12;
-  private readonly minPitch = 0.06;
+  // minPitch NEGATIVO: permite bascular el boom por DEBAJO del hombro para MIRAR
+  // AL CIELO (sol/lunas/nubes). Como el boom es personaje→cámara, un pitch<0 baja
+  // la cámara y ésta mira hacia arriba al encuadrar el hombro. El clamp anti-suelo
+  // (CAM_GROUND_MARGIN) evita que la cámara cruce el terreno en ese basculado.
+  private readonly minPitch = -0.9; // ~-51° (antes 0.06: sólo un pelo sobre el horizonte)
   private readonly maxPitch = 1.15;
+  /** Holgura (u) sobre la altura del terreno que la cámara NO cruza al mirar arriba. */
+  private static readonly CAM_GROUND_MARGIN = 0.8;
 
   /** +1 = "vuelo" (arrastrar abajo mira arriba) · -1 = clásico. (S2.5, dirección.) */
   private static readonly PITCH_DIR = 1;
@@ -81,6 +88,9 @@ export class FollowCamera {
   constructor(
     private camera: THREE.PerspectiveCamera,
     private target: CharacterController,
+    /** Campo de altura de la isla para el clamp anti-suelo (opcional: si falta,
+     * cae a un suelo relativo a los pies del jugador). */
+    private field?: IslandField,
   ) {}
 
   /** Coloca la cámara detrás del avatar en el primer frame (encuadre bonito). */
@@ -216,6 +226,21 @@ export class FollowCamera {
     }
 
     this.camera.position.copy(this.smoothPos);
+
+    // Clamp anti-suelo: al mirar al cielo (pitch negativo) el boom hunde la cámara
+    // por debajo del hombro; no la dejamos cruzar el terreno. Usa la altura
+    // analítica del campo (misma verdad que la malla) o, en su defecto, un suelo
+    // simple relativo a los pies del jugador. Se sincroniza `smoothPos` para que
+    // el damping no rebote contra el clamp.
+    const minY =
+      (this.field
+        ? this.field.heightAt(this.camera.position.x, this.camera.position.z)
+        : this.target.feetY) + FollowCamera.CAM_GROUND_MARGIN;
+    if (this.camera.position.y < minY) {
+      this.camera.position.y = minY;
+      this.smoothPos.y = minY;
+    }
+
     this.camera.up.copy(up);
     this.camera.lookAt(this.smoothTarget);
   }

@@ -37,6 +37,22 @@ const KICK_MIN = 2.0;
 const KICK_COOLDOWN = 0.2;
 /** Duración de la reconciliación suave tras applyBallState (s). */
 const RECONCILE_TIME = 0.45;
+/**
+ * Coeficiente del lerp de reconciliación (mayor = converge más rápido/tenso). Se
+ * subió respecto al 6 original para que el balón AGARRADO siga la mano del portador
+ * remoto sin arrastre/comba perceptible: a 10 Hz de difusión, este ritmo deja el
+ * balón pegado a la mano (la gravedad entre paquetes apenas lo descuelga ~cm).
+ */
+const RECONCILE_LERP = 20;
+/**
+ * Distancia (u) por encima de la cual una reconciliación entrante DENTRO de zona
+ * hace SNAP en vez de lerp: un salto grande (agarre inicial desde el piso, respawn
+ * aleatorio, robo entre manos) se coloca al instante, sin arrastre visible; los
+ * micro-ajustes (el balón siguiendo una mano a 10 Hz) se interpolan suave.
+ */
+const SNAP_DIST = 3;
+/** Frecuencia (Hz) a la que el portador difunde el estado del balón que lleva. */
+const HELD_BROADCAST_HZ = 10;
 
 /** Blanco cálido único para TODAS las pelotas (combina con el toon del mundo). */
 const BALL_COLOR = 0xf4f1ea;
@@ -66,6 +82,15 @@ const THROW_INHERIT = 0.5;
 const ZONE_RADIUS = 18;
 /** Margen de caída (u) bajo el nivel del claro que también dispara el respawn. */
 const ZONE_FALL_MARGIN = 8;
+/**
+ * Anillo (u, radio desde el origen) del respawn ALEATORIO en el claro. Antes se
+ * usaban slots deterministas → todos reaparecían en los mismos puntos y se hacía
+ * "camping"; ahora cada respawn cae en un ángulo aleatorio dentro de este anillo,
+ * bien dentro de ZONE_RADIUS (18) para que ningún receptor lo trate como "fuera de
+ * zona" y lo snapee al slot casa (ver applyState).
+ */
+const RESPAWN_R_MIN = 3.5;
+const RESPAWN_R_MAX = 8.5;
 
 interface Ball {
   pos: THREE.Vector3;
@@ -97,10 +122,22 @@ export class Balls {
   private kickCbs = new Set<(id: number, s: BallState) => void>();
   private throwCbs = new Set<(id: number) => void>();
   private respawnCbs = new Set<(id: number, s: BallState, reason: "out" | "hit") => void>();
+  /** Suscriptores de AGARRE local (para difundir "ball_grab": incluye robo). */
+  private grabCbs = new Set<(id: number, t: number) => void>();
 
   // --- agarrar / lanzar ---
   /** Índice de la pelota agarrada, o -1 si no llevas ninguna (solo una a la vez). */
   private heldId = -1;
+  /**
+   * Marca de tiempo (Date.now, ms) del AGARRE local del balón que llevo (heldId).
+   * Es la autoridad del desempate de robos: al llegar un "ball_grab" ajeno gana el
+   * `t` más nuevo; si empatan, gana el id lexicográfico menor.
+   */
+  private heldGrabT = 0;
+  /** Id del jugador local (lo fija la red); sólo para desempatar robos por id. */
+  private localId = "";
+  /** Acumulador para difundir el balón agarrado a HELD_BROADCAST_HZ (flujo "ball"). */
+  private heldBroadcastAcc = 0;
   /** Índice de la pelota agarrable resaltada por el sprite E este frame (-1 = ninguna). */
   private hintId = -1;
   /** Sprite billboard con el glifo "E" que aparece sobre la pelota agarrable. */
@@ -164,6 +201,21 @@ export class Balls {
   homeSlot(i: number, out: THREE.Vector3): THREE.Vector3 {
     const a = (i / BALL_COUNT) * Math.PI * 2 + 0.4;
     const r = 4 + (i % 3) * 1.7;
+    const x = Math.cos(a) * r;
+    const z = Math.sin(a) * r;
+    return out.set(x, this.field.heightAt(x, z) + RADIUS, z);
+  }
+
+  /**
+   * Posición de respawn ALEATORIA dentro del claro: ángulo aleatorio y radio
+   * r∈[RESPAWN_R_MIN, RESPAWN_R_MAX] desde el origen, anclada al terreno. Es la que
+   * usa `respawnToHome` (hit/out): evita el camping de los slots deterministas. El
+   * cliente que respawnea la decide y la difunde por el flujo "ball"; los demás la
+   * adoptan por reconciliación (queda bien dentro de zona, no la snapean fuera).
+   */
+  private randomHomePos(out: THREE.Vector3): THREE.Vector3 {
+    const a = Math.random() * Math.PI * 2;
+    const r = RESPAWN_R_MIN + Math.random() * (RESPAWN_R_MAX - RESPAWN_R_MIN);
     const x = Math.cos(a) * r;
     const z = Math.sin(a) * r;
     return out.set(x, this.field.heightAt(x, z) + RADIUS, z);
@@ -294,6 +346,21 @@ export class Balls {
   }
 
   /**
+   * Suscribe AGARRES locales de balón (para que la red difunda "ball_grab"). Se
+   * emite en TODO agarre (primero o robo) con `(id, t=Date.now())`. Los receptores
+   * que llevaban ese balón lo sueltan en silencio si el `t` ajeno es más nuevo.
+   */
+  onGrab(cb: (id: number, t: number) => void): () => void {
+    this.grabCbs.add(cb);
+    return () => this.grabCbs.delete(cb);
+  }
+
+  /** Fija el id del jugador local (para desempatar robos por id lexicográfico). */
+  setLocalId(id: string): void {
+    this.localId = id || "";
+  }
+
+  /**
    * Suscribe RESPAWNS de pelota (salida de zona o golpe a Paqo). `reason` distingue
    * el motivo; `s` es el nuevo estado (slot casa) para FX/sonido. La difusión de red
    * reutiliza `onKick` (respawnToHome emite también por ahí), así que los remotos
@@ -331,9 +398,12 @@ export class Balls {
     if (!b) return;
     if (id === this.heldId) {
       this.heldId = -1;
+      this.heldGrabT = 0;
       if (this.eSprite) this.eSprite.visible = false;
     }
-    this.homeSlot(id, b.pos);
+    // Posición ALEATORIA dentro del claro (anti-camping). El slot casa determinista
+    // se reserva para la convergencia de balones perdidos (applyState fuera de zona).
+    this.randomHomePos(b.pos);
     b.vel.set(0, 0, 0);
     b.grounded = true;
     b.thrownLive = false;
@@ -398,8 +468,50 @@ export class Balls {
     b.recPos = undefined;
     b.recVel = undefined;
     b.recTimer = 0;
+    // Autoridad del agarre para el desempate de robos + difusión inmediata: al
+    // arrancar el acumulador en un periodo completo, el PRIMER frame ya emite el
+    // estado del balón en la mano (evita que los demás lo vean un instante en el piso).
+    this.heldGrabT = Date.now();
+    this.heldBroadcastAcc = 1 / HELD_BROADCAST_HZ;
     if (this.eSprite) this.eSprite.visible = false;
+    for (const cb of this.grabCbs) cb(id, this.heldGrabT);
     return true;
+  }
+
+  /**
+   * Aplica un AGARRE remoto ("ball_grab" {by, ballId, t}). Sólo importa si YO llevaba
+   * ese balón: si el agarre ajeno gana el desempate lo suelto en silencio (force-drop,
+   * SIN lanzarlo) — el balón deja de ser mío y el flujo "ball" del ladrón lo reconcilia
+   * hacia su mano. Desempate: gana el `t` más nuevo; si empatan, gana el id menor.
+   * Si no llevo ese balón no hay nada que hacer localmente (lo sigue el flujo "ball").
+   */
+  applyGrab(ballId: number, by: string, t: number): void {
+    if (typeof by !== "string") return;
+    if (by === this.localId) return; // eco de mi propio agarre
+    if (ballId !== this.heldId) return; // sólo me afecta si YO lo llevaba
+    const theyWin = t > this.heldGrabT || (t === this.heldGrabT && by < this.localId);
+    if (theyWin) this.forceDrop(ballId);
+  }
+
+  /**
+   * Suelta en silencio el balón `id` si lo llevo (sin lanzarlo): lo devuelve a la
+   * física libre en su posición actual. Lo usa el robo (applyGrab): la pelota
+   * simplemente ya no es mía.
+   */
+  private forceDrop(id: number): void {
+    if (id !== this.heldId) return;
+    this.heldId = -1;
+    this.heldGrabT = 0;
+    if (this.eSprite) this.eSprite.visible = false;
+    const b = this.balls[id];
+    if (b) {
+      b.vel.set(0, 0, 0);
+      b.grounded = false;
+      b.thrownLive = false;
+      b.recPos = undefined;
+      b.recVel = undefined;
+      b.recTimer = 0;
+    }
   }
 
   /**
@@ -412,6 +524,7 @@ export class Balls {
     const id = this.heldId;
     const b = this.balls[id];
     this.heldId = -1;
+    this.heldGrabT = 0;
 
     this._tmp.set(dir.x, 0, dir.z);
     if (this._tmp.lengthSq() < 1e-6) this._tmp.set(0, 0, -1);
@@ -445,6 +558,21 @@ export class Balls {
       b.vel.set(0, 0, 0);
       b.grounded = true;
       b.thrownLive = false;
+      b.recPos = undefined;
+      b.recVel = undefined;
+      b.recTimer = 0;
+      return;
+    }
+    // Salto GRANDE dentro de zona (agarre inicial desde el piso, respawn aleatorio,
+    // robo entre manos): coloca al instante, sin arrastre. Los micro-ajustes del
+    // balón siguiendo una mano a 10 Hz caen por debajo del umbral → lerp suave.
+    const dx = s.pos[0] - b.pos.x;
+    const dy = s.pos[1] - b.pos.y;
+    const dz = s.pos[2] - b.pos.z;
+    if (dx * dx + dy * dy + dz * dz > SNAP_DIST * SNAP_DIST) {
+      b.pos.set(s.pos[0], s.pos[1], s.pos[2]);
+      b.vel.set(s.vel[0], s.vel[1], s.vel[2]);
+      b.grounded = false;
       b.recPos = undefined;
       b.recVel = undefined;
       b.recTimer = 0;
@@ -538,12 +666,22 @@ export class Balls {
         if (holdTarget) b.pos.copy(holdTarget);
         b.vel.set(0, 0, 0);
         b.grounded = false;
+        // Difunde el balón que llevas a ~HELD_BROADCAST_HZ por el flujo "ball": así
+        // los demás lo ven seguir tu mano (bug del "agarre invisible"). Reusa kickCbs
+        // (la red lo reenvía como "ball"); los receptores reconcilian con applyState.
+        this.heldBroadcastAcc += dt;
+        const heldPeriod = 1 / HELD_BROADCAST_HZ;
+        if (this.heldBroadcastAcc >= heldPeriod) {
+          this.heldBroadcastAcc -= heldPeriod;
+          const s = this.stateOf(i);
+          for (const cb of this.kickCbs) cb(i, s);
+        }
         continue;
       }
 
       // --- reconciliación de red: mezcla suave hacia el objetivo recibido ---
       if (b.recTimer > 0 && b.recPos && b.recVel) {
-        const alpha = 1 - Math.exp(-6 * dt);
+        const alpha = 1 - Math.exp(-RECONCILE_LERP * dt);
         b.pos.lerp(b.recPos, alpha);
         b.vel.lerp(b.recVel, alpha);
         b.recTimer -= dt;
@@ -691,6 +829,7 @@ export class Balls {
     this.kickCbs.clear();
     this.throwCbs.clear();
     this.respawnCbs.clear();
+    this.grabCbs.clear();
     this.mesh.geometry.dispose();
     (this.mesh.material as THREE.Material).dispose();
     this.mesh.dispose();

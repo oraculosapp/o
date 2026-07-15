@@ -152,6 +152,42 @@ export function isArchetypeId(id: string): id is ArchetypeId {
   return (ARCHETYPE_IDS as readonly string[]).includes(id);
 }
 
+/** Builds de cuerpo de los avatares modelados: femenino / masculino / neutro. */
+export const BUILD_IDS = ["f", "m", "n"] as const;
+export type BuildId = (typeof BUILD_IDS)[number];
+
+/** Ruta pública base de los GLB generados por Blender (tools/avatars/generate.py). */
+export const GEN_AVATAR_PREFIX = "/assets/avatars/gen/";
+
+/**
+ * Parsea un id de avatar MODELADO `"<arquetipo>-<f|m|n>"` (p.ej. `"vampiro-f"`,
+ * `"dedo-verde-n"`) en sus partes. Devuelve `null` si no encaja (incluye los 9
+ * ids de arquetipo "pelados" viejos como `"vampiro"`, que NO son ids de avatar).
+ * Corta por el ÚLTIMO guion para respetar arquetipos con guion (`dedo-verde`).
+ */
+export function parseAvatarId(id: string): { archetype: ArchetypeId; build: BuildId } | null {
+  if (typeof id !== "string") return null;
+  const i = id.lastIndexOf("-");
+  if (i <= 0) return null;
+  const base = id.slice(0, i);
+  const build = id.slice(i + 1);
+  if (isArchetypeId(base) && (BUILD_IDS as readonly string[]).includes(build)) {
+    return { archetype: base, build: build as BuildId };
+  }
+  return null;
+}
+
+/** ¿Es `id` un id de avatar modelado válido (`"<arquetipo>-<f|m|n>"`)? */
+export function isAvatarId(id: string): boolean {
+  return parseAvatarId(id) !== null;
+}
+
+/** URL same-origin del GLB modelado de un id de avatar, o `null` si el id no es válido. */
+export function avatarGlbUrl(id: string): string | null {
+  const p = parseAvatarId(id);
+  return p ? `${GEN_AVATAR_PREFIX}${p.archetype}-${p.build}.glb` : null;
+}
+
 /**
  * Construye el rig procedural de un arquetipo por id. Si el id no existe, cae al
  * primero (hacker) — nunca falla, porque los 9 son 100% código (no hay GLB que

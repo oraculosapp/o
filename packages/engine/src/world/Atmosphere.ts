@@ -29,6 +29,13 @@ export class Atmosphere {
 
   addTo(scene: THREE.Scene): void {
     scene.add(this.group);
+    // Comparte la REFERENCIA viva de scene.fog.color con todas las capas de niebla:
+    // cuando el clima muta fog.color in place, el mar de niebla funde hacia el mismo
+    // tono automáticamente (sin copia por frame) → costura continua con la cúpula.
+    const fog = scene.fog as THREE.FogExp2 | null;
+    if (fog && (fog as THREE.FogExp2).isFogExp2) {
+      for (const m of this.fogMats) m.uniforms.uFogColor.value = fog.color;
+    }
   }
 
   /** Escala global de la densidad/opacidad del shell de niebla (1=por defecto). */
@@ -52,7 +59,15 @@ export class Atmosphere {
 
   // ---- material de niebla plana (scroll de fBm), reutilizable ----
 
-  private makeFogMaterial(color: THREE.Color, opacity: number, scroll: number, seed: number, centerFadeR: number): THREE.ShaderMaterial {
+  private makeFogMaterial(
+    color: THREE.Color,
+    opacity: number,
+    scroll: number,
+    seed: number,
+    centerFadeR: number,
+    fogDensity: number,
+    edgeInner: number,
+  ): THREE.ShaderMaterial {
     return new THREE.ShaderMaterial({
       transparent: true,
       depthWrite: false,
@@ -65,18 +80,27 @@ export class Atmosphere {
         uScroll: { value: scroll },
         uSeed: { value: seed },
         uCenterFade: { value: centerFadeR },
+        // uFogColor arranca = uColor; addTo lo REEMPLAZA por la referencia viva de
+        // scene.fog.color (que el clima muta in place) → el disco funde con el fog
+        // vivo. uFogDensity: exp2 por distancia. uEdgeInner: inicio del edgeFade.
+        uFogColor: { value: color.clone() },
+        uFogDensity: { value: fogDensity },
+        uEdgeInner: { value: edgeInner },
       },
       vertexShader: /* glsl */ `
-        varying vec2 vUv; varying float vR;
+        varying vec2 vUv; varying float vR; varying vec3 vWorldPos;
         void main() {
           vUv = uv; vR = length(position.xy);
+          vec4 wp = modelMatrix * vec4(position, 1.0);
+          vWorldPos = wp.xyz;
           gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
         }
       `,
       fragmentShader: /* glsl */ `
         uniform float uTime; uniform vec3 uColor; uniform float uOpacity;
         uniform float uScroll; uniform float uSeed; uniform float uCenterFade;
-        varying vec2 vUv; varying float vR;
+        uniform vec3 uFogColor; uniform float uFogDensity; uniform float uEdgeInner;
+        varying vec2 vUv; varying float vR; varying vec3 vWorldPos;
         float hash(vec2 p){ return fract(sin(dot(p, vec2(127.1,311.7)))*43758.5453); }
         float noise(vec2 p){
           vec2 i=floor(p), f=fract(p);
@@ -94,9 +118,18 @@ export class Atmosphere {
           float n = fbm(p + vec2(uTime * uScroll, uTime * uScroll * 0.6));
           n = smoothstep(0.35, 0.85, n);
           float centerFade = smoothstep(0.0, uCenterFade, vR);
-          float edgeFade = 1.0 - smoothstep(0.7, 1.0, length(vUv - 0.5) * 2.0);
+          // edgeFade arranca en uEdgeInner (mar de niebla = 0.4: fundido largo, sin
+          // línea dura contra la cúpula).
+          float edgeFade = 1.0 - smoothstep(uEdgeInner, 1.0, length(vUv - 0.5) * 2.0);
           float a = n * uOpacity * centerFade * edgeFade;
-          gl_FragColor = vec4(uColor, a);
+          // Atenuación exp2 por DISTANCIA hacia el color de fog de la escena: el filo
+          // lejano del disco converge al mismo tono que el horizonte de la cúpula
+          // (uHorizon = fog) → sin costura. (cameraPosition lo inyecta three para
+          // ShaderMaterial.)
+          float d = length(vWorldPos - cameraPosition);
+          float ff = 1.0 - exp(-uFogDensity * uFogDensity * d * d);
+          vec3 c = mix(uColor, uFogColor, ff);
+          gl_FragColor = vec4(c, a);
         }
       `,
     });
@@ -113,8 +146,9 @@ export class Atmosphere {
       const geo = new THREE.CircleGeometry(70, 64);
       const height = this.field.clearLevel + 2.5 + i * (groundH / layers) + i * 1.5;
       // centerFade en unidades de posición (radio 70): funde el centro ~20 u
-      // para no tapar el tótem.
-      const mat = this.makeFogMaterial(color, 0.16 - i * 0.03, 0.012 + i * 0.006, i * 3.7, 20);
+      // para no tapar el tótem. Niebla baja: exp2 suave (0.004) y edgeFade normal
+      // (0.7) — está cerca y pequeña, sin costura contra la cúpula.
+      const mat = this.makeFogMaterial(color, 0.16 - i * 0.03, 0.012 + i * 0.006, i * 3.7, 20, 0.004, 0.7);
       const mesh = new THREE.Mesh(geo, mat);
       mesh.position.copy(up).multiplyScalar(height);
       mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), up);
@@ -134,9 +168,13 @@ export class Atmosphere {
     const color = new THREE.Color(this.preset.fog?.color ?? "#D8E0DE");
     for (let i = 0; i < layers; i++) {
       const geo = new THREE.CircleGeometry(360, 72);
-      const y = -22 - i * 8; // muy por debajo del filo (~ -22..-38)
-      // Sin center-fade: el mar llena el abismo bajo la isla. Scroll amplio.
-      const mat = this.makeFogMaterial(color, 0.28 - i * 0.05, 0.02 + i * 0.008, 11 + i * 2.3, 0.01);
+      // Capa superior a -16 (justo bajo CLIFF_BOTTOM=-14): TAPA el hueco entre el
+      // filo de la isla y el mar de niebla. Capas a -16/-26/-36.
+      const y = -16 - i * 10;
+      // Sin center-fade: el mar llena el abismo bajo la isla. Scroll amplio. exp2
+      // por distancia (0.009 ≈ densidad del fog de escena) + edgeFade largo (0.4):
+      // el filo lejano funde con el horizonte de la cúpula → sin línea rara.
+      const mat = this.makeFogMaterial(color, 0.28 - i * 0.05, 0.02 + i * 0.008, 11 + i * 2.3, 0.01, 0.009, 0.4);
       // Fade sólo hacia el borde lejano ya lo hace edgeFade del shader.
       const mesh = new THREE.Mesh(geo, mat);
       mesh.position.set(0, y, 0);

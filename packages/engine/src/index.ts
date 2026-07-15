@@ -30,10 +30,16 @@ export {
 export {
   ARCHETYPE_IDS,
   ARCHETYPE_SPECS,
+  BUILD_IDS,
+  GEN_AVATAR_PREFIX,
   buildArchetype,
   archetypeSpec,
   isArchetypeId as isProceduralArchetypeId,
+  parseAvatarId,
+  isAvatarId,
+  avatarGlbUrl,
   type ArchetypeId,
+  type BuildId,
 } from "./avatar/archetypes";
 export { ArchetypePreview, type ArchetypePreviewOptions } from "./avatar/ArchetypePreview";
 export { AnimationDriver, type Locomotion } from "./avatar/AnimationDriver";
@@ -78,6 +84,8 @@ export { WeatherDirector, WEATHER_IDS, type WeatherId, type WeatherRefs } from "
 
 // --- Vida ambiente (equipo Flora) ---
 export { AmbientLife } from "./world/AmbientLife";
+// Vegetación instanciada (equipo Flora/Tierra): expone platformHeightAt (copas pisables).
+export { Vegetation } from "./world/Vegetation";
 
 // --- Mini-juego ¡Dale a Paqo! (equipo Juego) ---
 export {

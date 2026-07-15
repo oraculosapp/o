@@ -23,6 +23,8 @@ export class IslandField {
   private amp: number;
   private freq: number; // frecuencia planar (por unidad de mundo)
   private octaves: number;
+  /** Octavas del fBm base tras el suavizado (≤3): colinas limpias, sin picoteo. */
+  private baseOctaves: number;
   private ridgeStrength: number;
 
   // Claro central plano (origen).
@@ -68,6 +70,8 @@ export class IslandField {
     // horizontal efectiva era (freq·230)/R por unidad. La conservamos tal cual.
     this.freq = (hn.frequency * 230) / IslandField.R_REF; // 0.012·230/40 = 0.069
     this.octaves = hn.octaves;
+    // Suavizado: una octava menos (4→3) para lomas limpias fuera del centro.
+    this.baseOctaves = Math.min(this.octaves, 3);
 
     this.ridgeStrength = preset.terrain.ridges?.enabled ? preset.terrain.ridges.steepness : 0;
 
@@ -137,19 +141,29 @@ export class IslandField {
   /** Altura (Y) del terreno en (x,z). Misma fórmula que desplaza la malla visual. */
   heightAt(x: number, z: number): number {
     const f = this.freq;
+    const r = Math.hypot(x, z);
+
+    // Suavizado radial: en el anfiteatro central (r≲20) el relieve conserva
+    // carácter; hacia el filo (r≳39) decae a lomas suaves que se antoje caminar.
+    // Los términos aditivos (claro, anfiteatro, gates, lip) van aparte y no se tocan.
+    const rough =
+      1 - 0.6 * THREE.MathUtils.smoothstep(r, this.rimRadius, IslandField.EDGE_BASE * 0.7);
+
     // fBm base (relieve continuo). Segundo eje fijo → heightmap 2D determinista.
-    const base = this.noise.fbm(x * f, 37.5, z * f, this.octaves, 0.5, 2);
+    const base = this.noise.fbm(x * f, 37.5, z * f, this.baseOctaves, 0.5, 2);
 
     let h = base;
     if (this.ridgeStrength > 0) {
       const rn = this.noise.noise3D(x * f * 1.7 + 11.3, 5.1, z * f * 1.7);
       const ridged = 1 - Math.abs(rn);
-      // Peso ridged 0.75 (idéntico a la esfera: la mejor caminata "deliciosa").
-      h = base * (1 - this.ridgeStrength * 0.45) + ridged * ridged * this.ridgeStrength * 0.75;
+      // Peso ridged bajado 0.75→0.30 (crestas mucho menos afiladas) y modulado
+      // por `rough`: las crestas se desvanecen hacia el filo → caminata deliciosa.
+      h = base * (1 - this.ridgeStrength * 0.45) + ridged * ridged * this.ridgeStrength * 0.3 * rough;
     }
     h *= this.amp;
-
-    const r = Math.hypot(x, z);
+    // Atenúa la ondulación (media ~0) lejos del centro: colinas más bajas y
+    // suaves sin aplanarlas del todo — siguen siendo lomas, no una meseta.
+    h *= 0.55 + 0.45 * rough;
 
     // Anillo-anfiteatro (gaussiana sobre el radio planar).
     const dRim = (r - this.rimRadius) / this.rimSigma;

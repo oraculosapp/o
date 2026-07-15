@@ -1,7 +1,7 @@
 import * as THREE from "three";
 import { TestDummy } from "../avatar/TestDummy";
 import { loadAvatarRigShared, isAllowedArchetypeUrl } from "../avatar/AvatarGLTFCache";
-import { buildArchetype, isArchetypeId as isProceduralArchetypeId } from "../avatar/archetypes";
+import { buildArchetype, isArchetypeId as isProceduralArchetypeId, avatarGlbUrl } from "../avatar/archetypes";
 import type { AvatarDriveState, IAvatarRig } from "../avatar/types";
 import { makeSoftCircleTexture } from "../util/toon";
 import type { NetAnim, RemoteState } from "./types";
@@ -113,7 +113,39 @@ class RemoteAvatar {
   setArchetype(id?: string): void {
     if (!id || id === this.curArchetype || this.loadingArchetype) return;
 
-    // Camino preferido (procedurales): construcción local instantánea, sin red.
+    // Avatar MODELADO nuevo ("<arquetipo>-<f|m|n>"): carga perezosa del GLB
+    // generado desde /assets/avatars/gen/ (caché compartida, hot-swap al llegar).
+    // Si falla, cae al chibi procedural del mismo arquetipo (nunca rompe).
+    const genUrl = avatarGlbUrl(id);
+    if (genUrl) {
+      this.curArchetype = id;
+      this.loadingArchetype = true;
+      loadAvatarRigShared(genUrl)
+        .then((rig) => {
+          this.loadingArchetype = false;
+          if (this.dead) {
+            rig.dispose();
+            return;
+          }
+          this.swapRig(rig);
+        })
+        .catch(() => {
+          this.loadingArchetype = false;
+          // Fallback: chibi procedural del arquetipo base (id "<arquetipo>").
+          const base = id.slice(0, id.lastIndexOf("-"));
+          if (!this.dead && isProceduralArchetypeId(base)) {
+            try {
+              this.swapRig(buildArchetype(base));
+            } catch {
+              /* se queda con el maniquí */
+            }
+          }
+        });
+      return;
+    }
+
+    // Camino procedural (los 9 ids "pelados" viejos): construcción local
+    // instantánea, sin red — compat con clientes/localStorage antiguos.
     if (isProceduralArchetypeId(id)) {
       this.curArchetype = id;
       try {

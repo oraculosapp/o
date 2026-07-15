@@ -36,6 +36,17 @@ export default function PaqoBiosphere() {
   const [pickerOpen, setPickerOpen] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
 
+  /**
+   * AvatarConfig para el mundo: carga el GLB MODELADO (arquetipo + build) y, si
+   * fallara, cae con gracia al chibi PROCEDURAL del mismo arquetipo (Fase 5).
+   */
+  const buildAvatarConfig = useCallback((sel: AvatarSelection): AvatarConfig => ({
+    ...worldConfigFromSelection(sel),
+    onArchetypeMissing: () => {
+      worldRef.current?.setAvatar({ archetype: sel.archetype, tint: sel.tint });
+    },
+  }), []);
+
   useEffect(() => {
     const el = mountRef.current;
     if (!el) return;
@@ -46,7 +57,7 @@ export default function PaqoBiosphere() {
     if (!sel) setPickerOpen(true);
 
     const avatarConfig: AvatarConfig | undefined = sel
-      ? { ...worldConfigFromSelection(sel) }
+      ? buildAvatarConfig(sel)
       : undefined;
 
     // El JSON completo del preset satisface el subconjunto BiospherePreset.
@@ -113,8 +124,8 @@ export default function PaqoBiosphere() {
     void saveAvatarToProfile(sel);
     setAvatarSel(sel);
     setPickerOpen(false);
-    // Aplica en caliente: el arquetipo procedural se encarna al instante (sin red).
-    worldRef.current?.setAvatar(worldConfigFromSelection(sel));
+    // Aplica en caliente: carga el GLB modelado del avatar (con fallback al chibi).
+    worldRef.current?.setAvatar(buildAvatarConfig(sel));
     setToast("Tu arquetipo te acompaña ✦");
   }, []);
 
@@ -145,7 +156,7 @@ export default function PaqoBiosphere() {
           El avatar muestra el retrato/tinte actual para no confundirse con Perfil. */}
       <HudControls
         onChangeAvatar={() => setPickerOpen(true)}
-        avatarThumbUrl={avatarSel ? thumbUrl(avatarSel.archetype) : null}
+        avatarThumbUrl={avatarSel ? thumbUrl(avatarSel.archetype, avatarSel.build) : null}
         avatarTint={avatarSel?.tint.primary ?? null}
       />
 

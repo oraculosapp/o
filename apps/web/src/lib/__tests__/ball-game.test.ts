@@ -181,6 +181,28 @@ describe("BallGame — máquina del mini-juego ¡Dale a Paqo!", () => {
     expect(game.snapshot().scores.a).toBe(5);
   });
 
+  it("applyRemote 'hit' puntúa y hace poof (sonido) pero NO respawnea local (autoridad del lanzador)", () => {
+    const { game, balls, sounds } = makeGame();
+    game.setLocalPlayer("me");
+    game.start();
+    game.applyRemote({ type: "hit", by: "otro", ballId: 2, hitPos: [0, 0, 0] });
+    // Puntúa al lanzador remoto y suena el impacto.
+    expect(game.snapshot().scores.otro).toBe(1);
+    expect(sounds).toContain("hit");
+    // Pero NO respawnea la pelota localmente: su nueva pos (aleatoria) llega por el
+    // flujo "ball" desde el lanzador (evita doble teleport con pos divergente).
+    expect(balls.respawned).toHaveLength(0);
+  });
+
+  it("el golpe LOCAL sí respawnea (el lanzador es la autoridad que difunde la pos)", () => {
+    const { game, balls } = makeGame();
+    game.setLocalPlayer("me");
+    game.start();
+    balls.throwAt(0, 0, 0, 0); // dentro del cilindro
+    game.update(0.016);
+    expect(balls.respawned).toContainEqual({ id: 0, reason: "hit" });
+  });
+
   it("applyRemote 'stop' durante running vuelve a idle", () => {
     const { game } = makeGame();
     game.setLocalPlayer("me");

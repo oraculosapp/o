@@ -42,8 +42,12 @@ export interface AvatarDriveState {
   jumping: boolean;
 }
 
-/** Zonas de color personalizables. `primary` = ropa principal, `secondary` = ropa secundaria. */
-export type TintZone = "primary" | "secondary" | "hair";
+/**
+ * Zonas de color personalizables por el editor del selector. `primary` = ropa
+ * principal, `secondary` = ropa secundaria/inferior, `hair` = pelo/barba,
+ * `skin` = piel, `accent` = detalle del arquetipo (neón, oro, cuero, gema…).
+ */
+export type TintZone = "primary" | "secondary" | "hair" | "skin" | "accent";
 
 /** Sockets donde se pueden enganchar props icónicos. */
 export type PropSocket = "handR" | "handL" | "back";

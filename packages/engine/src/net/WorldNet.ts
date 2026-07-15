@@ -91,6 +91,18 @@ export class WorldNet implements WorldNetHooks {
     this.balls.applyState(ballId, s);
   }
 
+  onBallGrab(cb: (ballId: number, t: number) => void): () => void {
+    return this.balls.onGrab(cb);
+  }
+
+  applyBallGrab(ballId: number, by: string, t: number): void {
+    this.balls.applyGrab(ballId, by, t);
+  }
+
+  setLocalId(id: string): void {
+    this.balls.setLocalId(id);
+  }
+
   onZoneSignal(cb: (signal: ZoneSignal) => void): () => void {
     return this.zones.onSignal(cb);
   }

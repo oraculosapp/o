@@ -160,9 +160,10 @@
 }
 
 @media (max-width: 640px) {
+  /* Fila 1 (derecha del clúster): ánimo/clima, con áreas seguras. */
   .root {
-    top: 12px;
-    left: 272px;
+    top: calc(12px + env(safe-area-inset-top));
+    left: calc(272px + env(safe-area-inset-left));
   }
   /* Área táctil ≥44px (WCAG 2.5.5) — glifo intacto a ~20px. */
   .button {
@@ -175,6 +176,17 @@
     left: auto;
     right: 0;
     width: min(244px, calc(100vw - 24px));
+  }
+}
+
+/* ≤360px: la fila superior no cabe → la píldora de ánimo baja a la SEGUNDA fila,
+   anclada a la DERECHA para que su panel (right:0) quede siempre en pantalla
+   (problema 7). */
+@media (max-width: 360px) {
+  .root {
+    top: calc(64px + env(safe-area-inset-top));
+    left: auto;
+    right: calc(12px + env(safe-area-inset-right));
   }
 }
 

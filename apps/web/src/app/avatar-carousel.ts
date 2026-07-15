@@ -16,10 +16,14 @@
  * programáticos vía `goTo(index)`.
  */
 import * as THREE from "three";
-import { buildArchetype, type IAvatarRig } from "@phygitalia/engine";
+import { buildArchetype, type IAvatarRig, type TintZone } from "@phygitalia/engine";
 
 /** Estado idle (parado, respirando) para todos los rigs del anillo. */
 const IDLE = { speed: 0, maxSpeed: 6, grounded: true, jumping: false } as const;
+
+/** Factoría de rig para un arquetipo del anillo (p.ej. cargar su GLB modelado).
+ *  Devolver `null`/rechazar mantiene el placeholder procedural (fallback). */
+export type RigLoader = (archetypeId: string, index: number) => Promise<IAvatarRig | null> | IAvatarRig | null;
 
 export interface AvatarCarouselOptions {
   /** Sin inercia ni tweens (prefers-reduced-motion). */
@@ -30,6 +34,12 @@ export interface AvatarCarouselOptions {
   onSelect?: (index: number) => void;
   /** URL de la textura de la runa central (default `/runa.png`). */
   runaUrl?: string;
+  /**
+   * Si se pasa, tras montar los placeholders PROCEDURALES (instantáneos) el anillo
+   * carga el rig "de verdad" de cada arquetipo (p.ej. su GLB modelado) y hace
+   * hot-swap al llegar. Si la carga falla, se queda el chibi procedural.
+   */
+  loadRig?: RigLoader;
 }
 
 export class AvatarCarousel {
@@ -63,6 +73,12 @@ export class AvatarCarousel {
   private readonly reducedMotion: boolean;
   private readonly onSelect?: (index: number) => void;
   private readonly runaUrl: string;
+  private readonly loadRig?: RigLoader;
+
+  /** Tinte de 5 zonas vigente (hex), reaplicado tras cada swap de rig. */
+  private tint?: Partial<Record<TintZone, string>>;
+  /** Token de carga: descarta swaps de una tanda anterior (cambio de build). */
+  private loadToken = 0;
 
   constructor(
     private container: HTMLElement,
@@ -74,6 +90,7 @@ export class AvatarCarousel {
     this.reducedMotion = opts?.reducedMotion ?? false;
     this.onSelect = opts?.onSelect;
     this.runaUrl = opts?.runaUrl ?? "/runa.png";
+    this.loadRig = opts?.loadRig;
     this.selectedIndex = ((opts?.initialIndex ?? 0) % this.count + this.count) % this.count;
     this.rot = -this.selectedIndex * this.step;
     this.targetRot = this.rot;
@@ -244,6 +261,77 @@ export class AvatarCarousel {
       this.holders.push(holder);
       this.rigs.push(rig);
     }
+    // Sube a los rigs "de verdad" (GLB modelado) si hay factoría; el chibi
+    // procedural queda de placeholder instantáneo (y de fallback si la carga falla).
+    if (this.loadRig) this.loadAllRigs();
+  }
+
+  /** Lanza la carga async del rig real de cada arquetipo y hace hot-swap al llegar. */
+  private loadAllRigs(): void {
+    const token = ++this.loadToken;
+    this.ids.forEach((id, i) => {
+      let out: Promise<IAvatarRig | null> | IAvatarRig | null;
+      try {
+        out = this.loadRig!(id, i);
+      } catch {
+        return;
+      }
+      Promise.resolve(out)
+        .then((rig) => {
+          if (!rig) return;
+          if (this.disposed || token !== this.loadToken) {
+            rig.dispose();
+            return;
+          }
+          this.swapRigAt(i, rig);
+        })
+        .catch(() => {
+          /* se queda el chibi procedural */
+        });
+    });
+  }
+
+  /** Sustituye el rig del holder `i` conservando orientación, escala y tinte. */
+  private swapRigAt(i: number, rig: IAvatarRig): void {
+    const holder = this.holders[i];
+    const old = this.rigs[i];
+    if (old) {
+      holder.remove(old.root);
+      old.dispose();
+    }
+    rig.root.rotation.y = Math.PI; // cara al +Z del holder (afuera → cámara)
+    holder.add(rig.root);
+    this.rigs[i] = rig;
+    if (this.tint) rig.setTint(this.tintColors());
+  }
+
+  /** Convierte el tinte hex vigente a THREE.Color por zona. */
+  private tintColors(): Partial<Record<TintZone, THREE.Color>> {
+    const out: Partial<Record<TintZone, THREE.Color>> = {};
+    if (!this.tint) return out;
+    for (const zone of Object.keys(this.tint) as TintZone[]) {
+      const hex = this.tint[zone];
+      if (hex) out[zone] = new THREE.Color(hex);
+    }
+    return out;
+  }
+
+  /**
+   * Fija el tinte (5 zonas, hex) y lo aplica EN VIVO a todos los rigs del anillo.
+   * El editor de color del selector llama a esto en cada cambio de picker.
+   */
+  setTint(tint: Partial<Record<TintZone, string>>): void {
+    this.tint = { ...tint };
+    const colors = this.tintColors();
+    for (const rig of this.rigs) rig.setTint(colors);
+  }
+
+  /**
+   * Recarga los rigs "de verdad" (p.ej. al cambiar de build): re-invoca la factoría
+   * y hace swap. No-op si no hay factoría (anillo puramente procedural).
+   */
+  reload(): void {
+    if (this.loadRig) this.loadAllRigs();
   }
 
   private applyRingRotation(): void {

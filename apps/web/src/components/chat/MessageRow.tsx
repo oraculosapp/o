@@ -45,9 +45,20 @@ export interface MessageRowProps {
   isOracle: boolean;
   mine?: boolean;
   tint?: string;
+  /** ISO 8601 del mensaje; se muestra como hora discreta (HH:MM). */
+  createdAt?: string;
 }
 
-export function MessageRow({ displayName, content, isOracle, mine, tint }: MessageRowProps) {
+/** Hora discreta local HH:MM; tolerante a fechas inválidas (no rompe el render). */
+function formatTime(iso?: string): string {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
+
+export function MessageRow({ displayName, content, isOracle, mine, tint, createdAt }: MessageRowProps) {
+  const time = formatTime(createdAt);
   return (
     <li className={`${styles.row} ${isOracle ? styles.rowOracle : ""} ${mine ? styles.rowMine : ""}`}>
       <div className={styles.avatarCol}>
@@ -55,8 +66,14 @@ export function MessageRow({ displayName, content, isOracle, mine, tint }: Messa
       </div>
       <div className={styles.bubbleCol}>
         <span className={`${styles.author} ${isOracle ? styles.authorOracle : ""}`}>
+          {isOracle && <span className={styles.oracleSpark} aria-hidden>✦</span>}
           {displayName}
-          {isOracle && <span className={styles.oracleBadge}>oráculo</span>}
+          {isOracle && <span className={styles.oracleBadge}>Paqo</span>}
+          {time && (
+            <time className={styles.time} dateTime={createdAt}>
+              {time}
+            </time>
+          )}
         </span>
         <p className={styles.bubble}>{content}</p>
       </div>

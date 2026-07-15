@@ -25,7 +25,7 @@ import type {
 } from "@supabase/supabase-js";
 import { ensureAnonSession, getSupabaseBrowserClient } from "./supabase";
 import { getStoredArchetype, getStoredPrimaryTint } from "./avatar-store";
-import { isArchetypeId } from "./avatars";
+import { isArchetypeId, isAvatarId } from "./avatars";
 import type { GameEventUi, WorldGameHooks } from "./world-ui";
 
 // --- Contrato con el engine (lo implementa el equipo PaqoWorld) --------------
@@ -55,6 +55,16 @@ export interface WorldNetHooks {
     ballId: number,
     s: { pos: [number, number, number]; vel: [number, number, number] }
   ): void;
+  /**
+   * Suscribe AGARRES locales de balón (primero o robo) → difundir "ball_grab".
+   * Opcionales (`?`) para degradar con gracia si el engine aún no expone la feature
+   * de robo; se invocan con optional-chaining.
+   */
+  onBallGrab?(cb: (ballId: number, t: number) => void): () => void;
+  /** Aplica un agarre remoto ("ball_grab"): puede provocar un force-drop del portador. */
+  applyBallGrab?(ballId: number, by: string, t: number): void;
+  /** Fija el id del jugador local (desempate de robos por id). */
+  setLocalId?(id: string): void;
   onZoneSignal(cb: (signal: "far" | "mid" | "near" | "found") => void): () => void;
 }
 
@@ -125,15 +135,16 @@ const NET_RETRY_MS = 600;
 const NET_RETRY_MAX = 20; // ~12 s intentando enganchar world.net
 
 /**
- * Valida que un `archetype` recibido por broadcast sea uno de los 9 ids
- * PROCEDURALES conocidos (M-5). El broadcast no es de fiar: al aceptar sólo ids
- * de una lista blanca fija (no una URL arbitraria), un emisor malicioso no puede
- * inducir ninguna descarga externa — el engine construye el rig en código.
- * Devuelve el id si es válido, o `undefined`.
+ * Valida que un `archetype` recibido por broadcast sea (a) uno de los 9 ids
+ * PROCEDURALES viejos, o (b) un id de avatar MODELADO `"<arquetipo>-<f|m|n>"`
+ * (M-5). El broadcast no es de fiar: al aceptar SÓLO ids de una lista blanca fija
+ * (nunca una URL arbitraria), un emisor malicioso no puede inducir descargas
+ * externas — el engine sólo resuelve el id a `/assets/avatars/gen/…` same-origin
+ * (o construye el chibi en código). Devuelve el id si es válido, o `undefined`.
  */
 function safeArchetype(id: string | undefined): string | undefined {
   if (!id || typeof id !== "string") return undefined;
-  return isArchetypeId(id) ? id : undefined;
+  return isArchetypeId(id) || isAvatarId(id) ? id : undefined;
 }
 
 /** ¿Están las env vars públicas de Supabase presentes? (decide si hay chat). */
@@ -155,6 +166,16 @@ interface BallPayload {
   ballId: number;
   pos: [number, number, number];
   vel: [number, number, number];
+}
+/**
+ * Sobre de "ball_grab": quién agarró qué balón y cuándo. Difundido en TODO agarre
+ * (primero o robo). El receptor que llevaba ese balón lo suelta si `t` es más nuevo
+ * (empate → gana el id lexicográfico menor); la autoridad del balón pasa al emisor.
+ */
+interface BallGrabPayload {
+  by: string;
+  ballId: number;
+  t: number;
 }
 
 /** Sobre del evento del mini-juego por broadcast: el GameEvent + el id del emisor. */
@@ -333,6 +354,15 @@ export class BiosphereRealtime {
       this.net()?.applyBallState(payload.ballId, { pos: payload.pos, vel: payload.vel });
     });
 
+    // (c1) Broadcast "ball_grab" — agarre/robo de balón (autoridad pasa al emisor)
+    channel.on("broadcast", { event: "ball_grab" }, ({ payload }: { payload: BallGrabPayload }) => {
+      if (!payload || payload.by === me.sessionId) return;
+      // Anti-griefing (M-5) idéntica a pos/ball: emisor presente + forma sana.
+      if (typeof payload.by !== "string" || !this.presentIds.has(payload.by)) return;
+      if (!isFiniteNum(payload.ballId) || !isFiniteNum(payload.t)) return;
+      this.net()?.applyBallGrab?.(payload.ballId, payload.by, payload.t);
+    });
+
     // (c2) Broadcast "game" — eventos del mini-juego ¡Dale a Paqo!
     channel.on("broadcast", { event: "game" }, ({ payload }: { payload: GamePayload }) => {
       if (!payload || payload.id === me.sessionId) return;
@@ -398,6 +428,9 @@ export class BiosphereRealtime {
     }
     this.netWired = true;
 
+    // Identidad local para el desempate de robos (id lexicográfico menor gana empate).
+    if (this.identity) net.setLocalId?.(this.identity.sessionId);
+
     // Emite mi estado a 10 Hz por broadcast.
     const stopTick = net.onLocalTick((s) => {
       const me = this.identity;
@@ -420,7 +453,8 @@ export class BiosphereRealtime {
       });
     }, POS_HZ);
 
-    // Reenvía cada patada al balón (autoridad local).
+    // Reenvía cada patada al balón (autoridad local). Este MISMO flujo transporta el
+    // balón AGARRADO (difundido a ~10 Hz por el portador) y los respawns.
     const stopKick = net.onBallKick((ballId, s) => {
       const me = this.identity;
       const ch = this.channel;
@@ -432,7 +466,20 @@ export class BiosphereRealtime {
       });
     });
 
+    // Reenvía cada AGARRE local (primero o robo) como "ball_grab".
+    const stopGrab = net.onBallGrab?.((ballId, t) => {
+      const me = this.identity;
+      const ch = this.channel;
+      if (!me || !ch) return;
+      void ch.send({
+        type: "broadcast",
+        event: "ball_grab",
+        payload: { by: me.sessionId, ballId, t } satisfies BallGrabPayload,
+      });
+    });
+
     this.netUnsubs.push(stopTick, stopKick);
+    if (stopGrab) this.netUnsubs.push(stopGrab);
   }
 
   /**

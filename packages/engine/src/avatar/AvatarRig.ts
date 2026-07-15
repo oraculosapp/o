@@ -44,9 +44,10 @@ const DEFAULT_HUE_BANDS: HueBand[] = [
 ];
 
 /** Palabras clave para clasificar materiales/huesos por zona o socket. */
-const HAIR_KW = ["hair", "pelo", "cabello"];
+const HAIR_KW = ["hair", "pelo", "cabello", "beard", "barba"];
 const SKIN_KW = ["skin", "piel", "face", "cara", "body", "cuerpo", "head", "cabeza", "eye", "ojo"];
-const SECONDARY_KW = ["secondary", "accent", "trim", "belt", "boot", "glove", "sleeve", "detail", "prop"];
+const ACCENT_KW = ["accent", "acento", "detail", "detalle", "trim", "metal", "gold", "oro", "neon", "gem", "gema", "glow", "prop"];
+const SECONDARY_KW = ["secondary", "secundario", "pant", "trouser", "leg", "pierna", "lower", "boot", "shoe", "zapato", "belt", "glove", "sleeve"];
 
 /**
  * Adopta un GLB skinned (arquetipo Tripo3D) y expone el contrato `IAvatarRig`.
@@ -218,15 +219,16 @@ export class AvatarRig implements IAvatarRig {
     });
 
     // Estrategia de tinte según nº de materiales.
-    const tintable = toonList.filter((t) => !SKIN_KW.some((k) => t.srcName.includes(k)));
     if (toonList.length <= 1) {
       // Un solo material con todo horneado → máscara de hue (best-effort).
       if (toonList[0]) this.tint.patchHueMask(toonList[0].mat, DEFAULT_HUE_BANDS);
     } else {
-      // Varios materiales → asigna zona por material (ruta precisa).
+      // Varios materiales → asigna zona por material (ruta precisa). Con los GLB
+      // generados (materiales NOMBRADOS primary/secondary/hair/skin/accent) el
+      // acierto es exacto; con GLB arbitrarios, heurística + reparto por orden.
       let unmatched = 0;
-      for (const { mat, srcName } of tintable) {
-        const zone = this.guessZone(srcName, unmatched);
+      for (const { mat, srcName } of toonList) {
+        const zone = this.guessZone(srcName);
         if (zone === null) {
           unmatched++;
           this.tint.patchZone(mat, unmatched === 1 ? "primary" : "secondary");
@@ -237,11 +239,13 @@ export class AvatarRig implements IAvatarRig {
     }
   }
 
-  /** Clasifica un material en una zona por palabras clave; null si no hay match. */
-  private guessZone(name: string, _unmatchedSoFar: number): TintZone | null {
-    if (HAIR_KW.some((k) => name.includes(k))) return "hair";
-    if (SECONDARY_KW.some((k) => name.includes(k))) return "secondary";
-    if (name.includes("primary") || name.includes("cloth") || name.includes("ropa")) return "primary";
+  /** Clasifica un material en una de las 5 zonas por palabras clave; null si no hay match. */
+  private guessZone(name: string): TintZone | null {
+    if (name === "hair" || HAIR_KW.some((k) => name.includes(k))) return "hair";
+    if (name === "skin" || SKIN_KW.some((k) => name.includes(k))) return "skin";
+    if (name === "accent" || ACCENT_KW.some((k) => name.includes(k))) return "accent";
+    if (name === "secondary" || SECONDARY_KW.some((k) => name.includes(k))) return "secondary";
+    if (name === "primary" || name.includes("cloth") || name.includes("ropa") || name.includes("shirt") || name.includes("coat")) return "primary";
     return null; // sin pista → el llamador reparte primary/secondary por orden
   }
 

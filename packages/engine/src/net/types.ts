@@ -27,6 +27,19 @@ export interface WorldNetHooks {
   onBallKick(cb: (ballId: number, s: BallState) => void): () => void;
   /** Aplica estado de pelota recibido de la red (reconciliación suave, no teleport). */
   applyBallState(ballId: number, s: BallState): void;
+  /**
+   * Suscribe AGARRES locales de pelota (primero o robo) para difundir "ball_grab".
+   * El callback recibe `(ballId, t)` con `t=Date.now()`. Unsub fn.
+   */
+  onBallGrab(cb: (ballId: number, t: number) => void): () => void;
+  /**
+   * Aplica un AGARRE remoto ("ball_grab"): si el jugador local llevaba ese balón y
+   * el agarre ajeno gana el desempate (t más nuevo; empate → id menor), lo suelta en
+   * silencio (robo). Si no lo llevaba, no hace nada (lo sigue el flujo "ball").
+   */
+  applyBallGrab(ballId: number, by: string, t: number): void;
+  /** Fija el id del jugador local (para desempatar robos por id lexicográfico). */
+  setLocalId(id: string): void;
   /** Suscribe cambios de zona respecto al tótem. Unsub fn. */
   onZoneSignal(cb: (signal: ZoneSignal) => void): () => void;
 }

@@ -1,16 +1,28 @@
 /* Botones táctiles de acción (inferior-derecha). Sólo se renderizan en touch.
-   El joystick del engine vive en la mitad izquierda; el chat, en la columna
-   derecha (colapsable), así que estos botones se sitúan por encima del launcher. */
+   El joystick del engine vive en la mitad izquierda; el chat es una HOJA INFERIOR
+   (bottom sheet). Para quedar SIEMPRE visibles por encima del chat, estos botones
+   se reubican según --chat-sheet-h (alto de la hoja en px, que publica ChatDock en
+   <html>): con el chat colapsado reserva ~64px (sobre el launcher); al asomar/
+   expandir, suben con la hoja. Respetan áreas seguras (problemas 4 y 5). */
 
 .pad {
   position: fixed;
-  right: 18px;
-  bottom: 92px;
+  right: calc(18px + env(safe-area-inset-right));
+  bottom: calc(var(--chat-sheet-h, 88px) + 16px + env(safe-area-inset-bottom));
   z-index: 28;
   display: flex;
   flex-direction: column;
   align-items: flex-end;
   gap: 0.7rem;
+  pointer-events: none;
+  transition: opacity var(--dur-fast) var(--ease-brand);
+}
+
+/* Con la hoja expandida a tope, el chat es el foco: oculta los botones para no
+   chocar con el clúster superior. Vuelven al asomar/colapsar. */
+:global(html[data-chat-sheet="full"]) .pad {
+  opacity: 0;
+  visibility: hidden;
   pointer-events: none;
 }
 
@@ -75,6 +87,7 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .pad,
   .btn,
   .grab {
     transition: none;

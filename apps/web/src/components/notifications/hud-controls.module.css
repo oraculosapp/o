@@ -110,18 +110,29 @@
 }
 
 @media (max-width: 640px) {
+  /* Fila 1 (izquierda): avatar; campanita+cuenta a su derecha. Áreas seguras. */
   .cluster {
-    top: 12px;
-    left: 168px;
+    top: calc(12px + env(safe-area-inset-top));
+    left: calc(168px + env(safe-area-inset-left));
   }
   .avatarSlot {
-    top: 12px;
-    left: 116px;
+    top: calc(12px + env(safe-area-inset-top));
+    left: calc(116px + env(safe-area-inset-left));
   }
   /* Área táctil ≥44px (WCAG 2.5.5) — glifo intacto a ~20px. */
   .profileLink {
     width: 44px;
     height: 44px;
+  }
+}
+
+/* ≤360px: el clúster no cabe en una fila → campanita+cuenta bajan a la SEGUNDA
+   fila (bajo Instalar/mute/avatar), anclado a la izquierda (problema 7). Su
+   desplegable, al re-anclarse a la izquierda, deja de desbordar por la derecha. */
+@media (max-width: 360px) {
+  .cluster {
+    top: calc(64px + env(safe-area-inset-top));
+    left: calc(12px + env(safe-area-inset-left));
   }
 }
 

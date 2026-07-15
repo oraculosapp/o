@@ -36,6 +36,11 @@
     var(--shadow),
     0 0 22px var(--glow);
 }
+.launcher:focus-visible {
+  outline: 2px solid var(--gold-bright);
+  outline-offset: 2px;
+  border-color: var(--gold-dim);
+}
 .launcherLabel {
   color: var(--gold-bright);
 }
@@ -104,7 +109,8 @@
   top: 72px;
   right: 16px;
   width: min(370px, calc(100vw - 32px));
-  height: min(460px, calc(100vh - 96px));
+  /* dvh: se ajusta a la ventana visible (barra/teclado) — no queda tapado. */
+  height: min(460px, calc(100dvh - 96px));
   border-radius: var(--radius);
 }
 @keyframes dockIn {
@@ -118,6 +124,74 @@
   }
 }
 
+/* --- MÓVIL: HOJA INFERIOR (bottom sheet) -----------------------------------
+   Full-width anclada abajo, arrastrable por el asa, con áreas seguras. Sustituye
+   a la columna lateral en móvil para NO tapar los botones de acción (problema 4).
+   Alturas en dvh (problema 2) y respeta env(safe-area-*) (problema 5). Se aplica
+   por JS (useIsMobileHud) alineado con la misma media query CSS (problema 8). */
+.sheet {
+  top: auto;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  width: 100%;
+  max-width: 100%;
+  padding-top: 0;
+  /* Áreas seguras laterales (landscape); el borde inferior lo maneja el composer
+     con env(safe-area-inset-bottom) para no descontarlo dos veces. */
+  padding-left: env(safe-area-inset-left);
+  padding-right: env(safe-area-inset-right);
+  border: none;
+  border-top: 1px solid var(--gold-dim);
+  border-top-left-radius: var(--radius);
+  border-top-right-radius: var(--radius);
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+  box-shadow: 0 -20px 50px -18px rgba(0, 0, 0, 0.72);
+  transition: height var(--dur-slow) var(--ease-brand);
+  animation: sheetIn var(--dur-slow) var(--ease-brand);
+}
+.sheetPeek {
+  height: 42dvh;
+}
+.sheetFull {
+  height: 88dvh;
+}
+/* Durante el arrastre se fija el alto por JS: sin transición (sigue al dedo). */
+.dragging {
+  transition: none;
+}
+@keyframes sheetIn {
+  from {
+    transform: translateY(100%);
+  }
+  to {
+    transform: none;
+  }
+}
+
+/* Asa de arrastre de la hoja. Área táctil generosa; el asa visible es una píldora. */
+.grabberWrap {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 30px;
+  padding: 10px 0 6px;
+  touch-action: none;
+  cursor: grab;
+}
+.grabberWrap:active {
+  cursor: grabbing;
+}
+.grabber {
+  width: 42px;
+  height: 5px;
+  border-radius: var(--radius-pill);
+  background: var(--gold-dim);
+  opacity: 0.7;
+}
+
 .header {
   display: flex;
   align-items: center;
@@ -126,6 +200,8 @@
   gap: 0.5rem;
   padding: 0.5rem 0.5rem 0.5rem 0.65rem;
   border-bottom: 1px solid var(--line-soft);
+  /* "Más onda": velo dorado sutil que se difumina hacia abajo. */
+  background: linear-gradient(180deg, rgba(227, 176, 99, 0.1), rgba(227, 176, 99, 0) 90%);
 }
 .tabs {
   display: inline-flex;
@@ -267,12 +343,41 @@
   flex: 1 1 auto;
   min-height: 0;
   overflow-y: auto;
+  overscroll-behavior: contain;
   margin: 0;
-  padding: 0.75rem;
+  padding: 0.85rem 0.75rem;
   list-style: none;
   display: flex;
   flex-direction: column;
-  gap: 0.7rem;
+  gap: 0.85rem;
+  /* Scrollbar estilizada (Firefox). */
+  scrollbar-width: thin;
+  scrollbar-color: var(--gold-dim) transparent;
+}
+/* Scrollbar estilizada (WebKit/Blink): delgada, dorada al pasar. */
+.list::-webkit-scrollbar,
+.paqoLog::-webkit-scrollbar {
+  width: 8px;
+}
+.list::-webkit-scrollbar-thumb,
+.paqoLog::-webkit-scrollbar-thumb {
+  background: var(--line);
+  border-radius: var(--radius-pill);
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+.list:hover::-webkit-scrollbar-thumb,
+.paqoLog:hover::-webkit-scrollbar-thumb {
+  background: var(--gold-dim);
+  background-clip: content-box;
+}
+.list::-webkit-scrollbar-track,
+.paqoLog::-webkit-scrollbar-track {
+  background: transparent;
+}
+.paqoLog {
+  scrollbar-width: thin;
+  scrollbar-color: var(--gold-dim) transparent;
 }
 .empty {
   flex: 1 1 auto;
@@ -293,6 +398,8 @@
   display: flex;
   gap: 0.55rem;
   align-items: flex-start;
+  /* Animación de entrada (se apaga con prefers-reduced-motion, más abajo). */
+  animation: rowIn var(--dur-slow) var(--ease-brand);
 }
 .avatarCol {
   flex: 0 0 auto;
@@ -300,7 +407,7 @@
 .bubbleCol {
   display: flex;
   flex-direction: column;
-  gap: 0.15rem;
+  gap: 0.2rem;
   min-width: 0;
 }
 .author {
@@ -316,37 +423,107 @@
 .authorOracle {
   color: var(--gold-bright);
 }
+/* ✦ de Paqo delante de su nombre (distinción clara del oráculo). */
+.oracleSpark {
+  color: var(--gold-bright);
+  font-size: 0.8rem;
+  line-height: 1;
+}
 .oracleBadge {
-  font-size: 0.58rem;
+  font-size: 0.56rem;
   letter-spacing: 0.14em;
-  padding: 0.05rem 0.35rem;
+  padding: 0.05rem 0.38rem;
   border-radius: var(--radius-pill);
-  background: rgba(222, 121, 78, 0.22);
-  color: var(--terra);
+  background: rgba(227, 176, 99, 0.16);
+  border: 1px solid var(--gold-dim);
+  color: var(--gold-bright);
+}
+/* Hora discreta del mensaje: pequeña, tenue, empujada al final de la fila. */
+.time {
+  margin-left: auto;
+  padding-left: 0.5rem;
+  font-family: var(--font-display);
+  font-size: 0.58rem;
+  letter-spacing: 0.08em;
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
 }
 .bubble {
+  position: relative;
   margin: 0;
-  padding: 0.5rem 0.7rem;
+  padding: 0.55rem 0.72rem;
   border-radius: var(--radius-sm);
   background: var(--panel-hi);
   color: var(--text);
   font-size: 0.9rem;
-  line-height: 1.35;
+  line-height: 1.4;
   overflow-wrap: anywhere;
+  border: 1px solid var(--line-soft);
 }
+/* Cola de la burbuja (ajeno/Paqo: a la izquierda). */
+.bubble::before {
+  content: "";
+  position: absolute;
+  left: -4px;
+  top: 11px;
+  width: 9px;
+  height: 9px;
+  background: inherit;
+  border-left: 1px solid var(--line-soft);
+  border-bottom: 1px solid var(--line-soft);
+  border-bottom-left-radius: 2px;
+  transform: rotate(45deg);
+}
+
+/* Paqo (oráculo): borde dorado, velo cálido y cola dorada. */
 .rowOracle .bubble {
-  background: rgba(222, 121, 78, 0.14);
-  border: 1px solid rgba(222, 121, 78, 0.35);
+  background: linear-gradient(180deg, rgba(227, 176, 99, 0.13), rgba(227, 176, 99, 0.05));
+  border: 1px solid var(--gold-dim);
 }
+.rowOracle .bubble::before {
+  border-color: var(--gold-dim);
+}
+
+/* Míos: pegados a la derecha, gradiente dorado, cola a la derecha. */
 .rowMine {
   flex-direction: row-reverse;
 }
 .rowMine .bubbleCol {
   align-items: flex-end;
 }
+.rowMine .author {
+  flex-direction: row-reverse;
+}
+.rowMine .time {
+  margin-left: 0;
+  margin-right: auto;
+  padding-left: 0;
+  padding-right: 0.5rem;
+}
 .rowMine .bubble {
-  background: linear-gradient(180deg, rgba(227, 176, 99, 0.2), rgba(227, 176, 99, 0.1));
+  background: linear-gradient(180deg, rgba(227, 176, 99, 0.22), rgba(227, 176, 99, 0.1));
   border: 1px solid var(--line);
+}
+.rowMine .bubble::before {
+  left: auto;
+  right: -4px;
+  border-left: none;
+  border-bottom: none;
+  border-right: 1px solid var(--line);
+  border-top: 1px solid var(--line);
+  border-bottom-left-radius: 0;
+  border-top-right-radius: 2px;
+}
+
+@keyframes rowIn {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
 }
 
 /* Avatares */
@@ -355,8 +532,8 @@
   height: 34px;
   border-radius: 50%;
   object-fit: cover;
-  border: 2px solid #de794e;
-  box-shadow: 0 0 12px rgba(222, 121, 78, 0.5);
+  border: 2px solid var(--gold);
+  box-shadow: 0 0 12px var(--glow);
 }
 .oracleGlyph {
   display: grid;
@@ -585,43 +762,62 @@
   pointer-events: none;
 }
 
-/* --- Móvil: a la derecha; el joystick vive en la mitad izquierda ------------ */
-@media (max-width: 640px) {
-  /* Colapsado: el launcher, en la esquina inferior DERECHA (joystick libre). */
+/* --- MÓVIL / TÁCTIL: puntero grueso O pantalla estrecha (problema 8) --------- */
+@media (pointer: coarse), (max-width: 640px) {
+  /* Launcher colapsado en la esquina inferior derecha, con áreas seguras. */
   .launcher {
-    right: 14px;
-    bottom: 14px;
+    right: calc(14px + env(safe-area-inset-right));
+    bottom: calc(14px + env(safe-area-inset-bottom));
+    min-height: 44px; /* área táctil ≥44px (WCAG 2.5.5) */
   }
   .disabledNote {
-    right: 14px;
-    bottom: 14px;
+    right: calc(14px + env(safe-area-inset-right));
+    bottom: calc(14px + env(safe-area-inset-bottom));
   }
-  /* Columna: ancho cómodo a la derecha que NO tapa el joystick izquierdo. */
-  .dockColumn {
-    width: min(78vw, 340px);
-    padding-top: 60px;
-  }
-  /* Flotante: hoja compacta que se puede arrastrar. */
-  .dockFloating {
-    width: min(84vw, 380px);
-    height: min(60vh, 460px);
-  }
-  /* Áreas táctiles ≥44px (WCAG 2.5.5) en el HUD de chat. */
+
+  /* Áreas táctiles ≥44px en TODOS los controles del HUD de chat (problema 6). */
   .iconBtn {
     width: 44px;
     height: 44px;
   }
+  .tab {
+    min-height: 44px;
+  }
+  .nameChip {
+    min-height: 44px;
+    max-width: 6.5rem;
+  }
+  .voiceHint {
+    min-height: 44px;
+  }
   .sendBtn {
     min-height: 44px;
+  }
+  /* Inputs a 16px: evita el zoom automático de iOS al enfocar (problema 1). */
+  .input {
+    font-size: 16px;
+    min-height: 44px;
+  }
+
+  /* El composer respeta el área segura inferior cuando la hoja llega al borde. */
+  .composer {
+    padding-bottom: max(0.55rem, env(safe-area-inset-bottom));
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
   .dock,
+  .sheet,
   .launcher,
   .sendBtn,
-  .caret {
+  .caret,
+  .row {
     animation: none;
+  }
+  .dock,
+  .sheet,
+  .launcher,
+  .sendBtn {
     transition: none;
   }
 }

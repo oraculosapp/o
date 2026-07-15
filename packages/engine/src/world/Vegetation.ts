@@ -86,6 +86,15 @@ export class Vegetation {
   private grassCounts: number[] = [];
   private counts: Record<string, number> = {};
 
+  /**
+   * [EQUIPO TIERRA] Copas pisables. Cada copa es un disco horizontal (centro
+   * x,z + `reachSq` = (radio·0.8)²) a la cota `topY` (donde se posan los pies).
+   * Lo llena buildTrees; lo consulta platformHeightAt (una vez por frame).
+   */
+  private canopies: { x: number; z: number; topY: number; reachSq: number }[] = [];
+  /** Fracción del radio de copa donde el jugador aún se posa (diagnóstico: 0.8). */
+  private static readonly CANOPY_REACH = 0.8;
+
   private readonly excludeRadius = 5; // u libres alrededor del tótem (origen)
   /** Pendiente máxima (rad) donde aún se planta pasto alto (~40°). */
   private static readonly MAX_GRASS_SLOPE = THREE.MathUtils.degToRad(40);
@@ -148,6 +157,23 @@ export class Vegetation {
    */
   setWindScale(s: number): void {
     this.windScale.value = s;
+  }
+
+  /**
+   * Top Y de la plataforma pisable (copa de árbol) en (x,z), o null si no hay.
+   * Devuelve la cota MÁS ALTA de las copas cuyo disco (radio·0.8) cubre el punto
+   * — así, encaramado a un cluster de copas, gana la más alta pisable. Recorrido
+   * lineal sobre ~220 copas: trivial por frame.
+   */
+  platformHeightAt(x: number, z: number): number | null {
+    let best: number | null = null;
+    for (let i = 0; i < this.canopies.length; i++) {
+      const c = this.canopies[i];
+      const dx = x - c.x;
+      const dz = z - c.z;
+      if (dx * dx + dz * dz < c.reachSq && (best === null || c.topY > best)) best = c.topY;
+    }
+    return best;
   }
 
   // ---- helpers de colocación ----
@@ -680,6 +706,14 @@ export class Vegetation {
     const tp = this.preset.vegetation?.trees;
     const treeCount = Math.round(TREE_COUNT * (tp?.density ?? 0.35));
     const maxTreeSlope = THREE.MathUtils.degToRad(45);
+    this.canopies.length = 0; // se reconstruye el índice de copas pisables
+
+    // Escalonado de copas para PLATAFORMEO (copa baja → media → alta). TIER_RAD =
+    // desplazamiento lateral local por peldaño (más centrado arriba); TIER_W =
+    // ancho relativo de la copa (la baja, más ancha, es la mejor plataforma de
+    // entrada). Las cotas verticales se calculan acotadas al sobre del doble salto.
+    const TIER_RAD = [0.95, 0.72, 0.5];
+    const TIER_W = [1.2, 1.0, 0.82];
 
     const trunkGeo = new THREE.CylinderGeometry(0.14, 0.34, 2.6, 6, 3).toNonIndexed();
     trunkGeo.translate(0, 1.3, 0);
@@ -738,8 +772,14 @@ export class Vegetation {
       // Nada de guardianes colgando de paredes de acantilado.
       if (this.field.slopeAt(x, z) > maxTreeSlope) continue;
       const yaw = rand() * Math.PI * 2;
-      const scale = 1.4 + rand() * 1.3;
+      const scale = 1.5 + rand() * 1.4; // árboles un pelín más grandes (copas más anchas)
       const lean = 0.12 + rand() * 0.14;
+      // Cotas de copa (mundo) sobre la base del tronco, ACOTADAS al sobre del
+      // doble salto (~3.3 u): así hasta el guardián más grande tiene una copa baja
+      // pisable desde el suelo. `climb` limita el crecimiento con la escala.
+      const climb = Math.min(scale, 1.9);
+      const tierBaseY = 2.1 + climb * 0.3; // cota de la copa BAJA (~2.6..2.67 u)
+      const tierStep = 1.35 + climb * 0.12; // salto entre peldaños (~1.5..1.58 u)
 
       // Tronco radial-vertical con leve inclinación (twist gnarled).
       this._pos.set(x, this.field.heightAt(x, z) - 0.2, z);
@@ -759,12 +799,20 @@ export class Vegetation {
       trunks.setColorAt(ti, col);
 
       for (let b = 0; b < blobsPerTree; b++) {
-        const off = new THREE.Vector3((rand() - 0.5) * 1.3, 2.4 + rand() * 1.1, (rand() - 0.5) * 1.3);
-        const bScale = (0.9 + rand() * 0.7) * scale * 0.85;
-        const worldOff = off.clone().applyQuaternion(this._q).multiplyScalar(scale * 0.6);
-        this._s.set(bScale, bScale * (0.8 + rand() * 0.3), bScale);
+        // Peldaño b en espiral alrededor del tronco: altura FIJA en mundo (dentro
+        // del sobre de salto), radio horizontal que crece con la escala del árbol.
+        const localY = tierBaseY + b * tierStep + (rand() - 0.5) * 0.25;
+        const ang = yaw + b * 2.3 + (rand() - 0.5) * 0.7;
+        const rad = (TIER_RAD[b] + rand() * 0.2) * scale * 0.62;
+        const lateral = new THREE.Vector3(Math.cos(ang) * rad, 0, Math.sin(ang) * rad).applyQuaternion(
+          this._q,
+        );
+        const center = this._pos.clone().addScaledVector(this._up, localY).add(lateral);
+        const bScale = TIER_W[b] * (0.92 + rand() * 0.2) * scale * 0.7;
+        const yScale = bScale * (0.82 + rand() * 0.24);
+        this._s.set(bScale, yScale, bScale);
         this._m.compose(
-          this._pos.clone().add(worldOff),
+          center,
           this._q.clone().multiply(
             new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), rand() * Math.PI),
           ),
@@ -774,6 +822,16 @@ export class Vegetation {
         col.copy(cLeafA).lerp(cLeafB, rand() * 0.6);
         canopy.setColorAt(ci, col);
         ci++;
+        // Registra la copa como plataforma pisable: disco de radio bScale·0.8 a una
+        // cota un poco por debajo del ápice (el jugador se hunde en la fronda). El
+        // hundimiento se acota a 0.6 u para que las copas anchas no queden altísimas.
+        const reach = bScale * Vegetation.CANOPY_REACH;
+        this.canopies.push({
+          x: center.x,
+          z: center.z,
+          topY: center.y + Math.min(yScale * 0.5, 0.6),
+          reachSq: reach * reach,
+        });
       }
 
       if (tp?.mossHang !== false && rand() < 0.6 && mi < moss.count) {

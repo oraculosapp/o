@@ -46,9 +46,10 @@
 }
 
 @media (max-width: 640px) {
+  /* Fila 1 (izquierda): mute tras Instalar, con áreas seguras. */
   .button {
-    top: 12px;
-    left: 64px;
+    top: calc(12px + env(safe-area-inset-top));
+    left: calc(64px + env(safe-area-inset-left));
     /* Área táctil ≥44px (WCAG 2.5.5) — glifo intacto a ~20px. */
     width: 44px;
     height: 44px;

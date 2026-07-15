@@ -200,11 +200,15 @@ export class BallGame {
         if (this.phase === "running") this.enterIdle();
         break;
       case "hit":
+        // Autoridad del LANZADOR: sólo él decide la posición (aleatoria) del respawn
+        // y la difunde por el flujo "ball". Aquí, en los remotos, hacemos el poof
+        // visual (chispas + flash + sonido) y puntuamos, pero NO respawneamos la
+        // pelota localmente: su nueva posición llega por reconciliación (applyBallState),
+        // evitando un doble teleport (nuestra pos aleatoria ≠ la del lanzador).
         this.scores[e.by] = (this.scores[e.by] ?? 0) + 1;
         this.triggerSpark(e.hitPos[0], e.hitPos[1], e.hitPos[2], false);
         this.flash(false);
         this.hooks.onSound("hit");
-        this.hooks.balls.respawnToHome(e.ballId, "hit");
         this.notifyChange();
         break;
       case "state":

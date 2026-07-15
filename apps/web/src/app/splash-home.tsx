@@ -162,7 +162,9 @@ export default function SplashHome() {
     }
     setEntering(true);
     storeName(clean);
-    storeAvatar({ archetype, tint: tintRef.current });
+    // El splash elige arquetipo + color; el build se conserva de la selección
+    // previa (o neutro), y se puede afinar luego en el selector del mundo.
+    storeAvatar({ archetype, build: stored?.build ?? "n", tint: tintRef.current });
     router.push("/b/paqo");
   };
 

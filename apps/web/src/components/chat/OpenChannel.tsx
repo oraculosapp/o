@@ -95,6 +95,7 @@ export function OpenChannel({ messages, name, sessionId, onSetName, onSend, auto
               content={m.content}
               isOracle={m.is_oracle}
               mine={!m.is_oracle && !!sessionId && m.user_id === sessionId}
+              createdAt={m.created_at}
             />
           ))}
         </ul>
@@ -113,7 +114,9 @@ export function OpenChannel({ messages, name, sessionId, onSetName, onSend, auto
             placeholder="¿Cómo te llamas, viajero?"
             value={nameDraft}
             maxLength={40}
-            autoFocus
+            /* Sólo autofoco cuando el chat se abrió a propósito con Enter (escritorio);
+               en móvil evita el teclado emergente al entrar (problema 3). */
+            autoFocus={autoFocusInput}
             onChange={(e) => setNameDraft(e.target.value)}
             aria-label="Tu nombre para el chat"
           />

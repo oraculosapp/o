@@ -40,14 +40,45 @@ export interface ChatDockProps {
 
 type Tab = "open" | "paqo";
 type Mode = "column" | "floating";
+/** Estado de anclaje de la hoja inferior móvil (bottom sheet). */
+type Snap = "peek" | "full";
 
 const MODE_KEY = "phy:chatMode";
 const POS_KEY = "phy:chatPos";
 const MARGIN = 12;
 
+/** Media query unificada de "móvil": puntero grueso O pantalla estrecha (problema 8). */
+const COARSE_QUERY = "(pointer: coarse), (max-width: 640px)";
+/** Fracciones de alto de la hoja (deben ir alineadas con .sheetPeek/.sheetFull en CSS). */
+const PEEK_FRACTION = 0.42;
+const FULL_FRACTION = 0.88;
+
 interface Pos {
   x: number;
   y: number;
+}
+
+/**
+ * ¿El HUD debe usar el layout móvil? Unifica puntero grueso y ancho estrecho en
+ * una sola media query (problema 8) para que JS y CSS coincidan siempre. Reactivo
+ * a rotación/cambio de dispositivo.
+ */
+function useIsMobileHud(): boolean {
+  const [mobile, setMobile] = useState(false);
+  useEffect(() => {
+    if (typeof matchMedia === "undefined") return;
+    const mq = matchMedia(COARSE_QUERY);
+    const apply = () => setMobile(mq.matches);
+    apply();
+    mq.addEventListener("change", apply);
+    return () => mq.removeEventListener("change", apply);
+  }, []);
+  return mobile;
+}
+
+/** Lectura síncrona de "móvil" para inicializar estado sin esperar al efecto. */
+function isMobileNow(): boolean {
+  return typeof matchMedia !== "undefined" && matchMedia(COARSE_QUERY).matches;
 }
 
 /** ¿El foco está en un campo de texto? (para no secuestrar Enter del juego/chat). */
@@ -106,11 +137,14 @@ function clampPos(p: Pos, w: number, h: number): Pos {
  */
 export function ChatDock({ biosphereId, getWorldNet, getWorld, voiceSlot }: ChatDockProps) {
   const configured = isSupabaseConfigured();
-  // Arranca ABIERTO como columna lateral (requisito). Escape lo colapsa al
-  // launcher; Enter lo reabre.
+  const isMobile = useIsMobileHud();
+  // En ESCRITORIO arranca abierto (columna lateral); en MÓVIL arranca COLAPSADO
+  // para no abrir el teclado al entrar (problema 3). Escape colapsa; Enter reabre.
   const [open, setOpen] = useState(true);
   const [mode, setMode] = useState<Mode>("column");
   const [pos, setPos] = useState<Pos | null>(null);
+  // Anclaje de la hoja inferior en móvil: asoma (~40%) o expandida (~85%).
+  const [snap, setSnap] = useState<Snap>("peek");
   const [tab, setTab] = useState<Tab>("open");
   const [showRegister, setShowRegister] = useState(false);
   const [autoFocusInput, setAutoFocusInput] = useState(false);
@@ -120,13 +154,18 @@ export function ChatDock({ biosphereId, getWorldNet, getWorld, voiceSlot }: Chat
   // Última posición del flotante (sin depender del closure de estado, que puede
   // ir por detrás durante el arrastre) para persistirla con exactitud al soltar.
   const posRef = useRef<Pos | null>(null);
+  // Arrastre vertical de la hoja móvil (se opera directo sobre el DOM por
+  // rendimiento; sólo se confirma el anclaje en el pointerup).
+  const sheetDragRef = useRef<{ startY: number; startH: number; moved: boolean } | null>(null);
 
-  // Restaura modo/posición del último uso (sólo cliente).
+  // Restaura modo/posición del último uso y, en móvil, colapsa al arrancar (sólo
+  // cliente). El colapso evita el teclado emergente al entrar (problema 3).
   useEffect(() => {
     setMode(loadMode());
     const p = loadPos();
     posRef.current = p;
     setPos(p);
+    if (isMobileNow()) setOpen(false);
   }, []);
 
   // Enter (foco fuera de un campo) abre el chat y enfoca el mensaje; Escape lo
@@ -148,44 +187,133 @@ export function ChatDock({ biosphereId, getWorldNet, getWorld, voiceSlot }: Chat
     return () => window.removeEventListener("keydown", onKey);
   }, [configured, open]);
 
-  // --- Empuje del viewport del juego (avatar centrado en el área visible) ------
-  const applyInset = useCallback(() => {
+  // --- Empuje del viewport del juego + chrome móvil ---------------------------
+  // Empuja el juego para centrar el avatar en el área visible y publica el alto
+  // de la hoja móvil en `--chat-sheet-h` (px) + `data-chat-sheet` en <html>, que
+  // los botones de acción (MobileControls) leen para reubicarse SIEMPRE por
+  // encima del chat (problema 4). En escritorio empuja por la derecha (columna).
+  const applyChrome = useCallback(() => {
+    const root = typeof document !== "undefined" ? document.documentElement : null;
     const world = getWorld?.();
-    if (!world?.setViewportInset) return;
+    // OJO: no extraer el método pelón (pierde el `this` del mundo).
+    const setInset = world?.setViewportInset ? world.setViewportInset.bind(world) : undefined;
+
+    if (isMobile) {
+      const vh = typeof window !== "undefined" ? window.innerHeight : 0;
+      if (open) {
+        const hPx = Math.round((snap === "full" ? FULL_FRACTION : PEEK_FRACTION) * vh);
+        root?.style.setProperty("--chat-sheet-h", `${hPx}px`);
+        if (root) root.dataset.chatSheet = snap;
+        // La hoja usa {bottom}: el avatar se recoloca en la franja visible superior
+        // (con tope al 50% para no aplastarlo al expandir). El engine lo soporta.
+        setInset?.({ right: 0, bottom: Math.min(hPx, Math.round(vh * 0.5)) });
+      } else {
+        // Colapsado: reserva sitio para el launcher (los botones quedan por encima).
+        root?.style.setProperty("--chat-sheet-h", "64px");
+        if (root) root.dataset.chatSheet = "closed";
+        setInset?.({ right: 0, bottom: 0 });
+      }
+      return;
+    }
+
+    // Escritorio: sin chrome móvil; empuje lateral en modo columna.
+    root?.style.removeProperty("--chat-sheet-h");
+    if (root) root.dataset.chatSheet = "closed";
     const right =
       open && mode === "column" && panelRef.current
         ? Math.round(panelRef.current.getBoundingClientRect().width)
         : 0;
-    world.setViewportInset({ right });
-  }, [getWorld, open, mode]);
+    setInset?.({ right, bottom: 0 });
+  }, [getWorld, isMobile, open, mode, snap]);
 
-  // Recalcula el inset al abrir/cerrar, cambiar de modo, redimensionar el panel o
-  // la ventana. Al desmontar o cerrar, libera ({right:0}).
+  // Recalcula al abrir/cerrar, cambiar de modo/anclaje, redimensionar panel o
+  // ventana. Al desmontar o cerrar, libera el empuje y limpia el chrome.
   useEffect(() => {
-    applyInset();
+    applyChrome();
     const el = panelRef.current;
-    const ro = el && typeof ResizeObserver !== "undefined" ? new ResizeObserver(applyInset) : null;
+    const ro = el && typeof ResizeObserver !== "undefined" ? new ResizeObserver(applyChrome) : null;
     if (ro && el) ro.observe(el);
-    window.addEventListener("resize", applyInset);
+    window.addEventListener("resize", applyChrome);
     return () => {
       ro?.disconnect();
-      window.removeEventListener("resize", applyInset);
+      window.removeEventListener("resize", applyChrome);
     };
-  }, [applyInset]);
+  }, [applyChrome]);
 
   useEffect(() => {
     return () => {
-      // Al desmontar el dock, no dejes el juego empujado.
-      getWorld?.()?.setViewportInset?.({ right: 0 });
+      // Al desmontar el dock, no dejes el juego empujado ni el chrome sucio.
+      getWorld?.()?.setViewportInset?.({ right: 0, bottom: 0 });
+      const root = typeof document !== "undefined" ? document.documentElement : null;
+      root?.style.removeProperty("--chat-sheet-h");
+      if (root) root.dataset.chatSheet = "closed";
     };
   }, [getWorld]);
 
   // --- Foco del chat ⇄ input del juego ----------------------------------------
   const onFocusIn = (e: React.FocusEvent) => {
-    if (isEditableTarget(e.target)) getWorld?.()?.setInputEnabled?.(false);
+    if (!isEditableTarget(e.target)) return;
+    getWorld?.()?.setInputEnabled?.(false);
+    // Al escribir en móvil, expande la hoja: máximo sitio sobre el teclado.
+    if (isMobile) setSnap("full");
   };
   const onFocusOut = (e: React.FocusEvent) => {
     if (isEditableTarget(e.target)) getWorld?.()?.setInputEnabled?.(true);
+  };
+
+  // --- Arrastre vertical de la hoja móvil (bottom sheet) ----------------------
+  // Se manipula el alto directo sobre el DOM durante el gesto (sin re-render por
+  // frame) y sólo se confirma el anclaje al soltar. Un toque limpio alterna
+  // asomar⇄expandir; arrastrar hacia abajo por debajo del umbral la colapsa.
+  const startSheetDrag = (e: React.PointerEvent) => {
+    const el = panelRef.current;
+    if (!el) return;
+    el.classList.add(styles.dragging);
+    sheetDragRef.current = {
+      startY: e.clientY,
+      startH: el.getBoundingClientRect().height,
+      moved: false,
+    };
+    try {
+      (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
+    } catch {
+      /* noop */
+    }
+  };
+  const onSheetDrag = (e: React.PointerEvent) => {
+    const d = sheetDragRef.current;
+    const el = panelRef.current;
+    if (!d || !el) return;
+    const dy = d.startY - e.clientY; // arrastrar hacia arriba agranda
+    if (Math.abs(dy) > 4) d.moved = true;
+    const vh = window.innerHeight;
+    const h = Math.min(vh * 0.92, Math.max(vh * 0.12, d.startH + dy));
+    el.style.height = `${h}px`;
+    document.documentElement.style.setProperty("--chat-sheet-h", `${Math.round(h)}px`);
+  };
+  const endSheetDrag = (e: React.PointerEvent) => {
+    const d = sheetDragRef.current;
+    const el = panelRef.current;
+    if (!d || !el) return;
+    sheetDragRef.current = null;
+    try {
+      (e.currentTarget as HTMLElement).releasePointerCapture?.(e.pointerId);
+    } catch {
+      /* noop */
+    }
+    const h = el.getBoundingClientRect().height;
+    el.classList.remove(styles.dragging);
+    el.style.height = ""; // vuelve al alto por clase (con transición)
+    const vh = window.innerHeight;
+    if (!d.moved) {
+      setSnap((s) => (s === "peek" ? "full" : "peek")); // toque: alterna
+      return;
+    }
+    if (h < vh * 0.26) {
+      setOpen(false); // arrastrada hacia abajo: colapsa al launcher
+      return;
+    }
+    setSnap(h > vh * 0.6 ? "full" : "peek");
   };
 
   // --- Arrastre del panel flotante --------------------------------------------
@@ -314,6 +442,7 @@ export function ChatDock({ biosphereId, getWorldNet, getWorld, voiceSlot }: Chat
 
   const openDock = () => {
     setAutoFocusInput(false);
+    if (isMobile) setSnap("peek"); // la hoja siempre asoma primero, sin teclado
     setOpen(true);
   };
 
@@ -334,7 +463,14 @@ export function ChatDock({ biosphereId, getWorldNet, getWorld, voiceSlot }: Chat
     );
   }
 
-  const floating = mode === "floating";
+  // En móvil el chat es una HOJA INFERIOR (bottom sheet): full-width, anclada
+  // abajo, arrastrable, con áreas seguras. En escritorio, columna o flotante.
+  const floating = !isMobile && mode === "floating";
+  const layoutClass = isMobile
+    ? `${styles.sheet} ${snap === "full" ? styles.sheetFull : styles.sheetPeek}`
+    : floating
+      ? styles.dockFloating
+      : styles.dockColumn;
   const floatStyle =
     floating && pos ? { left: `${pos.x}px`, top: `${pos.y}px` } : undefined;
 
@@ -342,19 +478,42 @@ export function ChatDock({ biosphereId, getWorldNet, getWorld, voiceSlot }: Chat
     <>
       <section
         ref={panelRef}
-        className={`${styles.dock} ${floating ? styles.dockFloating : styles.dockColumn}`}
+        className={`${styles.dock} ${layoutClass}`}
         style={floatStyle}
         role="region"
         aria-label={`Chat de la Biósfera ${biosphereId}`}
         onFocusCapture={onFocusIn}
         onBlurCapture={onFocusOut}
       >
+        {/* Asa de arrastre de la hoja móvil: tocar alterna asomar⇄expandir;
+            arrastrar la mueve y, hacia abajo, la colapsa. */}
+        {isMobile && (
+          <div
+            className={styles.grabberWrap}
+            role="button"
+            tabIndex={0}
+            aria-label={snap === "full" ? "Contraer el chat" : "Expandir el chat"}
+            onPointerDown={startSheetDrag}
+            onPointerMove={onSheetDrag}
+            onPointerUp={endSheetDrag}
+            onPointerCancel={endSheetDrag}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                setSnap((s) => (s === "peek" ? "full" : "peek"));
+              }
+            }}
+          >
+            <span className={styles.grabber} aria-hidden />
+          </div>
+        )}
+
         <header
           className={`${styles.header} ${floating ? styles.headerDraggable : ""}`}
-          onPointerDown={startDrag}
-          onPointerMove={onDrag}
-          onPointerUp={endDrag}
-          onPointerCancel={endDrag}
+          onPointerDown={floating ? startDrag : undefined}
+          onPointerMove={floating ? onDrag : undefined}
+          onPointerUp={floating ? endDrag : undefined}
+          onPointerCancel={floating ? endDrag : undefined}
         >
           <div className={styles.tabs} role="tablist" aria-label="Canales de chat" onKeyDown={onTabsKey}>
             <button
@@ -416,16 +575,19 @@ export function ChatDock({ biosphereId, getWorldNet, getWorld, voiceSlot }: Chat
 
           <div className={styles.headerRight}>
             <span className={`${styles.dot} ${statusDot}`} title={`Conexión: ${bio.status}`} aria-hidden />
-            <button
-              type="button"
-              className={styles.iconBtn}
-              onClick={() => setModePersisted(floating ? "column" : "floating")}
-              aria-label={floating ? "Anclar el chat a la columna" : "Soltar el chat (flotante)"}
-              aria-pressed={floating}
-              title={floating ? "Anclar a la columna" : "Modo flotante"}
-            >
-              {floating ? "⇥" : "⧉"}
-            </button>
+            {/* El conmutador columna/flotante no aplica a la hoja móvil. */}
+            {!isMobile && (
+              <button
+                type="button"
+                className={styles.iconBtn}
+                onClick={() => setModePersisted(floating ? "column" : "floating")}
+                aria-label={floating ? "Anclar el chat a la columna" : "Soltar el chat (flotante)"}
+                aria-pressed={floating}
+                title={floating ? "Anclar a la columna" : "Modo flotante"}
+              >
+                {floating ? "⇥" : "⧉"}
+              </button>
+            )}
             <button
               type="button"
               className={styles.iconBtn}

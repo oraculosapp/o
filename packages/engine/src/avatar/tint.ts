@@ -2,7 +2,7 @@ import * as THREE from "three";
 import { makeToonRamp } from "../util/toon";
 import type { TintZone } from "./types";
 
-const ZONES: TintZone[] = ["primary", "secondary", "hair"];
+const ZONES: TintZone[] = ["primary", "secondary", "hair", "skin", "accent"];
 
 /** Centro de hue (0..1) y ancho de banda para el enmascarado por color en modo hueMask. */
 export interface HueBand {
@@ -37,9 +37,17 @@ export class TintController {
   readonly uPrimary: THREE.IUniform<THREE.Color> = { value: new THREE.Color(1, 1, 1) };
   readonly uSecondary: THREE.IUniform<THREE.Color> = { value: new THREE.Color(1, 1, 1) };
   readonly uHair: THREE.IUniform<THREE.Color> = { value: new THREE.Color(1, 1, 1) };
+  readonly uSkin: THREE.IUniform<THREE.Color> = { value: new THREE.Color(1, 1, 1) };
+  readonly uAccent: THREE.IUniform<THREE.Color> = { value: new THREE.Color(1, 1, 1) };
 
   private uniformFor(zone: TintZone): THREE.IUniform<THREE.Color> {
-    return zone === "primary" ? this.uPrimary : zone === "secondary" ? this.uSecondary : this.uHair;
+    switch (zone) {
+      case "primary": return this.uPrimary;
+      case "secondary": return this.uSecondary;
+      case "hair": return this.uHair;
+      case "skin": return this.uSkin;
+      case "accent": return this.uAccent;
+    }
   }
 
   /** Estrategia A: tinta el material entero con el color de una zona. */

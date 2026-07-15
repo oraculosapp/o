@@ -122,6 +122,9 @@ export class Island {
     const mat = new THREE.MeshToonMaterial({ vertexColors: true, gradientMap: makeToonRamp() });
     const mesh = new THREE.Mesh(geo, mat);
     mesh.name = "island-terrain";
+    // [EQUIPO CIELO] El terreno RECIBE las sombras del sol (key DirectionalLight).
+    // MeshToonMaterial + shadow map PCF funcionan nativo (bandas cel intactas).
+    mesh.receiveShadow = true;
     return mesh;
   }
 

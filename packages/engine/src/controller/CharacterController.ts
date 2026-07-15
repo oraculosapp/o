@@ -56,11 +56,15 @@ export class CharacterController {
   // 8/s (antes 12): giros más pausados — feedback del director en S3b.
   private readonly turnRate = 8;
   private readonly slopeLimitCos = Math.cos(THREE.MathUtils.degToRad(50));
+  /** Margen (u) para posarse: pies a ≤ este valor por encima de la tapa. */
+  private static readonly LAND_GRAB = 0.35;
   private eyeHeight = 0.9;
 
   private horizVel = new THREE.Vector3(); // velocidad en XZ (mundo)
   private vertVel = 0; // velocidad en Y
   private grounded = false;
+  /** ¿El contacto actual es una copa pisable (tapa plana), no el terreno? */
+  private onPlatform = false;
   private timeSinceGround = 999;
   private timeSinceJumpReq = 999;
   private facing = new THREE.Quaternion();
@@ -73,6 +77,33 @@ export class CharacterController {
 
   /** Se dispara una vez al cruzar al vacío (el mundo hace el fundido + respawn). */
   onVoidFall: (() => void) | null = null;
+
+  /**
+   * Proveedores de altura EXTRA (plataformas pisables como copas de árbol):
+   * devuelven el top Y en (x,z) o null si ahí no hay plataforma.
+   * [EQUIPO TIERRA] integra estos proveedores en la colisión de §4.
+   */
+  private heightProviders: Array<(x: number, z: number) => number | null> = [];
+
+  /** Registra un proveedor de plataformas pisables. */
+  addHeightProvider(p: (x: number, z: number) => number | null): void {
+    this.heightProviders.push(p);
+  }
+
+  /**
+   * Cota de la copa pisable MÁS ALTA bajo (x,z) cuya tapa esté ≤ pies+LAND_GRAB
+   * (candidata a posarse — nunca una copa muy por encima que se agarraría desde
+   * abajo), o null si ninguna. El descenso (vertVel≤0) se exige en quien llama.
+   */
+  private platformTopAt(x: number, z: number, feet: number): number | null {
+    let best: number | null = null;
+    for (let i = 0; i < this.heightProviders.length; i++) {
+      const top = this.heightProviders[i](x, z);
+      if (top === null) continue;
+      if (top <= feet + CharacterController.LAND_GRAB && (best === null || top > best)) best = top;
+    }
+    return best;
+  }
 
   private avatar?: THREE.Group;
   private blob!: THREE.Mesh;
@@ -105,6 +136,7 @@ export class CharacterController {
     this.horizVel.set(0, 0, 0);
     this.vertVel = 0;
     this.grounded = true;
+    this.onPlatform = false;
     this.jumpsUsed = 0;
     this.falling = false;
     this.alignInitial();
@@ -199,7 +231,12 @@ export class CharacterController {
    */
   groundError(): number {
     const feet = this.position.y - this.eyeHeight;
-    return feet - this.island.field.heightAt(this.position.x, this.position.z);
+    // Superficie efectiva: terreno o copa pisable directamente bajo los pies
+    // (así el error es ~0 tanto en el suelo como encaramado a un árbol).
+    let surf = this.island.field.heightAt(this.position.x, this.position.z);
+    const plat = this.platformTopAt(this.position.x, this.position.z, feet);
+    if (plat !== null && plat > surf) surf = plat;
+    return feet - surf;
   }
 
   update(dt: number, intent: MoveIntent): void {
@@ -253,7 +290,8 @@ export class CharacterController {
     this.vertVel -= this.gravity * dt;
 
     // --- 2.5 Muro de pendiente (slide suave, ANTES de integrar) ---
-    if (this.grounded) {
+    // Sobre una copa (tapa plana) no hay slide: se ignora la pendiente del terreno.
+    if (this.grounded && !this.onPlatform) {
       const nrm = field.surfaceNormal(this.position.x, this.position.z, TMP.normal);
       if (nrm.y < this.slopeLimitCos) {
         // Parte horizontal de la normal apunta cuesta ABAJO → uphill = su opuesto.
@@ -271,25 +309,40 @@ export class CharacterController {
     TMP.next.addScaledVector(this.horizVel, dt);
     TMP.next.y += this.vertVel * dt;
 
-    // --- 4. Colisión con el suelo (altura analítica) o vacío fuera del filo ---
+    // --- 4. Colisión: suelo analítico + copas pisables, o vacío fuera del filo ---
+    const feet = TMP.next.y - this.eyeHeight;
     const onIsland = field.insideIsland(TMP.next.x, TMP.next.z);
+
+    // Terreno bajo los pies (o -Infinity fuera de la isla).
+    let surfaceY = -Infinity;
     if (onIsland) {
-      const surfaceY = field.heightAt(TMP.next.x, TMP.next.z);
-      const feetAbove = TMP.next.y - this.eyeHeight - surfaceY;
+      surfaceY = field.heightAt(TMP.next.x, TMP.next.z);
       field.surfaceNormal(TMP.next.x, TMP.next.z, this.groundNormal);
-      if (this.vertVel <= 0 && feetAbove <= 0.35) {
-        TMP.next.y = surfaceY + this.eyeHeight;
-        this.vertVel = 0;
-        this.grounded = true;
-        this.timeSinceGround = 0;
-        this.jumpsUsed = 0; // al aterrizar se recarga el doble salto
-      } else {
-        this.grounded = false;
-      }
     } else {
-      // Fuera de la isla: no hay suelo, se cae (money shot de isla flotante).
-      this.grounded = false;
+      // Fuera de la isla: no hay suelo (money shot de isla flotante).
       this.groundNormal.copy(UP);
+    }
+
+    // Copa pisable: SOLO al aterrizar CAYENDO (vertVel≤0); platformTopAt ya
+    // descarta las copas por encima de los pies (no se teleporta al pasar por
+    // debajo subiendo). Se queda con la más alta pisable.
+    const platformY = this.vertVel <= 0 ? this.platformTopAt(TMP.next.x, TMP.next.z, feet) : null;
+
+    // Superficie efectiva = la más alta entre terreno y copa pisable.
+    const standingOnPlatform = platformY !== null && platformY >= surfaceY;
+    const effSurface = standingOnPlatform ? (platformY as number) : surfaceY;
+
+    if (effSurface > -Infinity && this.vertVel <= 0 && feet - effSurface <= 0.35) {
+      TMP.next.y = effSurface + this.eyeHeight;
+      this.vertVel = 0;
+      this.grounded = true;
+      this.timeSinceGround = 0;
+      this.jumpsUsed = 0; // al aterrizar se recarga el doble salto
+      this.onPlatform = standingOnPlatform;
+      if (standingOnPlatform) this.groundNormal.copy(UP); // copa: tapa plana
+    } else {
+      this.grounded = false;
+      this.onPlatform = false;
     }
 
     this.position.copy(TMP.next);
@@ -368,17 +421,28 @@ export class CharacterController {
 
   private updateBlob(): void {
     const field = this.island.field;
-    if (!field.insideIsland(this.position.x, this.position.z)) {
-      (this.blob.material as THREE.MeshBasicMaterial).opacity = 0; // en el aire, sin sombra
+    const mat = this.blob.material as THREE.MeshBasicMaterial;
+    const feet = this.position.y - this.eyeHeight;
+    const onIsland = field.insideIsland(this.position.x, this.position.z);
+    // Copa pisable directamente bajo los pies: la sombra se posa en su tapa plana.
+    const plat = this.platformTopAt(this.position.x, this.position.z, feet);
+    if (!onIsland && plat === null) {
+      mat.opacity = 0; // en el aire sobre el vacío: sin sombra
       return;
     }
-    const surface = field.surfacePoint(this.position.x, this.position.z, TMP.surf);
-    const nrm = field.surfaceNormal(this.position.x, this.position.z, TMP.normal);
-    this.blob.position.copy(surface).addScaledVector(nrm, 0.05);
-    this.blob.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), nrm);
+    const terrainY = onIsland ? field.heightAt(this.position.x, this.position.z) : -Infinity;
+    if (plat !== null && plat > terrainY) {
+      TMP.surf.set(this.position.x, plat, this.position.z);
+      TMP.normal.copy(UP);
+    } else {
+      field.surfacePoint(this.position.x, this.position.z, TMP.surf);
+      field.surfaceNormal(this.position.x, this.position.z, TMP.normal);
+    }
+    this.blob.position.copy(TMP.surf).addScaledVector(TMP.normal, 0.05);
+    this.blob.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), TMP.normal);
     const airborne = THREE.MathUtils.clamp(1 - Math.abs(this.vertVel) * 0.05, 0.5, 1);
     this.blob.scale.setScalar(airborne);
-    (this.blob.material as THREE.MeshBasicMaterial).opacity = 0.5 * airborne;
+    mat.opacity = 0.5 * airborne;
   }
 
   /** Orienta el personaje para mirar hacia un punto de mundo (frente en XZ). */

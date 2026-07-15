@@ -24,14 +24,37 @@ export const WEATHER_IDS = ["pradera", "bruma", "ocaso", "cenit", "tormenta"] as
 export type WeatherId = (typeof WEATHER_IDS)[number];
 
 /**
+ * Uniforms del ShaderMaterial de la cúpula de cielo alienígena que el clima
+ * modula. Es un SUBCONJUNTO estructural: el material real tiene más uniforms
+ * (uTime, uSunDir, uSunColor, uCloudColor…) que el clima NO toca. Sólo se listan
+ * aquí los que el director interpola/escribe.
+ */
+export interface SkyUniforms {
+  /** Cénit del gradiente (scene.background lo SIGUE = mismo color). */
+  top: { value: THREE.Color };
+  /** Horizonte del gradiente. */
+  bottom: { value: THREE.Color };
+  /** Brillo del disco/halo del sol (bruma → pálido, cenit → alto, tormenta → oculto). */
+  uSunTint: { value: number };
+  /** Opacidad de las lunas (tormenta las oculta tras el cielo pizarra). */
+  uMoonOpacity: { value: number };
+  /** Cobertura/opacidad de las nubes fBm (bruma/tormenta → más; cenit → menos). */
+  uCloud: { value: number };
+  /** Intensidad de las estrellas del cénit (día luminoso → 0). */
+  uStar: { value: number };
+  /** Color de la banda de fusión del horizonte: lo SIGUE el color de fog vivo. */
+  uHorizon: { value: THREE.Color };
+}
+
+/**
  * Referencias vivas de la escena que el director de clima modula. Las provee
  * PaqoWorld al construirlo (todas apuntan a objetos ya creados en initScene/start).
  */
 export interface WeatherRefs {
   /** Escena; `scene.fog` es una `THREE.FogExp2` (color/densidad modulables). */
   scene: THREE.Scene;
-  /** Uniforms del ShaderMaterial de la cúpula de cielo (gradiente vertical). */
-  skyUniforms: { top: { value: THREE.Color }; bottom: { value: THREE.Color } };
+  /** Uniforms del ShaderMaterial de la cúpula de cielo (gradiente + sol/lunas/nubes). */
+  skyUniforms: SkyUniforms;
   /** Luz direccional key (sol): color/intensidad/ángulo. */
   keyLight: THREE.DirectionalLight;
   /** Luz hemisférica (rebote cielo/suelo). */
@@ -66,6 +89,11 @@ interface WeatherState {
   hemiIntensity: number;
   windScale: number;
   fogShellScale: number;
+  // --- cielo alienígena (skydome): magnitudes escalares del sol/lunas/nubes ---
+  sunTint: number;
+  moonOpacity: number;
+  cloud: number;
+  star: number;
 }
 
 function cloneState(s: WeatherState): WeatherState {
@@ -81,6 +109,10 @@ function cloneState(s: WeatherState): WeatherState {
     hemiIntensity: s.hemiIntensity,
     windScale: s.windScale,
     fogShellScale: s.fogShellScale,
+    sunTint: s.sunTint,
+    moonOpacity: s.moonOpacity,
+    cloud: s.cloud,
+    star: s.star,
   };
 }
 
@@ -132,6 +164,11 @@ export class WeatherDirector {
       hemiIntensity: hemiLight.intensity,
       windScale: 1,
       fogShellScale: 1,
+      // Baseline del cielo vivo (init = 1s en PaqoWorld.initScene).
+      sunTint: skyUniforms.uSunTint.value,
+      moonOpacity: skyUniforms.uMoonOpacity.value,
+      cloud: skyUniforms.uCloud.value,
+      star: skyUniforms.uStar.value,
     };
   }
 
@@ -159,6 +196,11 @@ export class WeatherDirector {
     toward(bruma.skyBottom, "#B18BC9", 0.42);
     toward(bruma.hemiSky, "#B18BC9", 0.18);
     bruma.windScale = 0.8;
+    // Cielo: sol PÁLIDO tras la bruma, más nubes, lunas apenas veladas.
+    bruma.sunTint = 0.45;
+    bruma.cloud = 1.7;
+    bruma.moonOpacity = 0.4;
+    bruma.star = 0.2;
 
     // ── ocaso: horizonte naranja más profundo, luz más cálida ─────────────
     const ocaso = from();
@@ -169,6 +211,11 @@ export class WeatherDirector {
     toward(ocaso.hemiGround, "#3E2A5E", 0.5); // suelo más morado
     toward(ocaso.fogColor, "#C79AB0", 0.18); // niebla un pelín rosada
     ocaso.windScale = 1.0;
+    // Cielo: sol bajo y cálido MUY presente; primeras estrellas y lunas visibles.
+    ocaso.sunTint = 1.2;
+    ocaso.cloud = 1.0;
+    ocaso.moonOpacity = 0.85;
+    ocaso.star = 0.5;
 
     // ── cenit: mediodía luminoso, aire limpio ─────────────────────────────
     const cenit = from();
@@ -181,6 +228,12 @@ export class WeatherDirector {
     toward(cenit.hemiSky, "#FFE6D6", 0.3);
     cenit.hemiIntensity = base.hemiIntensity * 1.12;
     cenit.windScale = 0.7;
+    // Cielo: SOL ALTO y brillante, aire limpio (pocas nubes), sin estrellas, lunas
+    // tenues bajo el mediodía.
+    cenit.sunTint = 1.5;
+    cenit.cloud = 0.5;
+    cenit.moonOpacity = 0.25;
+    cenit.star = 0.0;
 
     // ── tormenta: pizarra-púrpura amenazante pero LEGIBLE ─────────────────
     const tormenta = from();
@@ -194,6 +247,11 @@ export class WeatherDirector {
     tormenta.fogDensity = base.fogDensity * 1.5;
     tormenta.fogShellScale = 1.3;
     tormenta.windScale = 2.4;
+    // Cielo pizarra cubierto: sol OCULTO, lunas OCULTAS, nubes densas, sin estrellas.
+    tormenta.sunTint = 0.15;
+    tormenta.cloud = 2.2;
+    tormenta.moonOpacity = 0.0;
+    tormenta.star = 0.0;
 
     return { pradera, bruma, ocaso, cenit, tormenta };
   }
@@ -243,6 +301,10 @@ export class WeatherDirector {
       hemiIntensity: lerp(this.from.hemiIntensity, this.to.hemiIntensity, k),
       windScale: lerp(this.from.windScale, this.to.windScale, k),
       fogShellScale: lerp(this.from.fogShellScale, this.to.fogShellScale, k),
+      sunTint: lerp(this.from.sunTint, this.to.sunTint, k),
+      moonOpacity: lerp(this.from.moonOpacity, this.to.moonOpacity, k),
+      cloud: lerp(this.from.cloud, this.to.cloud, k),
+      star: lerp(this.from.star, this.to.star, k),
     };
   }
 
@@ -256,11 +318,19 @@ export class WeatherDirector {
     if (fog) {
       fog.color.copy(from.fogColor).lerp(to.fogColor, k);
       fog.density = lerp(from.fogDensity, to.fogDensity, k);
+      // La banda de fusión del horizonte del cielo SIGUE al color de fog vivo →
+      // costura CONTINUA entre cúpula, mar de niebla y niebla exp2.
+      skyUniforms.uHorizon.value.copy(fog.color);
     }
 
     // Cielo (uniforms mutados in place → el shader lee el nuevo valor).
     skyUniforms.top.value.copy(from.skyTop).lerp(to.skyTop, k);
     skyUniforms.bottom.value.copy(from.skyBottom).lerp(to.skyBottom, k);
+    // Sol/lunas/nubes/estrellas del skydome alienígena.
+    skyUniforms.uSunTint.value = lerp(from.sunTint, to.sunTint, k);
+    skyUniforms.uMoonOpacity.value = lerp(from.moonOpacity, to.moonOpacity, k);
+    skyUniforms.uCloud.value = lerp(from.cloud, to.cloud, k);
+    skyUniforms.uStar.value = lerp(from.star, to.star, k);
 
     // scene.background SIGUE al top del cielo (mismo color).
     const bg = scene.background as THREE.Color | null;

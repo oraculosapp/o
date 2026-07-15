@@ -216,11 +216,16 @@
   }
 }
 
-/* En móvil, baja la tarjeta un pelín y estréchala para no tapar el clúster. */
+/* En móvil, baja la tarjeta un pelín y estréchala para no tapar el clúster.
+   Respeta el área segura superior (notch/status bar) — sólo reacomodo de posición. */
 @media (max-width: 560px) {
   .card {
+    top: calc(16px + env(safe-area-inset-top));
     min-width: 150px;
     padding: 0.6rem 0.7rem 0.5rem;
+  }
+  .banner {
+    top: calc(20px + env(safe-area-inset-top));
   }
   .clock {
     font-size: 1.45rem;

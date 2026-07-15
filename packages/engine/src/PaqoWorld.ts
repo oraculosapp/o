@@ -66,9 +66,41 @@ export class PaqoWorld {
   private bloom!: BloomComposer;
 
   // Referencias de la escena promovidas a campos para que las module el clima.
-  private skyUniforms!: { top: { value: THREE.Color }; bottom: { value: THREE.Color } };
+  // El skydome alienígena expone gradiente (top/bottom) + sol + lunas + nubes +
+  // estrellas + banda de horizonte. El clima (Weather) sólo modula un subconjunto
+  // (ver SkyUniforms); el resto son estáticos (dir/color del sol, color de nube…).
+  private skyUniforms!: {
+    top: { value: THREE.Color };
+    bottom: { value: THREE.Color };
+    uTime: { value: number };
+    uSunDir: { value: THREE.Vector3 };
+    uSunColor: { value: THREE.Color };
+    uSunTint: { value: number };
+    uMoonOpacity: { value: number };
+    uCloud: { value: number };
+    uCloudColor: { value: THREE.Color };
+    uStar: { value: number };
+    uHorizon: { value: THREE.Color };
+  };
   private keyLight!: THREE.DirectionalLight;
   private hemiLight!: THREE.HemisphereLight;
+
+  // ─── KNOBS de sombras (equipo Cielo, documentados) ───────────────────────────
+  /** Resolución del shadow map (px). 1024 = nítido y barato en Intel UHD. */
+  private static readonly SHADOW_MAP_SIZE = 1024;
+  /** Semiancho (u) de la cámara orto de sombra, centrada en el área jugable. */
+  private static readonly SHADOW_HALF = 35;
+  /** Near/Far de la cámara orto (u desde el sol; origen ≈ a 156 u de (80,120,60)). */
+  private static readonly SHADOW_NEAR = 80;
+  private static readonly SHADOW_FAR = 260;
+  /** Depth bias contra shadow-acne (low-poly toon = acné fácil). */
+  private static readonly SHADOW_BIAS = -0.0006;
+  /** Normal bias (u): empuja la muestra por la normal — clave en caras planas grandes. */
+  private static readonly SHADOW_NORMAL_BIAS = 0.12;
+  /** Tope de instancias para proyectar sombra: InstancedMesh con menos que esto
+   *  (árboles/copas/rocas/menhires/matas/helechos/flores) castea; los anillos de
+   *  pasto (miles) NO, para no saturar el shadow map. */
+  private static readonly SHADOW_INSTANCE_MAX = 400;
 
   /** Director de clima (fog/cielo/luces/viento). Disponible tras start(). */
   private weather!: WeatherDirector;
@@ -131,6 +163,7 @@ export class PaqoWorld {
     this.vegetation = new Vegetation(this.island.field, this.preset, this.spawnPos);
     this.vegetation.build();
     this.vegetation.addTo(this.scene);
+    this.enableVegetationShadows();
 
     // Agua RETIRADA (S5): la laguna/arroyo/cascada se eliminaron de la escena.
 
@@ -154,11 +187,15 @@ export class PaqoWorld {
     this.rig = new TestDummy();
     this.controller = new CharacterController(this.island, this.spawnPos, this.rig);
     this.controller.onVoidFall = () => this.beginFall();
+    // [EQUIPO TIERRA] copas de árbol pisables: la vegetación aporta alturas extra.
+    this.controller.addHeightProvider((x, z) => this.vegetation.platformHeightAt(x, z));
     this.controller.addTo(this.scene);
+    this.enableAvatarShadows();
     this.controller.faceToward(this.rune.position);
     if (this.avatarConfig) this.setAvatar(this.avatarConfig);
 
-    this.follow = new FollowCamera(this.camera, this.controller);
+    // La cámara recibe el campo de altura para el clamp anti-suelo al mirar arriba.
+    this.follow = new FollowCamera(this.camera, this.controller, this.island.field);
     this.follow.snapBehind();
 
     // Accesibilidad: respeta prefers-reduced-motion (y el override de UI por
@@ -236,7 +273,10 @@ export class PaqoWorld {
       .load(this.scene)
       .catch(() => undefined)
       .finally(() => {
-        if (!this.disposed) this.renderer.compile(this.scene, this.camera);
+        if (!this.disposed) {
+          this.enableTotemShadows();
+          this.renderer.compile(this.scene, this.camera);
+        }
         this.onReady?.();
       });
   }
@@ -262,6 +302,7 @@ export class PaqoWorld {
         const rig = buildArchetype(cfg.archetype);
         this.controller.setRig(rig);
         if (colors) rig.setTint(colors);
+        this.enableAvatarShadows(); // el rig nuevo debe proyectar sombra
         cfg.onArchetypeLoaded?.(cfg.archetype);
       } catch (err) {
         console.warn(`[avatar] no se pudo construir el arquetipo procedural ${cfg.archetype}:`, err);
@@ -280,6 +321,7 @@ export class PaqoWorld {
         }
         this.controller.setRig(rig);
         if (colors) rig.setTint(colors);
+        this.enableAvatarShadows(); // el rig nuevo debe proyectar sombra
         cfg.onArchetypeLoaded?.(url);
       })
       .catch((err) => {
@@ -378,6 +420,11 @@ export class PaqoWorld {
   private initRenderer(): void {
     this.renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    // Sombras del sol: shadow map PCF (NO PCFSoft — más barato en Intel UHD). El
+    // key DirectionalLight proyecta; el terreno recibe. Config de la cámara orto
+    // en initScene. RenderPass de pmndrs las respeta sin cambios.
+    this.renderer.shadowMap.enabled = true;
+    this.renderer.shadowMap.type = THREE.PCFShadowMap;
     const { w, h } = this.size();
     this.renderer.setSize(w, h);
     this.renderer.domElement.style.display = "block";
@@ -401,12 +448,27 @@ export class PaqoWorld {
       2000,
     );
 
-    // Cúpula de cielo (gradiente vertical del preset). Los uniforms {top,bottom}
-    // se promueven a campo para que el director de clima module el gradiente.
-    const skyGeo = new THREE.SphereGeometry(1000, 32, 16);
+    // Cúpula de cielo ALIENÍGENA (gradiente flamingo + sol + 2-3 lunas + estrellas
+    // + nubes fBm toon), todo en UN shader del domo (coste trivial). Los uniforms
+    // se promueven a campo para que el director de clima module gradiente/sol/
+    // lunas/nubes/estrellas. El sol vive en la dirección de la key light → sus glow
+    // y disco son COHERENTES con las sombras. El horizonte funde con el color de
+    // fog (uHorizon) para una costura continua con el mar de niebla.
+    const skyGeo = new THREE.SphereGeometry(1000, 48, 24);
+    // Dirección del sol = posición de la key light normalizada (véase abajo, (80,120,60)).
+    const sunDir = new THREE.Vector3(80, 120, 60).normalize();
     this.skyUniforms = {
-      top: { value: new THREE.Color(this.preset.sky.gradientTop) },
-      bottom: { value: new THREE.Color(this.preset.sky.gradientBottom) },
+      top: { value: new THREE.Color(this.preset.sky.gradientTop) }, // #F79FA8 rosa flamingo
+      bottom: { value: new THREE.Color(this.preset.sky.gradientBottom) }, // #FF9E6B naranja horizonte
+      uTime: { value: 0 },
+      uSunDir: { value: sunDir },
+      uSunColor: { value: new THREE.Color("#FFE7B0") }, // disco cálido dorado
+      uSunTint: { value: 1 },
+      uMoonOpacity: { value: 1 },
+      uCloud: { value: 1 },
+      uCloudColor: { value: new THREE.Color("#FBD9DE") }, // crema-rosa
+      uStar: { value: 1 },
+      uHorizon: { value: new THREE.Color(this.preset.fog.color) }, // banda de fusión = fog lila
     };
     const skyMat = new THREE.ShaderMaterial({
       side: THREE.BackSide,
@@ -418,10 +480,86 @@ export class PaqoWorld {
         void main() { vPos = position; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }
       `,
       fragmentShader: /* glsl */ `
-        uniform vec3 top; uniform vec3 bottom; varying vec3 vPos;
-        void main() {
-          float h = clamp(normalize(vPos).y * 0.5 + 0.5, 0.0, 1.0);
-          gl_FragColor = vec4(mix(bottom, top, h), 1.0);
+        uniform vec3 top; uniform vec3 bottom; uniform vec3 uHorizon;
+        uniform float uTime;
+        uniform vec3 uSunDir; uniform vec3 uSunColor; uniform float uSunTint;
+        uniform float uMoonOpacity;
+        uniform vec3 uCloudColor; uniform float uCloud;
+        uniform float uStar;
+        varying vec3 vPos;
+
+        float hash21(vec2 p){ p = fract(p * vec2(123.34, 345.45)); p += dot(p, p + 34.345); return fract(p.x * p.y); }
+        float vnoise(vec2 p){
+          vec2 i = floor(p), f = fract(p);
+          float a = hash21(i), b = hash21(i + vec2(1.0, 0.0));
+          float c = hash21(i + vec2(0.0, 1.0)), d = hash21(i + vec2(1.0, 1.0));
+          vec2 u = f * f * (3.0 - 2.0 * f);
+          return mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
+        }
+        float fbm(vec2 p){
+          float v = 0.0, a = 0.5;
+          for (int k = 0; k < 3; k++){ v += a * vnoise(p); p = p * 2.03 + vec2(11.1, 17.7); a *= 0.5; }
+          return v;
+        }
+        // Luna: disco toon con terminador simple (fase). 'ang' = radio angular (rad),
+        // 'phase' en [-1,1] desplaza el borde luz/sombra. Devuelve color sombreado y
+        // setea 'alpha' por el disco (para el mix contra el cielo).
+        vec3 moon(vec3 dir, vec3 mdir, vec3 mcol, float ang, float phase, out float alpha){
+          float d = dot(dir, mdir);
+          float edge = cos(ang);
+          alpha = smoothstep(edge, mix(edge, 1.0, 0.03), d);
+          if (alpha <= 0.0) return vec3(0.0);
+          vec3 t = normalize(cross(vec3(0.0, 1.0, 0.0), mdir));
+          vec3 b = cross(mdir, t);
+          vec2 lp = vec2(dot(dir, t), dot(dir, b)) / sin(ang);
+          float lit = smoothstep(phase - 0.35, phase + 0.35, lp.x);
+          return mcol * mix(0.22, 1.0, lit);
+        }
+
+        void main(){
+          vec3 dir = normalize(vPos);
+          float h = clamp(dir.y * 0.5 + 0.5, 0.0, 1.0);
+          vec3 col = mix(bottom, top, h);
+
+          // Estrellas tenues cerca del cénit (parpadeo suave).
+          float hi = smoothstep(0.45, 0.9, dir.y);
+          vec2 sc = dir.xz / (abs(dir.y) + 0.25) * 42.0;
+          float rnd = hash21(floor(sc));
+          float star = step(0.986, rnd) * (0.5 + 0.5 * sin(uTime * 1.7 + rnd * 40.0));
+          col += vec3(0.9, 0.92, 1.0) * star * hi * 0.5 * uStar;
+
+          // Lunas (detrás de las nubes): una grande rosada, una pequeña turquesa,
+          // una mediana lila. Dirección/tamaño/fase fijos; el clima sólo las funde.
+          float a1, a2, a3;
+          vec3 m1 = moon(dir, normalize(vec3(-0.55, 0.50, -0.62)), vec3(0.91, 0.66, 0.78), 0.105, -0.2, a1);
+          vec3 m2 = moon(dir, normalize(vec3( 0.60, 0.72,  0.22)), vec3(0.56, 0.88, 0.84), 0.045,  0.35, a2);
+          vec3 m3 = moon(dir, normalize(vec3( 0.12, 0.86, -0.50)), vec3(0.80, 0.72, 0.91), 0.062,  0.10, a3);
+          col = mix(col, m1, a1 * uMoonOpacity);
+          col = mix(col, m3, a3 * uMoonOpacity);
+          col = mix(col, m2, a2 * uMoonOpacity);
+
+          // Sol: halo + disco cálido en la dirección de la key light (coherente con sombras).
+          float sd = dot(dir, uSunDir);
+          float glow = pow(max(sd, 0.0), 8.0) * 0.12 + pow(max(sd, 0.0), 200.0) * 0.5;
+          col += uSunColor * glow * uSunTint;
+          float disc = smoothstep(0.9975, 0.9990, sd);
+          col = mix(col, uSunColor, disc * uSunTint);
+
+          // Nubes fBm toon (2 muestras, scroll lento), recortadas con smoothstep.
+          float up = smoothstep(-0.02, 0.22, dir.y);
+          vec2 cuv = dir.xz / max(dir.y + 0.30, 0.18);
+          float c = fbm(cuv * 1.25 + vec2(uTime * 0.006, uTime * 0.004));
+          c += 0.45 * fbm(cuv * 2.70 - vec2(uTime * 0.010, 0.0));
+          float cloud = smoothstep(0.62, 0.95, c) * up * uCloud;
+          vec3 cloudLit = mix(uCloudColor, top, 0.15) + uSunColor * glow * 0.3 * uSunTint;
+          col = mix(col, cloudLit, clamp(cloud, 0.0, 1.0));
+
+          // Banda de fusión con el horizonte (= color de fog): costura continua con
+          // el mar de niebla y el fog exp2 de la escena.
+          float band = 1.0 - smoothstep(0.0, 0.16, abs(dir.y));
+          col = mix(col, uHorizon, band * 0.9);
+
+          gl_FragColor = vec4(col, 1.0);
         }
       `,
     });
@@ -432,6 +570,21 @@ export class PaqoWorld {
     const lg = this.preset.lighting ?? {};
     this.keyLight = new THREE.DirectionalLight(new THREE.Color(lg.keyColor ?? "#FFCF8A"), lg.keyIntensity ?? 1.05);
     this.keyLight.position.set(80, 120, 60);
+    // El sol proyecta sombras sobre el área jugable. Cámara orto ±SHADOW_HALF
+    // centrada en el origen (tótem/claro); el target por defecto (0,0,0) coincide.
+    // Bias/normalBias afinados para low-poly toon (acné vs. peter-panning).
+    this.keyLight.castShadow = true;
+    this.keyLight.shadow.mapSize.set(PaqoWorld.SHADOW_MAP_SIZE, PaqoWorld.SHADOW_MAP_SIZE);
+    this.keyLight.shadow.bias = PaqoWorld.SHADOW_BIAS;
+    this.keyLight.shadow.normalBias = PaqoWorld.SHADOW_NORMAL_BIAS;
+    const sc = this.keyLight.shadow.camera;
+    sc.left = -PaqoWorld.SHADOW_HALF;
+    sc.right = PaqoWorld.SHADOW_HALF;
+    sc.top = PaqoWorld.SHADOW_HALF;
+    sc.bottom = -PaqoWorld.SHADOW_HALF;
+    sc.near = PaqoWorld.SHADOW_NEAR;
+    sc.far = PaqoWorld.SHADOW_FAR;
+    sc.updateProjectionMatrix();
     this.scene.add(this.keyLight);
     // Intensidad contenida (0.78) y rebote apenas enfriado para que el atardecer
     // bañe el valle SIN lavar el alma verde del terreno. Se promueve a campo para
@@ -442,6 +595,46 @@ export class PaqoWorld {
       lg.ambientIntensity ?? 0.78,
     );
     this.scene.add(this.hemiLight);
+  }
+
+  // ---- sombras (equipo Cielo): quién proyecta ----
+
+  /**
+   * Marca las mallas del avatar del jugador (grupo del controller, incluye el rig
+   * actual) como proyectoras de sombra. Barato y genérico: recorre el grupo, así
+   * sirve tanto al maniquí inicial como a cualquier arquetipo cargado en caliente
+   * (se re-invoca desde setAvatar). El blob-shadow del controller vive fuera de
+   * este grupo (se añade suelto a la escena), así que no se toca. No edita
+   * CharacterController.
+   */
+  private enableAvatarShadows(): void {
+    this.controller.object.traverse((o) => {
+      const m = o as THREE.Mesh;
+      if (m.isMesh) m.castShadow = true;
+    });
+  }
+
+  /**
+   * Activa castShadow en la vegetación BARATA de proyectar: cada InstancedMesh con
+   * menos de SHADOW_INSTANCE_MAX instancias (árboles/copas/rocas/menhires/matas/
+   * helechos/flores). Excluye los anillos de pasto (miles de instancias) para no
+   * saturar el shadow map. NO edita Vegetation.ts (otro equipo): recorre su group.
+   */
+  private enableVegetationShadows(): void {
+    this.vegetation.group.traverse((o) => {
+      const im = o as THREE.InstancedMesh;
+      if (im.isInstancedMesh && im.count < PaqoWorld.SHADOW_INSTANCE_MAX) {
+        im.castShadow = true;
+      }
+    });
+  }
+
+  /** Marca las mallas del tótem como proyectoras de sombra (tras cargar el GLB). */
+  private enableTotemShadows(): void {
+    this.totem?.group.traverse((o) => {
+      const m = o as THREE.Mesh;
+      if (m.isMesh) m.castShadow = true;
+    });
   }
 
   /** Anillo-runa emisivo dorado en el suelo del claro (origen), plano. */
@@ -672,6 +865,8 @@ export class PaqoWorld {
 
     this.vegetation.update(dt, t);
     this.ambientLife.update(dt, t);
+    // Scroll de las nubes / parpadeo de estrellas del skydome (una escritura/frame).
+    this.skyUniforms.uTime.value = t;
     this.weather.update(dt);
     this.game.update(dt);
     this.atmosphere.update(dt, t);

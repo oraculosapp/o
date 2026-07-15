@@ -57,6 +57,10 @@ export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
   viewportFit: "cover",
+  // El teclado virtual REDIMENSIONA el layout (no lo tapa): así el composer del
+  // chat queda siempre por encima del teclado y las alturas en `dvh` se ajustan a
+  // la ventana visible. Base del arreglo "el teclado tapa el chat" en móvil.
+  interactiveWidget: "resizes-content",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

@@ -25,9 +25,10 @@
   border-radius: 50%;
 }
 @media (max-width: 640px) {
+  /* Fila 1 (izquierda): Instalar, con áreas seguras (notch/gestos). */
   .hud {
-    top: 12px;
-    left: 12px;
+    top: calc(12px + env(safe-area-inset-top));
+    left: calc(12px + env(safe-area-inset-left));
   }
   /* Área táctil ≥44px (WCAG 2.5.5). */
   .hud .pill {

@@ -201,7 +201,7 @@ export function ProfileForm({ userId, initial, progress }: ProfileFormProps) {
             <div className={styles.avatarPreview}>
               {avatarSel ? (
                 // eslint-disable-next-line @next/next/no-img-element
-                <img src={thumbUrl(avatarSel.archetype)} alt="" className={styles.avatarThumb} />
+                <img src={thumbUrl(avatarSel.archetype, avatarSel.build)} alt="" className={styles.avatarThumb} />
               ) : (
                 <span className={styles.avatarEmpty} aria-hidden />
               )}
