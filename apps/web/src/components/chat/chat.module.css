@@ -62,15 +62,37 @@
   animation: dockIn var(--dur-slow) var(--ease-brand);
 }
 
-/* COLUMNA lateral derecha (por defecto): full-height, ~360px. El clúster del menú
+/* --- ANTI-FLASH del primer paint en móvil -----------------------------------
+   El HTML del SERVIDOR no puede saber si el visitante es móvil, así que el dock
+   nace con el default de escritorio (open=true) y un efecto lo colapsa al montar.
+   Eso pintaba el chat abierto un instante en móvil y luego lo quitaba: se veía raro.
+   Solución CSS-first, sin hydration mismatch: el markup sale con
+   `data-chat-ready="false"` (idéntico en SSR y en la hidratación) y aquí lo
+   ocultamos en punteros gruesos / pantallas estrechas hasta que el JS decida. Al
+   montar, ChatDock fija el estado real y pone `data-chat-ready="true"`.
+   · Móvil    → nunca se pinta abierto (esta regla lo tapa desde el frame 0).
+   · Escritorio → la regla NO aplica: abre desde el primer paint, sin pop.
+   La media query debe seguir ESPEJANDO a COARSE_QUERY en ChatDock.tsx. */
+@media (pointer: coarse), (max-width: 640px) {
+  .dock[data-chat-ready="false"] {
+    display: none;
+  }
+}
+
+/* COLUMNA lateral derecha (por defecto): full-height, ~330px. El clúster del menú
    vive ahora a la IZQUIERDA (el chat va a la derecha), así que NO hace falta reservar
    la franja superior de 52px que había para el HUD viejo: la cabecera del chat (tabs)
-   arranca limpia arriba, sin hueco muerto. */
+   arranca limpia arriba, sin hueco muerto.
+   ANCHO: se bajó de min(360px, 92vw) → min(330px, 88vw). En pantallas medianas el
+   92vw dejaba al juego con una rendija; 88vw le devuelve aire y 330px sigue siendo
+   holgado para las burbujas (el composer y la fila de segmentos ya envuelven solos).
+   El empuje del juego (setViewportInset) se mide con getBoundingClientRect, así que
+   sigue coherente con el ancho real sin tocar nada más. */
 .dockColumn {
   top: 0;
   right: 0;
   bottom: 0;
-  width: min(360px, 92vw);
+  width: min(330px, 88vw);
   padding-top: 0;
   border-top: none;
   border-right: none;
@@ -78,11 +100,13 @@
   border-radius: 0;
 }
 
-/* FLOTANTE: posición por inline-style (left/top), arrastrable por la cabecera. */
+/* FLOTANTE: posición por inline-style (left/top), arrastrable por la cabecera.
+   Ancho a juego con la columna (era 370px): un flotante más ancho que la columna
+   anclada se sentía descolocado al conmutar entre modos. */
 .dockFloating {
   top: 72px;
   right: 16px;
-  width: min(370px, calc(100vw - 32px));
+  width: min(340px, calc(100vw - 32px));
   /* dvh: se ajusta a la ventana visible (barra/teclado) — no queda tapado. */
   height: min(460px, calc(100dvh - 96px));
   border-radius: var(--radius);
@@ -159,15 +183,18 @@
 
 /* --- MÓVIL LANDSCAPE: PANEL LATERAL izquierdo ------------------------------
    La hoja vertical no sirve en apaisado (poca altura). En su lugar, una columna
-   IZQUIERDA angosta (~40 %), full-height y colapsable, tipo columna de escritorio
+   IZQUIERDA angosta (~38 %), full-height y colapsable, tipo columna de escritorio
    pero compacta. Empuja el juego con {left}. Áreas seguras (notch lateral/superior).
-   Se aplica por JS (isSidePanel) desde (orientation: landscape) and (pointer:coarse). */
+   Se aplica por JS (isSidePanel) desde (orientation: landscape) and (pointer:coarse).
+   ANCHO: de min(42vw, 340px) → min(38vw, 310px). En apaisado el ancho es el recurso
+   escaso (el juego se queda con el resto), así que 42vw mordía demasiado; 38vw deja
+   al mundo ~62 % y el panel sigue leyéndose bien. */
 .sidePanel {
   top: 0;
   left: 0;
   bottom: 0;
   right: auto;
-  width: min(42vw, 340px);
+  width: min(38vw, 310px);
   padding-top: env(safe-area-inset-top);
   padding-left: env(safe-area-inset-left);
   padding-bottom: env(safe-area-inset-bottom);

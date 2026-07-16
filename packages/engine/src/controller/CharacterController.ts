@@ -47,6 +47,37 @@ const FLY_BOB_W = 2 * Math.PI * 0.35;
 const FLY_BOB_AMP = 0.07;
 
 /**
+ * DESPEGUE (liftoff) — altura (u) que gana la fase automática de despegue sobre el
+ * suelo desde el que se activó el vuelo (tecla Q / botón "Volar" estando en tierra).
+ * REFERENCIA DE JULIO: el tótem de Paqo mide 8.5 u de alto (`world/Totem.ts`,
+ * `targetHeight = 8.5`, posado en el claro). El despegue debe SENTIRSE vuelo pero
+ * NO sobrepasar a Paqo: con 6 u de pies + ~1.8 u de avatar la cabeza queda ~7.8 u,
+ * por debajo de los 8.5 u de Paqo.
+ * NO es un techo de vuelo: pasada la fase, mirar arriba y avanzar sube sin límite.
+ */
+const LIFTOFF_RISE = 6;
+/**
+ * DESPEGUE — tope DURO (u) sobre el suelo de despegue: la fase nunca eleva más de
+ * esto, pase lo que pase (p.ej. un pico de `dt`). Queda por debajo de los 8.5 u de
+ * Paqo. Guarda de seguridad: con la curva normal manda `LIFTOFF_RISE` (6 u).
+ */
+const LIFTOFF_MAX_ABS = 8;
+/**
+ * DESPEGUE — velocidad vertical inicial (u/s). Un pelín por encima del salto (9.2)
+ * para que el arranque se sienta un impulso de verdad ("que salte más alto de inicio").
+ */
+const LIFTOFF_SPEED = 10;
+/**
+ * DESPEGUE — desaceleración (u/s²) de la curva EASE-OUT: rápido al inicio, se demora
+ * al llegar. Derivada de v₀²/(2·RISE) para que la subida termine EXACTAMENTE a
+ * `LIFTOFF_RISE` con velocidad 0 (movimiento uniformemente decelerado):
+ * v(restante) = √(2·DECEL·restante). Duración ≈ 2·RISE/v₀ = 1.2 s.
+ */
+const LIFTOFF_DECEL = (LIFTOFF_SPEED * LIFTOFF_SPEED) / (2 * LIFTOFF_RISE);
+/** DESPEGUE — margen (u) para dar la subida por terminada y entregar al vuelo normal. */
+const LIFTOFF_EPS = 0.02;
+
+/**
  * Character controller PLANAR de isla flotante: up constante (0,1,0), gravedad
  * -Y, anclaje al suelo ANALÍTICO (IslandField.heightAt, la misma fórmula que
  * desplaza la malla visual). Conserva TODO el game feel aprobado de la esfera
@@ -82,13 +113,14 @@ export class CharacterController {
   /** ¿En modo VUELO? (gravedad off; se mueve hacia donde mira). */
   private flying = false;
   /**
-   * Impulso vertical de despegue (u/s) al ENTRAR a vuelo desde el suelo (botón
-   * "Volar"/tecla Q). Sin él, la colisión de §4 volvería a posar al personaje en
-   * el mismo frame (pies ≈ suelo, vertVel≤0) y saldría del vuelo al instante. Con
-   * el impulso se separa del umbral de aterrizaje (~0.9 u de altura) y queda en
-   * vuelo estable. Entrar a vuelo EN EL AIRE no lo usa (ya está despegado).
+   * ¿En fase de DESPEGUE? Al entrar a vuelo DESDE EL SUELO, el controller se eleva
+   * solo con una curva ease-out hasta `LIFTOFF_RISE` u sobre el suelo de despegue y
+   * entonces entrega el control al vuelo normal. Ver {@link liftoffVertVel}.
+   * Entrar a vuelo EN EL AIRE (3er salto, Q en el aire) NO la usa: ya viene con altura.
    */
-  private readonly flyLiftoff = 6;
+  private liftoff = false;
+  /** Y de los PIES en el instante del despegue (origen de `LIFTOFF_RISE`/`MAX_ABS`). */
+  private liftoffBaseY = 0;
   /** ¿El vuelo tiene input de movimiento este frame? (para la pose del rig). */
   private flyMoving = false;
   /** Reloj del bob de flotación idle (s). */
@@ -180,6 +212,7 @@ export class CharacterController {
     this.jumpsUsed = 0;
     this.flying = false;
     this.flyMoving = false;
+    this.liftoff = false;
     this.falling = false;
     this.alignInitial();
   }
@@ -266,9 +299,10 @@ export class CharacterController {
    * móvil, tecla Q en escritorio). NO reemplaza el triple salto: ambos caminos
    * conviven (el 3er salto sigue activando el vuelo en `update` §2).
    *   · En suelo o aire y NO vuela → entra a vuelo: gravedad off, `jumpsUsed` a tope
-   *     (coherente con el 3er salto), bob reiniciado. Desde el SUELO da un impulso
-   *     de despegue (`flyLiftoff`) para no re-aterrizar en el mismo frame; en el
-   *     aire conserva su altura (vertVel a cero, como el 3er salto).
+   *     (coherente con el 3er salto), bob reiniciado. Desde el SUELO arranca la fase
+   *     de DESPEGUE (se eleva solo ~`LIFTOFF_RISE` u con ease-out: se SIENTE que vuela
+   *     y de paso no re-aterriza en el mismo frame); en el aire conserva su altura
+   *     (vertVel a cero, como el 3er salto: ya viene despegado).
    *   · Si YA vuela → sale: cae con gravedad normal desde reposo vertical.
    * Conserva TODO el vuelo actual (crucero, flotación idle, salto-en-vuelo = caer).
    */
@@ -285,12 +319,17 @@ export class CharacterController {
       this.jumpsUsed = this.maxJumps;
       this.flyBobT = 0;
       this.grounded = false;
-      // Despegue desde el suelo: impulso hacia arriba para separarse del umbral de
-      // aterrizaje. En el aire NO da tirón (parte de reposo vertical, como el 3er salto).
-      this.vertVel = wasGrounded ? this.flyLiftoff : 0;
+      // Despegue DESDE EL SUELO: fase de subida automática (§updateFly). vertVel ya
+      // arranca a LIFTOFF_SPEED — positiva, así la colisión de §4 (que exige vertVel≤0)
+      // no puede re-posarlo en el mismo frame. En el aire NO hay despegue ni tirón:
+      // parte de reposo vertical (como el 3er salto).
+      this.liftoff = wasGrounded;
+      this.liftoffBaseY = this.feetY;
+      this.vertVel = wasGrounded ? LIFTOFF_SPEED : 0;
     } else {
       this.flying = false;
       this.flyMoving = false;
+      this.liftoff = false;
       this.vertVel = 0;
     }
   }
@@ -358,6 +397,7 @@ export class CharacterController {
       if (intent.jump) {
         this.flying = false;
         this.flyMoving = false;
+        this.liftoff = false; // cancela el despegue si aún subía
         this.vertVel = 0;
         this.timeSinceJumpReq = 999;
       }
@@ -384,10 +424,12 @@ export class CharacterController {
         this.jumpsUsed = 2;
       } else {
         // TERCER salto → VUELO: gravedad off, velocidad vertical a cero, bob reiniciado.
+        // SIN fase de despegue: se activa EN EL AIRE, ya viene con la altura de dos saltos.
         this.flying = true;
         this.jumpsUsed = 3;
         this.vertVel = 0;
         this.flyBobT = 0;
+        this.liftoff = false;
       }
     }
 
@@ -449,6 +491,7 @@ export class CharacterController {
       this.jumpsUsed = 0; // al aterrizar se recarga el doble/triple salto
       this.flying = false; // aterrizar SIEMPRE sale del modo vuelo
       this.flyMoving = false;
+      this.liftoff = false;
       this.onPlatform = standingOnPlatform;
       if (standingOnPlatform) this.groundNormal.copy(UP); // copa: tapa plana
     } else {
@@ -504,6 +547,10 @@ export class CharacterController {
    * arriba y avanzar (W) sube; mirar abajo baja; el strafe queda nivelado. La
    * velocidad 3D se suaviza (flyAccel). Sin input: la velocidad decae a cero y se
    * añade un bob CON EASE, sutil (flotación idle delicada). NO hay gravedad aquí.
+   *   Excepción: durante la fase de DESPEGUE (entrada a vuelo desde el suelo) la
+   * vertical la gobierna {@link liftoffVertVel} — el suavizado de arriba la apagaría
+   * en un suspiro (objetivo 0 sin input, flyAccel 20) y el avatar apenas se despegaría.
+   * El control HORIZONTAL sigue siendo del jugador durante todo el despegue.
    */
   private updateFly(dt: number, intent: MoveIntent): void {
     TMP.desired.copy(intent.worldDir);
@@ -557,13 +604,44 @@ export class CharacterController {
     // flote se demora gentilmente arriba y abajo) → se siente un flote con ease, no
     // un balanceo mecánico. Sumamos su DERIVADA temporal exacta como velocidad:
     //   d/dt = FLY_BOB_AMP · ease'(sin φ) · cos φ · FLY_BOB_W,  ease'(u) = 1.5 − 1.5u².
-    if (!hasInput) {
+    if (this.liftoff) {
+      // DESPEGUE en curso: manda la curva (ignora bob y la vy de la mirada). El
+      // jugador SÍ conserva el control HORIZONTAL (lo de arriba no se toca).
+      // Salvedad: si pide bajar EXPLÍCITAMENTE (mira abajo y avanza), se entrega ya
+      // el control — nunca se le lleva a donde no quiere ir.
+      if (TMP.flyTarget.y < -0.5) this.liftoff = false;
+      else this.vertVel = this.liftoffVertVel(dt);
+    } else if (!hasInput) {
       this.flyBobT += dt;
       const phase = FLY_BOB_W * this.flyBobT;
       const s = Math.sin(phase);
       const easeDeriv = 1.5 - 1.5 * s * s; // ease'(u) con u = sin φ
       this.vertVel += FLY_BOB_AMP * FLY_BOB_W * easeDeriv * Math.cos(phase);
     }
+  }
+
+  /**
+   * Velocidad vertical (u/s) de la fase de DESPEGUE, y su final. Curva EASE-OUT por
+   * movimiento uniformemente decelerado: v = √(2·LIFTOFF_DECEL·restante) — sale fuerte
+   * (LIFTOFF_SPEED) y se demora al acercarse a `LIFTOFF_RISE`, donde llega con v≈0 y
+   * ENTREGA el control al vuelo normal (a partir de ahí el jugador sube cuanto quiera
+   * mirando arriba: el tope es SÓLO del despegue automático, no un techo de vuelo).
+   * Siempre devuelve v > 0 mientras dura → la colisión de §4 (exige vertVel≤0) no puede
+   * re-posar al avatar en el suelo que acaba de dejar.
+   */
+  private liftoffVertVel(dt: number): number {
+    const rise = this.feetY - this.liftoffBaseY;
+    const remaining = LIFTOFF_RISE - rise;
+    // Llegó (o el tope duro dice basta): entrega al vuelo normal.
+    if (remaining <= LIFTOFF_EPS || rise >= LIFTOFF_MAX_ABS - LIFTOFF_EPS) {
+      this.liftoff = false;
+      this.flyBobT = 0; // la flotación idle arranca limpia desde el punto neutro
+      return 0;
+    }
+    let v = Math.sqrt(2 * LIFTOFF_DECEL * remaining);
+    // Sin sobrepasar: ni el objetivo (último frame: justo lo que falta) ni el tope duro.
+    v = Math.min(v, remaining / dt, (LIFTOFF_MAX_ABS - rise) / dt);
+    return v;
   }
 
   // ---- avatar placeholder ----

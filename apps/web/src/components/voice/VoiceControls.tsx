@@ -29,12 +29,19 @@ export interface VoiceControlsProps {
   /** Nombre visible del participante. */
   displayName: string;
   /**
-   * Gating: sólo con sesión (enabled) se habilita la voz. Por defecto `true` — el
-   * padre suele montar este componente SÓLO cuando ya hay sesión (gating externo).
-   * Pásalo como `false` para mostrar el estado deshabilitado "Voz: inicia sesión"
-   * cuando NO hay sesión.
+   * Gating: sólo con sesión (enabled) se habilita la voz. Por defecto `true`.
+   * Pásalo como `false` para mostrar el estado DESHABILITADO: el botón sigue
+   * EXISTIENDO (el usuario siempre lo ve y entiende el estado) pero no conecta.
+   * OJO: con `enabled=false` el hook no abre canal ni pide micrófono — se puede
+   * montar sin sesión sin efectos secundarios (es lo que hace el chat).
    */
   enabled?: boolean;
+  /**
+   * Motivo VISIBLE del estado deshabilitado (`enabled=false`). Por defecto es
+   * transitorio ("Preparando tu voz…"); el padre puede pasar algo ACCIONABLE si
+   * sabe que la sesión falló de plano (p. ej. "recarga la página").
+   */
+  disabledReason?: string;
   /** Clase extra opcional para el contenedor (posicionamiento del slot). */
   className?: string;
   /**
@@ -50,6 +57,7 @@ export function VoiceControls({
   identity,
   displayName,
   enabled = true,
+  disabledReason = "Preparando tu voz…",
   className,
   buttonClassName,
 }: VoiceControlsProps) {
@@ -67,8 +75,10 @@ export function VoiceControls({
   const joinClass = buttonClassName ?? styles.join;
 
   // --- Gating: identidad aún no lista → mismo botón "Unirse a voz", pero
-  // deshabilitado (transitorio; todos reciben un nombre aleatorio al entrar). Sin
-  // leyendas confusas: la etiqueta es siempre la acción real.
+  // deshabilitado. El botón SIEMPRE existe (nunca desaparece en silencio: eso
+  // dejaba al usuario sin entender por qué no hay voz) y el MOTIVO se pinta
+  // debajo y se anuncia (aria-describedby + role=status). Sin leyendas confusas:
+  // la etiqueta es siempre la acción real.
   if (!enabled) {
     return (
       <div className={containerClass}>
@@ -77,11 +87,15 @@ export function VoiceControls({
           className={joinClass}
           disabled
           aria-disabled="true"
-          title="Preparando tu voz…"
+          aria-describedby={statusId}
+          title={disabledReason}
         >
           <MicGlyph muted />
           <span>Unirse a voz</span>
         </button>
+        <p id={statusId} className={styles.status} role="status" aria-live="polite">
+          {disabledReason}
+        </p>
       </div>
     );
   }

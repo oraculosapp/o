@@ -39,12 +39,12 @@ function useIsTouch(): boolean {
  *   · ACCIÓN (siempre visible) → contextual:
  *       - cerca de pelota agarrable → "Tomar"; con pelota en mano → "Lanzar"
  *         (world.input.pressGrab());
- *       - lejos de pelotas → "Dibuja" (toggle: encendido = dorado; vuelve a picar
+ *       - lejos de pelotas → "Dibujar" (toggle: encendido = dorado; vuelve a picar
  *         para apagar) → world.setDrawing.
  *   · VOLAR (toggle) → world.input.pressFly(); alterna el modo vuelo (entrada
  *     alternativa al triple salto). Encendido (dorado) mientras vuela; tocarlo de
  *     nuevo = bajar. Va ARRIBA de Correr, en su misma columna.
- *   · CORRER (toggle, como Dibuja) → world.input.pressRun(); un toque enciende y se
+ *   · CORRER (toggle, como Dibujar) → world.input.pressRun(); un toque enciende y se
  *     queda (dorado); otro toque apaga.
  *   · SALTAR → world.input.pressJump(); el triple toque encadena al VUELO y, en
  *     vuelo, la etiqueta pasa a "Caer" (misma acción: pulsar salto cae).
@@ -92,7 +92,7 @@ export function MobileControls({ getWorld }: MobileControlsProps) {
 
   const pressJump = () => getWorld?.()?.input?.pressJump?.();
   const pressFly = () => getWorld?.()?.input?.pressFly?.();
-  // Correr en TOGGLE (como Dibuja): un toque enciende y se queda; otro toque apaga.
+  // Correr en TOGGLE (como Dibujar): un toque enciende y se queda; otro toque apaga.
   // El estado "corriendo" se refleja localmente (dorado + aria-pressed).
   const toggleRun = () => {
     getWorld?.()?.input?.pressRun?.();
@@ -111,9 +111,10 @@ export function MobileControls({ getWorld }: MobileControlsProps) {
     setDrawing(next);
   };
 
-  // Etiqueta contextual del botón de acción.
-  const actionLabel = state.holding ? "Lanzar" : state.canGrab ? "Tomar" : "Dibuja";
-  const drawingOn = actionLabel === "Dibuja" && drawing;
+  // Etiqueta contextual del botón de acción (en infinitivo, como el resto del mando:
+  // Volar · Correr · Saltar · Tomar · Lanzar · Dibujar).
+  const actionLabel = state.holding ? "Lanzar" : state.canGrab ? "Tomar" : "Dibujar";
+  const drawingOn = actionLabel === "Dibujar" && drawing;
   const jumpLabel = state.flying ? "Caer" : "Saltar";
 
   return (

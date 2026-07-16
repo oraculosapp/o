@@ -90,12 +90,24 @@
   color: #cfe0ff;
 }
 
-/* Acción (Tomar/Lanzar/Dibuja): siempre visible, encabeza el clúster. ~15% más chico
-   (76→64). */
+/* Acción (Tomar/Lanzar/Dibujar): siempre visible, encabeza el clúster. Mismo tamaño
+   y tipografía que Volar/Correr (56px / 0.6rem): los tres son SATÉLITES de Saltar
+   (64px), que es el principal.
+
+   El margen negativo lo BAJA hasta cerrar el anillo alrededor de Saltar sin mover
+   Volar/Correr (que ya están bien). Geometría resultante, con el origen en el centro
+   de Saltar (56px de satélite, 64px de Saltar, gap 0.7rem = 11.2px):
+     · Correr  → radio 71px, ~183° (a la izquierda)
+     · Volar   → radio 95px, ~138° (arriba-izquierda)
+     · Dibujar → radio 95px,  ~93° (arriba)  ← antes: radio 130px, muy lejos
+   Es decir, un arco de pasos ~45° y radio parejo arriba. El solape vertical con la
+   columna Volar/Correr es sólo de caja: horizontalmente quedan a 19px (centros a
+   82px, con 56px de diámetro → 26px de aire), así que no se tocan. */
 .action {
-  width: 64px;
-  height: 64px;
-  font-size: 0.66rem;
+  width: 56px;
+  height: 56px;
+  font-size: 0.6rem;
+  margin-bottom: -35px;
 }
 /* Con pelota en mano → acento terracota (Lanzar). */
 .holding {
@@ -112,7 +124,7 @@
 }
 
 /* Correr y Volar: neutros de base; ~15% más chicos (56px), sobre el mínimo táctil
-   de 44px. Encendidos (toggle) resaltan en dorado sólido con halo, como Dibuja. */
+   de 44px. Encendidos (toggle) resaltan en dorado sólido con halo, como Dibujar. */
 .run,
 .fly {
   width: 56px;

@@ -173,7 +173,16 @@ export function ChatDock({ biosphereId, getWorldNet, getWorld, voiceSlot }: Chat
   const isSidePanel = isMobile && isLandscape;
   // En ESCRITORIO arranca abierto (columna lateral); en MÓVIL arranca COLAPSADO
   // para no abrir el teclado al entrar (problema 3). Escape colapsa; Enter reabre.
+  // El HTML del SERVIDOR no sabe si el visitante es móvil, así que nace con el
+  // default de escritorio (abierto) y el efecto de montaje lo colapsa en móvil.
+  // Para que ese instante NO se vea (flash), `ready` empieza en false y publica
+  // `data-chat-ready="false"` en el markup: en punteros gruesos / pantallas
+  // estrechas el CSS lo OCULTA desde el primer paint (ver chat.module.css). Al
+  // montar, el efecto fija el estado real y marca ready=true. Es CSS-first a
+  // propósito: el atributo es idéntico en SSR y en la hidratación → cero mismatch,
+  // y en escritorio (donde la regla no aplica) el chat abre desde el primer paint.
   const [open, setOpen] = useState(true);
+  const [ready, setReady] = useState(false);
   const [mode, setMode] = useState<Mode>("column");
   const [pos, setPos] = useState<Pos | null>(null);
   // Anclaje de la hoja inferior en móvil: asoma (~40%) o expandida (~85%).
@@ -193,12 +202,17 @@ export function ChatDock({ biosphereId, getWorldNet, getWorld, voiceSlot }: Chat
 
   // Restaura modo/posición del último uso y, en móvil, colapsa al arrancar (sólo
   // cliente). El colapso evita el teclado emergente al entrar (problema 3).
+  // `setReady(true)` va al final: hasta aquí el CSS mantiene el dock oculto en
+  // móvil, así que el colapso ocurre SIN que se llegue a pintar abierto. Los tres
+  // setState se agrupan en un solo re-render (batching), de modo que móvil pasa de
+  // "oculto por CSS" a "cerrado" sin ningún frame intermedio visible.
   useEffect(() => {
     setMode(loadMode());
     const p = loadPos();
     posRef.current = p;
     setPos(p);
     if (isMobileNow()) setOpen(false);
+    setReady(true);
   }, []);
 
   // Enter (foco fuera de un campo) abre el chat y enfoca el mensaje; Escape lo
@@ -525,6 +539,13 @@ export function ChatDock({ biosphereId, getWorldNet, getWorld, voiceSlot }: Chat
 
   // La voz sólo se habilita si el viajero ya se identificó (nombre + sesión).
   const hasSession = Boolean(bio.sessionId && bio.name);
+  // Motivo del estado deshabilitado. Si la sesión falló DE PLANO (el login anónimo
+  // agotó sus reintentos → status "error" sin sessionId), el mensaje es ACCIONABLE;
+  // si todavía se está negociando, es transitorio.
+  const voiceDisabledReason =
+    bio.status === "error" && !bio.sessionId
+      ? "No pudimos preparar tu sesión · recarga la página"
+      : "Preparando tu voz…";
 
   // Colapsado: NO hay launcher flotante. El chat se abre desde el botón de CHAT del
   // menú superior (evento "phy:toggle-chat") o con Enter. Aquí no se pinta nada.
@@ -552,6 +573,9 @@ export function ChatDock({ biosphereId, getWorldNet, getWorld, voiceSlot }: Chat
         ref={panelRef}
         className={`${styles.dock} ${layoutClass}`}
         style={floatStyle}
+        // Anti-flash móvil: mientras sea "false" (SSR + primer render del cliente,
+        // idéntico → sin mismatch) el CSS lo oculta en punteros gruesos.
+        data-chat-ready={ready ? "true" : "false"}
         role="region"
         aria-label={`Chat de la Biósfera ${biosphereId}`}
         onFocusCapture={onFocusIn}
@@ -606,19 +630,25 @@ export function ChatDock({ biosphereId, getWorldNet, getWorld, voiceSlot }: Chat
             {/* Controles de VOZ, en la MISMA fila que los tabs. Si el orquestador
                 inyecta un voiceSlot, tiene prioridad; si no, el chat monta
                 VoiceControls con la identidad de useBiosphere y le pasa `.segment`
-                para que "Unirse a voz" luzca IGUAL que los tabs. Mientras la sesión
-                se prepara, se muestra deshabilitado (enabled={hasSession}). */}
+                para que "Unirse a voz" luzca IGUAL que los tabs.
+                SIEMPRE se monta, TAMBIÉN sin sesión: antes iba tras un
+                `bio.sessionId ? … : null` y, si la sesión no llegaba (típico del
+                login anónimo con captcha), el slot quedaba VACÍO y el botón no
+                existía — el usuario no veía voz alguna ni sabía por qué. Ahora el
+                botón siempre está: sin sesión sale DESHABILITADO con su motivo
+                (`enabled=false` no pide micro ni abre señalización, así que montarlo
+                sin identidad es inerte). */}
             <div className={styles.voiceSlot}>
-              {voiceSlot ??
-                (bio.sessionId ? (
-                  <VoiceControls
-                    biosphereId={biosphereId}
-                    identity={bio.sessionId}
-                    displayName={bio.name ?? "Viajero"}
-                    enabled={hasSession}
-                    buttonClassName={styles.segment}
-                  />
-                ) : null)}
+              {voiceSlot ?? (
+                <VoiceControls
+                  biosphereId={biosphereId}
+                  identity={bio.sessionId ?? ""}
+                  displayName={bio.name ?? "Viajero"}
+                  enabled={hasSession}
+                  disabledReason={voiceDisabledReason}
+                  buttonClassName={styles.segment}
+                />
+              )}
             </div>
           </div>
 
