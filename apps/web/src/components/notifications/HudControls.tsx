@@ -50,9 +50,18 @@ export function HudControls({
 }
 
 /**
- * Retrato circular del avatar actual: la miniatura del arquetipo elegido; si no
- * carga (o aún no hay elección), un disco con el tinte del viajero (dummy). Así
- * este botón NO se confunde con la silueta genérica de "Perfil".
+ * Retrato circular del avatar actual: la miniatura "nube" TEÑIDA con el color
+ * elegido del viajero, para que el iconito muestre TU color (igual que el avatar
+ * en el mundo) y NO se confunda con la silueta genérica de "Perfil".
+ *
+ * El tinte se aplica en vivo: `tint` es el color ACTUAL (page.tsx pasa
+ * `avatarSel.color` del store {design, color}; al aplicar un color nuevo en el
+ * picker, `onApplyAvatar` re-renderiza y el retrato se re-tiñe solo).
+ *
+ * Técnica: la miniatura es una figura casi-blanca sobre fondo blanco (sin alfa),
+ * así que una capa de color en `mix-blend-mode: multiply` sobre la imagen la
+ * recolorea conservando su forma/sombreado (blanco×color = color; sombras×color =
+ * color más oscuro). Si la imagen no carga, cae a un disco liso con el tinte.
  */
 function AvatarPortrait({ thumbUrl, tint }: { thumbUrl?: string | null; tint?: string | null }) {
   const [broken, setBroken] = useState(false);
@@ -64,14 +73,18 @@ function AvatarPortrait({ thumbUrl, tint }: { thumbUrl?: string | null; tint?: s
 
   if (thumbUrl && !broken) {
     return (
-      // eslint-disable-next-line @next/next/no-img-element
-      <img
-        src={thumbUrl}
-        alt=""
-        aria-hidden
-        className={styles.avatarPortrait}
-        onError={() => setBroken(true)}
-      />
+      <span className={styles.avatarPortraitWrap} aria-hidden>
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src={thumbUrl}
+          alt=""
+          className={styles.avatarPortrait}
+          onError={() => setBroken(true)}
+        />
+        {tint && (
+          <span className={styles.avatarTintLayer} style={{ background: tint }} aria-hidden />
+        )}
+      </span>
     );
   }
   return (

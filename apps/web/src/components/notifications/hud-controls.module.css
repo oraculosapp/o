@@ -36,9 +36,21 @@
   border-color: var(--gold-dim);
 }
 
-/* El botón de avatar aloja un retrato circular a sangre; recorta el contenido. */
+/* El botón de avatar aloja un retrato circular; el glifo interno respira ~6px
+   dentro del botón (no llega a sangre) dejando un aro de glass alrededor. El
+   contenido se centra vía el `place-content:center` heredado de .profileLink. */
 .avatarButton {
   padding: 0;
+  overflow: hidden;
+}
+/* Retrato = ~6px más chico que el botón (3px de aire por lado). Envuelve la
+   miniatura + su capa de tinte y las recorta al círculo. */
+.avatarPortraitWrap {
+  position: relative;
+  display: block;
+  width: calc(100% - 6px);
+  height: calc(100% - 6px);
+  border-radius: 50%;
   overflow: hidden;
 }
 .avatarPortrait {
@@ -48,10 +60,21 @@
   border-radius: 50%;
   display: block;
 }
+/* Capa de color sobre la miniatura "nube": la tiñe al color elegido del avatar
+   (multiply: blanco→color, sombras→color oscuro). Refleja el color EN VIVO (el
+   `background` inline viene del prop `tint`). */
+.avatarTintLayer {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  mix-blend-mode: multiply;
+  pointer-events: none;
+}
+/* Fallback (miniatura no carga): disco liso teñido, también ~6px más chico. */
 .avatarDummy {
   display: block;
-  width: 100%;
-  height: 100%;
+  width: calc(100% - 6px);
+  height: calc(100% - 6px);
   border-radius: 50%;
   background:
     radial-gradient(circle at 35% 30%, var(--gold-bright), var(--gold-dim));

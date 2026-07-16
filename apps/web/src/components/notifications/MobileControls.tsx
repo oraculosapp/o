@@ -46,7 +46,7 @@ function useIsTouch(): boolean {
  *     nuevo = bajar. Va ARRIBA de Correr, en su misma columna.
  *   · CORRER (toggle, como Dibujar) → world.input.pressRun(); un toque enciende y se
  *     queda (dorado); otro toque apaga.
- *   · SALTAR → world.input.pressJump(); el triple toque encadena al VUELO y, en
+ *   · BRINCAR → world.input.pressJump(); el triple toque encadena al VUELO y, en
  *     vuelo, la etiqueta pasa a "Caer" (misma acción: pulsar salto cae).
  *
  * Se suscribe a `world.input.onActionState(cb)` para reflejar el estado; reintenta
@@ -112,57 +112,59 @@ export function MobileControls({ getWorld }: MobileControlsProps) {
   };
 
   // Etiqueta contextual del botón de acción (en infinitivo, como el resto del mando:
-  // Volar · Correr · Saltar · Tomar · Lanzar · Dibujar).
+  // Volar · Correr · Brincar · Tomar · Lanzar · Dibujar).
   const actionLabel = state.holding ? "Lanzar" : state.canGrab ? "Tomar" : "Dibujar";
   const drawingOn = actionLabel === "Dibujar" && drawing;
-  const jumpLabel = state.flying ? "Caer" : "Saltar";
+  // El estado en vuelo se sigue llamando "Caer"; en reposo la etiqueta es "Brincar".
+  const jumpLabel = state.flying ? "Caer" : "Brincar";
 
+  // Anillo equidistante: los 3 satélites (Dibujar/Volar/Correr, 56px) orbitan a
+  // Brincar (64px) sobre un arco del MISMO radio (90px) y paso angular uniforme
+  // (45°). Las posiciones absolutas viven en mobile-controls.module.css (.cluster
+  // + .action/.fly/.run/.jump); aquí sólo declaramos los botones como hermanos.
   return (
     <div className={styles.pad} role="group" aria-label="Controles de mando">
-      <button
-        type="button"
-        className={`${styles.btn} ${styles.action} ${state.holding ? styles.holding : ""} ${
-          drawingOn ? styles.drawingOn : ""
-        }`}
-        onPointerDown={(e) => {
-          e.preventDefault();
-          onAction();
-        }}
-        aria-label={actionLabel}
-        aria-pressed={drawingOn || undefined}
-      >
-        {actionLabel}
-      </button>
+      <div className={styles.cluster}>
+        <button
+          type="button"
+          className={`${styles.btn} ${styles.action} ${state.holding ? styles.holding : ""} ${
+            drawingOn ? styles.drawingOn : ""
+          }`}
+          onPointerDown={(e) => {
+            e.preventDefault();
+            onAction();
+          }}
+          aria-label={actionLabel}
+          aria-pressed={drawingOn || undefined}
+        >
+          {actionLabel}
+        </button>
 
-      <div className={styles.row}>
-        {/* Columna izquierda: Volar ARRIBA, Correr ABAJO. */}
-        <div className={styles.col}>
-          <button
-            type="button"
-            className={`${styles.btn} ${styles.fly} ${state.flying ? styles.flyOn : ""}`}
-            onPointerDown={(e) => {
-              e.preventDefault();
-              pressFly();
-            }}
-            aria-label="Volar"
-            aria-pressed={state.flying}
-          >
-            Volar
-          </button>
+        <button
+          type="button"
+          className={`${styles.btn} ${styles.fly} ${state.flying ? styles.flyOn : ""}`}
+          onPointerDown={(e) => {
+            e.preventDefault();
+            pressFly();
+          }}
+          aria-label="Volar"
+          aria-pressed={state.flying}
+        >
+          Volar
+        </button>
 
-          <button
-            type="button"
-            className={`${styles.btn} ${styles.run} ${running ? styles.runOn : ""}`}
-            onPointerDown={(e) => {
-              e.preventDefault();
-              toggleRun();
-            }}
-            aria-label="Correr"
-            aria-pressed={running}
-          >
-            Correr
-          </button>
-        </div>
+        <button
+          type="button"
+          className={`${styles.btn} ${styles.run} ${running ? styles.runOn : ""}`}
+          onPointerDown={(e) => {
+            e.preventDefault();
+            toggleRun();
+          }}
+          aria-label="Correr"
+          aria-pressed={running}
+        >
+          Correr
+        </button>
 
         <button
           type="button"

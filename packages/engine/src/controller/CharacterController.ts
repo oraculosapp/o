@@ -78,6 +78,17 @@ const LIFTOFF_DECEL = (LIFTOFF_SPEED * LIFTOFF_SPEED) / (2 * LIFTOFF_RISE);
 const LIFTOFF_EPS = 0.02;
 
 /**
+ * COLISIÓN — radio (u) del avatar para los colliders cilíndricos estáticos (tótem).
+ * Se suma al radio del cilindro para el push-out: la cápsula placeholder mide 0.42 u
+ * y los chibis rigged rondan ese ancho, así que ~0.45 u deja al avatar rozar el borde
+ * sin clavarse ni flotar despegado. No es la hitbox de golpe de pelota (BallGame usa
+ * su propio radio): esto es SÓLO el cuerpo del jugador contra el poste del tótem.
+ */
+const AVATAR_RADIUS = 0.45;
+/** COLISIÓN — bajo esta distancia (u²) centro y posición se consideran coincidentes. */
+const COLLIDER_EPS_SQ = 1e-8;
+
+/**
  * Character controller PLANAR de isla flotante: up constante (0,1,0), gravedad
  * -Y, anclaje al suelo ANALÍTICO (IslandField.heightAt, la misma fórmula que
  * desplaza la malla visual). Conserva TODO el game feel aprobado de la esfera
@@ -160,6 +171,73 @@ export class CharacterController {
   /** Registra un proveedor de plataformas pisables. */
   addHeightProvider(p: (x: number, z: number) => number | null): void {
     this.heightProviders.push(p);
+  }
+
+  /**
+   * Colliders CILÍNDRICOS estáticos (postes sólidos como el tótem de Paqo): el
+   * avatar no puede atravesarlos por debajo de `topY`. Mismo patrón que
+   * {@link addHeightProvider}: se acumulan en un array y §3.5 los resuelve con
+   * push-out radial (matando la velocidad hacia el centro, ver {@link resolveCylinderColliders}).
+   */
+  private cylinderColliders: Array<{ x: number; z: number; radius: number; topY: number }> = [];
+
+  /**
+   * Registra un collider cilíndrico estático. `x,z` = eje del cilindro; `radius` =
+   * su radio (u); `topY` = cota de su tapa (u mundo). Los pies por ENCIMA de `topY`
+   * pasan libres (saltar/volar por encima del tótem). El cuerpo del avatar aporta
+   * {@link AVATAR_RADIUS} extra al empujar.
+   */
+  addCylinderCollider(c: { x: number; z: number; radius: number; topY: number }): void {
+    this.cylinderColliders.push(c);
+  }
+
+  /**
+   * §3.5 COLISIÓN CILÍNDRICA — resuelve `next` (posición integrada) contra cada
+   * collider cilíndrico. Si la XZ del avatar entra en `radius + AVATAR_RADIUS` de un
+   * cilindro Y sus pies quedan por debajo de `topY`, lo EMPUJA radialmente al borde
+   * exacto y mata SÓLO la componente de velocidad que apunta hacia el centro
+   * (proyección sobre la tangente): resbalar en oblicuo se siente suave, no un muro
+   * pegajoso; empujarse hacia fuera no se penaliza. Corre igual caminando y volando
+   * (la vertical `vertVel` no se toca: saltar/volar por encima de `topY` pasa libre).
+   * Caso degenerado centro==posición: empuja en +X (dirección estable, determinista).
+   */
+  private resolveCylinderColliders(next: THREE.Vector3): void {
+    if (this.cylinderColliders.length === 0) return;
+    const feet = next.y - this.eyeHeight;
+    for (let i = 0; i < this.cylinderColliders.length; i++) {
+      const c = this.cylinderColliders[i];
+      // Por encima de la tapa: se pasa por arriba (saltar/volar sobre el tótem).
+      if (feet >= c.topY) continue;
+      const minDist = c.radius + AVATAR_RADIUS;
+      let dx = next.x - c.x;
+      let dz = next.z - c.z;
+      const distSq = dx * dx + dz * dz;
+      if (distSq >= minDist * minDist) continue; // fuera del cilindro: nada que hacer
+
+      // Normal de push-out (hacia afuera). Centro==posición → dirección estable +X.
+      let nx: number;
+      let nz: number;
+      if (distSq < COLLIDER_EPS_SQ) {
+        nx = 1;
+        nz = 0;
+      } else {
+        const dist = Math.sqrt(distSq);
+        nx = dx / dist;
+        nz = dz / dist;
+      }
+
+      // Push-out al borde exacto.
+      next.x = c.x + nx * minDist;
+      next.z = c.z + nz * minDist;
+
+      // Mata SÓLO la velocidad hacia el centro (componente normal negativa): lo que
+      // queda es la tangente → resbala suave. Empujarse hacia afuera no se toca.
+      const vn = this.horizVel.x * nx + this.horizVel.z * nz;
+      if (vn < 0) {
+        this.horizVel.x -= vn * nx;
+        this.horizVel.z -= vn * nz;
+      }
+    }
   }
 
   /**
@@ -459,6 +537,11 @@ export class CharacterController {
     TMP.next.copy(this.position);
     TMP.next.addScaledVector(this.horizVel, dt);
     TMP.next.y += this.vertVel * dt;
+
+    // --- 3.5 Colisión cilíndrica (tótem): push-out radial + resbalón tangencial ---
+    // Tras integrar XZ (caminando o volando). Empuja fuera del poste sólido; la
+    // vertical sigue libre → saltar/volar por encima de `topY` pasa sin colisión.
+    this.resolveCylinderColliders(TMP.next);
 
     // --- 4. Colisión: suelo analítico + copas pisables, o vacío fuera del filo ---
     const feet = TMP.next.y - this.eyeHeight;

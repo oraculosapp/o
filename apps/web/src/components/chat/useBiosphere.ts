@@ -7,6 +7,7 @@ import {
   type BiosphereMessage,
   type RealtimeStatus,
   type RosterMember,
+  type SessionErrorInfo,
   type WorldNetHooks,
 } from "@/lib/realtime";
 import type { WorldGameHooks } from "@/lib/world-ui";
@@ -29,9 +30,16 @@ export interface UseBiosphere {
   registered: boolean;
   sessionId: string | null;
   accessToken: string | null;
+  /**
+   * Causa AMABLE del fallo de sesión (incógnito / captcha / red / otro), o null si
+   * no ha fallado. La UI la usa para el mensaje y para ofrecer "Reintentar".
+   */
+  sessionError: SessionErrorInfo | null;
   setName(name: string): void;
   /** Publica en el chat abierto; si menciona a Paqo, dispara su respuesta pública. */
   sendPublic(text: string): Promise<void>;
+  /** Reintenta la conexión (botón "Reintentar" del estado de sesión fallida). */
+  retryConnect(): void;
 }
 
 /**
@@ -51,6 +59,7 @@ export function useBiosphere(params: {
   const [registered, setRegistered] = useState(false);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [accessToken, setAccessToken] = useState<string | null>(null);
+  const [sessionError, setSessionError] = useState<SessionErrorInfo | null>(null);
 
   const rtRef = useRef<BiosphereRealtime | null>(null);
   const seenIds = useRef<Set<string>>(new Set());
@@ -67,6 +76,23 @@ export function useBiosphere(params: {
       return next.length > MAX_MESSAGES ? next.slice(next.length - MAX_MESSAGES) : next;
     });
   }, []);
+
+  // Tras una conexión con éxito (montaje inicial O reintento manual): vuelca la
+  // identidad y el historial reciente. Compartido para que "Reintentar" recupere
+  // la sesión igual que el arranque, sin duplicar lógica.
+  const afterConnect = useCallback(
+    async (rt: BiosphereRealtime) => {
+      const id = rt.getIdentity();
+      if (id) {
+        setSessionId(id.sessionId);
+        setRegistered(id.registered);
+        setAccessToken(id.accessToken);
+      }
+      const recent = await rt.loadRecent(40);
+      for (const m of recent) pushMessage(m);
+    },
+    [pushMessage]
+  );
 
   useEffect(() => {
     // Sin Supabase no hay nada que conectar (la UI ya muestra el aviso discreto).
@@ -87,20 +113,14 @@ export function useBiosphere(params: {
       onStatus: setStatus,
       onRoster: setRoster,
       onMessage: pushMessage,
+      onSessionError: setSessionError,
     });
     rtRef.current = rt;
 
     let cancelled = false;
-    void rt.connect().then(async () => {
+    void rt.connect().then(() => {
       if (cancelled) return;
-      const id = rt.getIdentity();
-      if (id) {
-        setSessionId(id.sessionId);
-        setRegistered(id.registered);
-        setAccessToken(id.accessToken);
-      }
-      const recent = await rt.loadRecent(40);
-      for (const m of recent) pushMessage(m);
+      void afterConnect(rt);
     });
 
     return () => {
@@ -120,6 +140,15 @@ export function useBiosphere(params: {
     setNameState(clean);
     void rtRef.current?.setIdentity({ displayName: clean });
   }, []);
+
+  // Reintento manual: limpia el motivo mostrado y relanza la conexión; al terminar
+  // vuelca identidad/historial igual que el arranque (afterConnect).
+  const retryConnect = useCallback(() => {
+    const rt = rtRef.current;
+    if (!rt) return;
+    setSessionError(null);
+    void rt.retryConnect().then(() => afterConnect(rt));
+  }, [afterConnect]);
 
   const sendPublic = useCallback(
     async (text: string) => {
@@ -154,7 +183,9 @@ export function useBiosphere(params: {
     registered,
     sessionId,
     accessToken,
+    sessionError,
     setName,
     sendPublic,
+    retryConnect,
   };
 }

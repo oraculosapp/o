@@ -539,13 +539,14 @@ export function ChatDock({ biosphereId, getWorldNet, getWorld, voiceSlot }: Chat
 
   // La voz sólo se habilita si el viajero ya se identificó (nombre + sesión).
   const hasSession = Boolean(bio.sessionId && bio.name);
-  // Motivo del estado deshabilitado. Si la sesión falló DE PLANO (el login anónimo
-  // agotó sus reintentos → status "error" sin sessionId), el mensaje es ACCIONABLE;
-  // si todavía se está negociando, es transitorio.
-  const voiceDisabledReason =
-    bio.status === "error" && !bio.sessionId
-      ? "No pudimos preparar tu sesión · recarga la página"
-      : "Preparando tu voz…";
+  // ¿La sesión falló DE PLANO? (el login anónimo agotó reintentos o el
+  // almacenamiento está bloqueado → status "error" sin sessionId).
+  const sessionFailed = bio.status === "error" && !bio.sessionId;
+  // Motivo del estado deshabilitado. Si la sesión falló, mostramos la CAUSA amable
+  // (incógnito / captcha / red / otro con código); si aún se negocia, transitorio.
+  const voiceDisabledReason = sessionFailed
+    ? (bio.sessionError?.message ?? "No pudimos preparar tu sesión. Reintenta.")
+    : "Preparando tu voz…";
 
   // Colapsado: NO hay launcher flotante. El chat se abre desde el botón de CHAT del
   // menú superior (evento "phy:toggle-chat") o con Enter. Aquí no se pinta nada.
@@ -646,12 +647,21 @@ export function ChatDock({ biosphereId, getWorldNet, getWorld, voiceSlot }: Chat
                   displayName={bio.name ?? "Viajero"}
                   enabled={hasSession}
                   disabledReason={voiceDisabledReason}
+                  onRetry={sessionFailed ? bio.retryConnect : undefined}
                   buttonClassName={styles.segment}
                 />
               )}
             </div>
           </div>
 
+          {/* headerRight: SÓLO el punto de estado de conexión y, en escritorio, el
+              conmutador columna/flotante. El botón de "Cerrar/Colapsar el chat" se
+              ELIMINÓ (Julio): el chat se cierra desde el botón CHAT del menú superior
+              (evento "phy:toggle-chat"), con Escape, o —en la hoja móvil portrait—
+              arrastrando el asa hacia arriba por debajo del umbral. En el panel lateral
+              apaisado se cierra con Escape o con el botón CHAT del menú, que se dibuja
+              POR ENCIMA del panel (z-index del nav = 35 > 30 del dock), así que sigue
+              accesible sin necesidad del antiguo botón ◀. */}
           <div className={styles.headerRight}>
             <span className={`${styles.dot} ${statusDot}`} title={`Conexión: ${bio.status}`} aria-hidden />
             {/* El conmutador columna/flotante no aplica a la hoja móvil. */}
@@ -667,18 +677,6 @@ export function ChatDock({ biosphereId, getWorldNet, getWorld, voiceSlot }: Chat
                 {floating ? "⇥" : "⧉"}
               </button>
             )}
-            <button
-              type="button"
-              className={styles.iconBtn}
-              onClick={() => setOpen(false)}
-              aria-label="Colapsar el chat"
-              title="Colapsar el chat"
-            >
-              {/* Panel lateral apaisado → colapsa a la izquierda (◀). Hoja superior
-                  portrait → cuelga de arriba, colapsar = SUBIR (▴). Escritorio columna
-                  → baja (▾). Se decide por la clase/disposición activa. */}
-              {isSidePanel ? "◀" : isTopSheet ? "▴" : "▾"}
-            </button>
           </div>
         </header>
 

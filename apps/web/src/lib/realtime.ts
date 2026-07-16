@@ -113,6 +113,28 @@ export interface RosterMember {
 
 export type RealtimeStatus = "idle" | "connecting" | "live" | "error";
 
+/**
+ * Categoría AMABLE del fallo de sesión, para comunicar la CAUSA real al viajero
+ * (no un genérico "recarga la página"):
+ *   · "storage"  — el navegador bloquea localStorage/cookies (típico de modo
+ *                  incógnito): la sesión persistente de Supabase no puede vivir.
+ *   · "captcha"  — Turnstile / la verificación anti-bots de Supabase falló.
+ *   · "red"      — falló el fetch al servidor (sin conexión / red restrictiva).
+ *   · "otro"     — cualquier otro fallo; se acompaña de un código corto legible.
+ */
+export type SessionErrorCategory = "storage" | "captcha" | "red" | "otro";
+
+export interface SessionErrorInfo {
+  category: SessionErrorCategory;
+  /** Mensaje corto y accionable para pintar al viajero. */
+  message: string;
+  /**
+   * Código corto (≤80 chars) del error original — sólo en la categoría "otro",
+   * para que Julio nos lo pueda leer por teléfono al diagnosticar.
+   */
+  code?: string;
+}
+
 export interface RealtimeIdentity {
   /** id de sesión (uid de Supabase, anónimo o registrado). */
   sessionId: string;
@@ -129,6 +151,13 @@ export interface RealtimeCallbacks {
   onRoster?(members: RosterMember[]): void;
   onMessage?(msg: BiosphereMessage): void;
   onStatus?(status: RealtimeStatus): void;
+  /**
+   * La sesión falló DE PLANO (tras agotar reintentos o por almacenamiento
+   * bloqueado). Llega junto con `onStatus("error")` y trae la causa AMABLE para
+   * que la UI muestre qué pasó (incógnito / captcha / red / otro) y ofrezca
+   * "Reintentar". Se limpia (no se re-emite) en un reintento con éxito.
+   */
+  onSessionError?(info: SessionErrorInfo): void;
 }
 
 export interface BiosphereRealtimeOptions extends RealtimeCallbacks {
@@ -179,6 +208,89 @@ function safeArchetype(id: string | undefined): string | undefined {
 /** ¿Están las env vars públicas de Supabase presentes? (decide si hay chat). */
 export function isSupabaseConfigured(): boolean {
   return Boolean(process.env.NEXT_PUBLIC_SUPABASE_URL && process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY);
+}
+
+// --- Diagnóstico de la causa del fallo de sesión -----------------------------
+
+/** Extrae el `.message` de un error-like (Error / string / objeto) de forma segura. */
+function errorMessage(err: unknown): string {
+  if (err instanceof Error) return err.message;
+  if (typeof err === "string") return err;
+  if (err && typeof err === "object" && "message" in err) {
+    const m = (err as { message: unknown }).message;
+    if (typeof m === "string") return m;
+  }
+  return "";
+}
+
+/**
+ * ¿El navegador permite el almacenamiento que Supabase necesita? Comprueba
+ * `navigator.cookieEnabled` y un ciclo real `setItem/removeItem` de localStorage
+ * (donde vive la sesión persistente). En incógnito / almacenamiento restringido
+ * esto falla o lanza → devolvemos false y atajamos con un motivo claro ANTES de
+ * gastar reintentos de red. Robusto ante navegadores que LANZAN al mero acceder
+ * a `localStorage` (todo va en try/catch).
+ */
+export function storageHealthy(): boolean {
+  try {
+    if (typeof navigator !== "undefined" && navigator.cookieEnabled === false) {
+      return false;
+    }
+  } catch {
+    return false;
+  }
+  try {
+    if (typeof localStorage === "undefined") return false;
+    const probe = "__phy_storage_probe__";
+    localStorage.setItem(probe, "1");
+    localStorage.removeItem(probe);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Motivo fijo cuando el almacenamiento está bloqueado (incógnito): accionable. */
+export const STORAGE_SESSION_ERROR: SessionErrorInfo = {
+  category: "storage",
+  message:
+    "Tu navegador está bloqueando el almacenamiento (¿modo incógnito?). " +
+    "Abre o.oraculos.app en una pestaña normal para jugar con los demás.",
+};
+
+/** Clasifica un error de sesión en una de las categorías amables (sin "storage"). */
+function categorizeSessionError(err: unknown): Exclude<SessionErrorCategory, "storage"> {
+  const msg = errorMessage(err).toLowerCase();
+  if (/captcha|turnstile/.test(msg)) return "captcha";
+  // Fallos de fetch/red: TypeError "Failed to fetch", AuthRetryableFetchError,
+  // "NetworkError", "network request failed", etc.
+  if (/failed to fetch|networkerror|network request|network error|fetch\b|econn|timeout/.test(msg)) {
+    return "red";
+  }
+  return "otro";
+}
+
+/**
+ * Traduce un error de sesión en un {@link SessionErrorInfo} con la causa AMABLE.
+ * Función PURA (sin DOM ni red) → se testea en node. El caso "storage" no pasa por
+ * aquí: se detecta antes con {@link storageHealthy} → {@link STORAGE_SESSION_ERROR}.
+ */
+export function describeSessionError(err: unknown): SessionErrorInfo {
+  const category = categorizeSessionError(err);
+  if (category === "captcha") {
+    return { category, message: "La verificación anti-bots no pudo completarse. Reintenta." };
+  }
+  if (category === "red") {
+    return { category, message: "Sin conexión con el servidor. Reintenta." };
+  }
+  const code = errorMessage(err).replace(/\s+/g, " ").trim().slice(0, 80);
+  return {
+    category: "otro",
+    message: code
+      ? `No pudimos preparar tu sesión. Reintenta. (${code})`
+      : "No pudimos preparar tu sesión. Reintenta.",
+    code: code || undefined,
+  };
 }
 
 interface PosPayload {
@@ -322,6 +434,8 @@ export class BiosphereRealtime {
   private onVisibility: (() => void) | null = null;
   /** Sólo se permite UN reintento extra por visibilitychange (no reencolar). */
   private visibilityRetryUsed = false;
+  /** Último motivo del fallo de sesión (para exponerlo y para el botón Reintentar). */
+  private lastSessionError: SessionErrorInfo | null = null;
 
   constructor(private readonly opts: BiosphereRealtimeOptions) {}
 
@@ -329,20 +443,65 @@ export class BiosphereRealtime {
     return this.identity;
   }
 
+  /** Último motivo del fallo de sesión, o null si no ha fallado (aún). */
+  getSessionError(): SessionErrorInfo | null {
+    return this.lastSessionError;
+  }
+
   /** Arranca sesión + canal. Idempotente: reconectar tras dispose crea uno nuevo. */
   async connect(): Promise<void> {
     if (this.disposed || this.identity) return;
     this.opts.onStatus?.("connecting");
+    // Atajo directo: si el navegador bloquea almacenamiento/cookies (típico de
+    // incógnito), la sesión persistente de Supabase (persistSession → localStorage)
+    // NO puede vivir. No gastamos reintentos de red: comunicamos la causa real y
+    // dejamos que el viajero abra una pestaña normal (o reintente si desbloquea).
+    if (!storageHealthy()) {
+      this.failSession(STORAGE_SESSION_ERROR);
+      return;
+    }
     const session = await this.acquireSessionWithRetry();
     if (this.disposed || this.identity) return;
     if (!session) {
       // Agotados los reintentos con backoff: deja armado un ÚLTIMO intento para
       // cuando la pestaña vuelva a primer plano (móvil: arrancó en 2º plano).
       this.armVisibilityRetry();
-      this.opts.onStatus?.("error");
+      this.failSession(this.lastSessionError ?? describeSessionError(undefined));
       return;
     }
     this.establish(session);
+  }
+
+  /** Fija el motivo del fallo, lo emite y pone el estado en "error". */
+  private failSession(info: SessionErrorInfo): void {
+    this.lastSessionError = info;
+    this.opts.onSessionError?.(info);
+    this.opts.onStatus?.("error");
+  }
+
+  /**
+   * Reintento MANUAL de conexión (botón "Reintentar" de la UI). Resetea los guards
+   * de reintento, limpia timers y cualquier canal a medias (para no duplicar) y
+   * vuelve a {@link connect}. No hace nada si ya estamos conectados o dispuestos.
+   */
+  async retryConnect(): Promise<void> {
+    if (this.disposed || this.identity) return;
+    // Corta timers de reintento en vuelo (backoff de sesión + visibility) para
+    // arrancar limpio; permite de nuevo el reintento por visibilitychange.
+    if (this.sessionRetryTimer) {
+      clearTimeout(this.sessionRetryTimer);
+      this.sessionRetryTimer = null;
+    }
+    this.teardownVisibilityRetry();
+    this.visibilityRetryUsed = false;
+    // Si un intento anterior dejó un canal a medias, límpialo antes de reconectar
+    // (evita canales duplicados sobre `biosphere:<id>`).
+    if (this.channel) {
+      if (this.supabase) void this.supabase.removeChannel(this.channel);
+      this.channel = null;
+    }
+    this.lastSessionError = null;
+    await this.connect();
   }
 
   /**
@@ -359,6 +518,9 @@ export class BiosphereRealtime {
         return await ensureAnonSession();
       } catch (err) {
         const isLast = attempt === total - 1;
+        // Guarda la causa AMABLE del último error para exponerla si se agotan
+        // los intentos (captcha / red / otro con código corto).
+        this.lastSessionError = describeSessionError(err);
         console.warn(
           `[realtime] no se pudo iniciar sesión anónima (intento ${attempt + 1}/${total}` +
             `${isLast ? ", último" : `, reintento en ${backoffs[attempt] / 1000}s`}):`,
@@ -387,6 +549,7 @@ export class BiosphereRealtime {
       this.sessionRetryTimer = null;
     }
     try {
+      this.lastSessionError = null; // sesión obtenida: el fallo previo (si hubo) ya no aplica
       this.supabase = getSupabaseBrowserClient();
       const user = session.user;
       this.identity = {
@@ -401,7 +564,7 @@ export class BiosphereRealtime {
       this.subscribe();
     } catch (err) {
       console.warn("[realtime] no se pudo montar el canal tras la sesión:", err);
-      this.opts.onStatus?.("error");
+      this.failSession(describeSessionError(err));
     }
   }
 

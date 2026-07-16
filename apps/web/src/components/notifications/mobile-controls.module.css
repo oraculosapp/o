@@ -10,10 +10,6 @@
   right: calc(18px + env(safe-area-inset-right));
   bottom: calc(var(--chat-sheet-h, 88px) + 16px + env(safe-area-inset-bottom));
   z-index: 28;
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 0.7rem;
   pointer-events: none;
   transition: opacity var(--dur-fast) var(--ease-brand);
 }
@@ -26,27 +22,36 @@
   pointer-events: none;
 }
 
-/* Fila inferior del clúster: columna [Volar/Correr] (izq) + Saltar (der). */
-.row {
-  display: flex;
-  flex-direction: row;
-  align-items: flex-end;
-  gap: 0.7rem;
-}
+/* --- ANILLO EQUIDISTANTE alrededor de Brincar ------------------------------
+   Brincar (64px) es el ancla, abajo-derecha del clúster. Los 3 satélites
+   (Dibujar/Volar/Correr, 56px) se posan sobre un ARCO del MISMO radio y con
+   separación angular UNIFORME, formando un abanico hacia arriba-izquierda.
 
-/* Columna izquierda: Volar ARRIBA, Correr ABAJO. */
-.col {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 0.7rem;
+   Geometría (origen = centro de Brincar; convención matemática 0°=este, sentido
+   antihorario; en pantalla la Y crece hacia abajo, por eso restamos R·sinθ):
+     · radio (centro↔centro Brincar→satélite)  R = 90px  (igual para los 3)
+     · paso angular entre satélites consecutivos = 45°  (igual para los 3)
+         - Dibujar →  90°  (arriba)          offset (  0, -90)
+         - Volar   → 135°  (arriba-izq)       offset (-63.64, -63.64) = (-R·cos45, -R·sin45)
+         - Correr  → 180°  (izquierda)         offset (-90,   0)
+   Distancias resultantes (lo que pidió Julio):
+     · satélite ↔ Brincar: R = 90px  → aire de borde 90-32-28 = 30px  (los 3 IGUAL)
+     · satélite ↔ satélite adyacente: cuerda 2·R·sin(22.5°) = 68.9px → aire 12.9px (IGUAL)
+
+   El clúster mide 150×150 (aloja el arco completo). Brincar ancla en su esquina
+   inferior-derecha (right:0/bottom:0), así que su centro cae en (118,118) dentro
+   del clúster; de ahí salen las posiciones top/left de cada satélite (centro-28). */
+.cluster {
+  position: relative;
+  width: 150px;
+  height: 150px;
 }
 
 .btn {
   pointer-events: auto;
   display: inline-grid;
   place-content: center;
-  /* Botones ~15% más chicos (Saltar 74→64) manteniendo el mínimo táctil de 44px. */
+  /* Botones ~15% más chicos (Brincar 74→64) manteniendo el mínimo táctil de 44px. */
   width: 64px;
   height: 64px;
   border-radius: 50%;
@@ -78,8 +83,11 @@
   outline-offset: 2px;
 }
 
-/* Saltar: acento dorado sólido. */
+/* Brincar: ancla del anillo, esquina inferior-derecha del clúster. Acento dorado. */
 .jump {
+  position: absolute;
+  right: 0;
+  bottom: 0;
   background: linear-gradient(180deg, rgba(227, 176, 99, 0.28), rgba(227, 176, 99, 0.12));
   border-color: var(--gold-dim);
 }
@@ -90,24 +98,17 @@
   color: #cfe0ff;
 }
 
-/* Acción (Tomar/Lanzar/Dibujar): siempre visible, encabeza el clúster. Mismo tamaño
-   y tipografía que Volar/Correr (56px / 0.6rem): los tres son SATÉLITES de Saltar
-   (64px), que es el principal.
-
-   El margen negativo lo BAJA hasta cerrar el anillo alrededor de Saltar sin mover
-   Volar/Correr (que ya están bien). Geometría resultante, con el origen en el centro
-   de Saltar (56px de satélite, 64px de Saltar, gap 0.7rem = 11.2px):
-     · Correr  → radio 71px, ~183° (a la izquierda)
-     · Volar   → radio 95px, ~138° (arriba-izquierda)
-     · Dibujar → radio 95px,  ~93° (arriba)  ← antes: radio 130px, muy lejos
-   Es decir, un arco de pasos ~45° y radio parejo arriba. El solape vertical con la
-   columna Volar/Correr es sólo de caja: horizontalmente quedan a 19px (centros a
-   82px, con 56px de diámetro → 26px de aire), así que no se tocan. */
+/* Acción (Tomar/Lanzar/Dibujar): satélite superior del arco, a 90° (arriba de
+   Brincar). Mismo tamaño y tipografía que Volar/Correr (56px / 0.6rem): los tres
+   son SATÉLITES equidistantes de Brincar (64px). Posición absoluta dentro del
+   clúster (ver bloque "ANILLO EQUIDISTANTE"): centro (118,28) → top/left (0,90). */
 .action {
+  position: absolute;
+  left: 90px;
+  top: 0;
   width: 56px;
   height: 56px;
   font-size: 0.6rem;
-  margin-bottom: -35px;
 }
 /* Con pelota en mano → acento terracota (Lanzar). */
 .holding {
@@ -124,12 +125,24 @@
 }
 
 /* Correr y Volar: neutros de base; ~15% más chicos (56px), sobre el mínimo táctil
-   de 44px. Encendidos (toggle) resaltan en dorado sólido con halo, como Dibujar. */
+   de 44px. Encendidos (toggle) resaltan en dorado sólido con halo, como Dibujar.
+   Satélites del arco (posición absoluta en el clúster, ver "ANILLO EQUIDISTANTE"):
+     · Volar   → 135° (arriba-izq)  centro (54.36,54.36) → top/left 26.36px
+     · Correr  → 180° (izquierda)   centro (28,118)      → top 90px / left 0 */
 .run,
 .fly {
+  position: absolute;
   width: 56px;
   height: 56px;
   font-size: 0.6rem;
+}
+.fly {
+  left: 26.36px;
+  top: 26.36px;
+}
+.run {
+  left: 0;
+  top: 90px;
 }
 /* Estado "on" persistente (toggle): dorado encendido con halo — mismo lenguaje que
    .drawingOn, para que "activo" se lea igual en todo el mando. */

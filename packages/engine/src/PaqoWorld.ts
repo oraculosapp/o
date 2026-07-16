@@ -307,6 +307,7 @@ export class PaqoWorld {
       .finally(() => {
         if (!this.disposed) {
           this.enableTotemShadows();
+          this.registerTotemCollider();
           this.renderer.compile(this.scene, this.camera);
         }
         this.onReady?.();
@@ -777,6 +778,30 @@ export class PaqoWorld {
     this.totem?.group.traverse((o) => {
       const m = o as THREE.Mesh;
       if (m.isMesh) m.castShadow = true;
+    });
+  }
+
+  /**
+   * [COLLIDER] Registra el poste del tótem como collider cilíndrico en el controller,
+   * para que el avatar no lo atraviese. Cilindro con el MISMO patrón que BallGame:
+   * Box3 del group, radio = max(size.x, size.z)/2 × 0.8, centro = centro XZ del box,
+   * topY = box.max.y (~8.6 u → saltar por encima prácticamente nunca). La runa del
+   * suelo NO colisiona (es un mesh aparte, no del tótem: se camina sobre ella). Si el
+   * GLB no cargó, el group está vacío → box vacío → no se registra nada.
+   */
+  private registerTotemCollider(): void {
+    const g = this.totem?.group;
+    if (!g) return;
+    const box = new THREE.Box3().setFromObject(g);
+    if (box.isEmpty()) return;
+    const size = new THREE.Vector3();
+    box.getSize(size);
+    const radius = (Math.max(size.x, size.z) / 2) * 0.8;
+    this.controller.addCylinderCollider({
+      x: (box.min.x + box.max.x) / 2,
+      z: (box.min.z + box.max.z) / 2,
+      radius,
+      topY: box.max.y,
     });
   }
 

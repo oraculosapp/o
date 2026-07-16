@@ -161,6 +161,34 @@
   color: var(--text-faint);
   max-width: 18rem;
 }
+
+/* Botón "Reintentar" del estado de sesión fallida: píldora glass discreta de la
+   casa (mismo vocabulario que .join, más compacta). Aparece bajo el motivo. */
+.retryBtn {
+  align-self: flex-start;
+  min-height: 32px;
+  padding: 0 0.8rem;
+  border: 1px solid var(--gold-dim);
+  border-radius: var(--radius-pill);
+  background: var(--panel);
+  color: var(--gold-bright);
+  font: inherit;
+  font-size: 0.78rem;
+  cursor: pointer;
+  transition:
+    transform var(--dur-fast) var(--ease-brand),
+    border-color var(--dur-fast) var(--ease-brand),
+    box-shadow var(--dur-fast) var(--ease-brand);
+}
+.retryBtn:hover {
+  transform: translateY(-1px);
+  border-color: var(--gold);
+  box-shadow: 0 0 16px var(--glow);
+}
+.retryBtn:focus-visible {
+  outline: 2px solid var(--gold-bright);
+  outline-offset: 2px;
+}
 /* Fallo DURO (permiso / sin micro / ocupado / HTTPS / conexión total): terracota,
    para distinguirlo del estado normal y del aviso suave de un par P2P fallido. */
 .statusError {
@@ -181,7 +209,8 @@
 
 @media (max-width: 640px) {
   .join,
-  .mic {
+  .mic,
+  .retryBtn {
     /* Área táctil ≥44px (WCAG 2.5.5). */
     min-height: 44px;
   }
@@ -194,7 +223,8 @@
 @media (prefers-reduced-motion: reduce) {
   .join,
   .mic,
-  .leave {
+  .leave,
+  .retryBtn {
     transition: none;
   }
   .pulse {

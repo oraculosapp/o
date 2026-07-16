@@ -3,7 +3,33 @@
   inset: 0;
   overflow: hidden;
   background: var(--bg-0);
-  touch-action: none;
+  /* PULL-TO-REFRESH: antes `touch-action: none` mataba el gesto en TODA la
+     pantalla. Ahora el escenario permite paneo vertical del navegador (`pan-y`),
+     que es lo que dispara el pull-to-refresh nativo. El LIENZO WebGL conserva su
+     `touch-action: none` (lo fija el engine en initRenderer) → como el hijo es más
+     restrictivo, la cámara/joystick siguen capturando sus gestos sobre el canvas
+     sin cambios; sólo se habilita el paneo donde NO hay canvas encima. */
+  touch-action: pan-y;
+}
+
+/* Franja superior DOM (~110px) que HABILITA el pull-to-refresh nativo.
+   El lienzo WebGL cubre todo el escenario con `touch-action: none`, así que un
+   gesto en la banda superior aún caería sobre el canvas (sin PTR). Este pseudo se
+   interpone SÓLO en esa banda (por encima del canvas, por debajo del menú/chat) y,
+   con `touch-action: pan-y`, deja que arrastrar el dedo hacia abajo desde arriba
+   dispare el refresco. No pinta nada (transparente) y no hace preventDefault.
+   Consecuencia buscada: en esta banda mandan el navegador/menú, no la cámara. */
+.stage::before {
+  content: "";
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: calc(110px + env(safe-area-inset-top));
+  /* Por encima del canvas (z-auto) y por debajo del menú (35), chat (30) y mando
+     (28), que siguen recibiendo sus toques con normalidad. */
+  z-index: 5;
+  touch-action: pan-y;
 }
 
 .canvas {

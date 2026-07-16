@@ -10,6 +10,12 @@ body {
   margin: 0;
   padding: 0;
   height: 100%;
+  /* PULL-TO-REFRESH: el gesto nativo exige que la raíz de scroll NO tenga
+     `overscroll-behavior: none` en el eje Y. Lo fijamos explícito en `auto` para
+     blindar el contrato (el bloqueo real del PTR era `touch-action` en el
+     escenario/canvas, ver app/paqo.module.css .stage / .stage::before). El chat
+     acota su propio rebote con `overscroll-behavior: contain` en su lista. */
+  overscroll-behavior-y: auto;
 }
 
 body {

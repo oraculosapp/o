@@ -39,9 +39,15 @@ export interface VoiceControlsProps {
   /**
    * Motivo VISIBLE del estado deshabilitado (`enabled=false`). Por defecto es
    * transitorio ("Preparando tu voz…"); el padre puede pasar algo ACCIONABLE si
-   * sabe que la sesión falló de plano (p. ej. "recarga la página").
+   * sabe que la sesión falló de plano (p. ej. la causa amable: incógnito/captcha/red).
    */
   disabledReason?: string;
+  /**
+   * Si se pasa, muestra un botón "Reintentar" bajo el motivo deshabilitado: la
+   * sesión falló de plano y el viajero puede reintentar sin recargar a mano. Sólo
+   * tiene sentido junto con `enabled=false` (estado sin sesión).
+   */
+  onRetry?: () => void;
   /** Clase extra opcional para el contenedor (posicionamiento del slot). */
   className?: string;
   /**
@@ -58,6 +64,7 @@ export function VoiceControls({
   displayName,
   enabled = true,
   disabledReason = "Preparando tu voz…",
+  onRetry,
   className,
   buttonClassName,
 }: VoiceControlsProps) {
@@ -96,6 +103,11 @@ export function VoiceControls({
         <p id={statusId} className={styles.status} role="status" aria-live="polite">
           {disabledReason}
         </p>
+        {onRetry && (
+          <button type="button" className={styles.retryBtn} onClick={onRetry}>
+            Reintentar
+          </button>
+        )}
       </div>
     );
   }
