@@ -36,20 +36,27 @@
   border-color: var(--gold-dim);
 }
 
-/* El botón de avatar aloja un retrato circular; el glifo interno respira ~6px
-   dentro del botón (no llega a sangre) dejando un aro de glass alrededor. El
-   contenido se centra vía el `place-content:center` heredado de .profileLink. */
+/* El botón de avatar aloja un retrato circular; el glifo interno respira 3px por
+   lado dentro del botón (no llega a sangre) dejando un aro de glass alrededor.
+   `position: relative` lo convierte en el contenedor de posicionamiento del
+   retrato absoluto. NOTA: el retrato ya NO se centra por grid — se ancla con
+   `inset: 3px` (ver más abajo el porqué), así que el `place-content:center`
+   heredado de .profileLink queda inerte aquí. */
 .avatarButton {
   padding: 0;
   overflow: hidden;
-}
-/* Retrato = ~6px más chico que el botón (3px de aire por lado). Envuelve la
-   miniatura + su capa de tinte y las recorta al círculo. */
-.avatarPortraitWrap {
   position: relative;
-  display: block;
-  width: calc(100% - 6px);
-  height: calc(100% - 6px);
+}
+/* Retrato anclado con `inset: 3px` (3px de aire por lado) en vez de
+   `width: calc(100% - 6px)`. El botón es `inline-grid` con tracks `auto`, así que
+   un hijo dimensionado en % creaba una dependencia circular (el track depende del
+   hijo y el hijo del track) → el navegador la resolvía mal y la miniatura de
+   600×600 se pintaba desbordada/recortada. Con posición absoluta el tamaño sale
+   del botón (contenedor de bloque fijo 40/38px), sin ciclo. Envuelve la miniatura
+   + su capa de tinte y las recorta al círculo. */
+.avatarPortraitWrap {
+  position: absolute;
+  inset: 3px;
   border-radius: 50%;
   overflow: hidden;
 }
@@ -61,8 +68,9 @@
   display: block;
 }
 /* Capa de color sobre la miniatura "nube": la tiñe al color elegido del avatar
-   (multiply: blanco→color, sombras→color oscuro). Refleja el color EN VIVO (el
-   `background` inline viene del prop `tint`). */
+   (multiply: blanco→color, sombras→color oscuro). `inset: 0` sobre el wrap → cubre
+   exacto el retrato (que ahora mide el botón menos 3px por lado). Refleja el color
+   EN VIVO (el `background` inline viene del prop `tint`). */
 .avatarTintLayer {
   position: absolute;
   inset: 0;
@@ -70,11 +78,11 @@
   mix-blend-mode: multiply;
   pointer-events: none;
 }
-/* Fallback (miniatura no carga): disco liso teñido, también ~6px más chico. */
+/* Fallback (miniatura no carga): disco liso teñido, anclado igual con `inset: 3px`
+   para conservar el mismo aro de glass de 3px que el retrato real. */
 .avatarDummy {
-  display: block;
-  width: calc(100% - 6px);
-  height: calc(100% - 6px);
+  position: absolute;
+  inset: 3px;
   border-radius: 50%;
   background:
     radial-gradient(circle at 35% 30%, var(--gold-bright), var(--gold-dim));
@@ -111,6 +119,15 @@
 .tip:focus-visible::after {
   opacity: 1;
   transform: none;
+}
+
+/* En táctil NO hay hover real: el tap deja el :hover pegado y el letrero queda
+   flotando sobre la UI. Lo apagamos SOLO en `pointer: coarse` (no en `max-width`,
+   para que una ventana de escritorio estrecha con ratón conserve sus tooltips). */
+@media (pointer: coarse) {
+  .tip::after {
+    display: none;
+  }
 }
 
 @media (pointer: coarse), (max-width: 640px) {

@@ -162,6 +162,22 @@
   max-width: 18rem;
 }
 
+/* Sólo para lectores de pantalla: anuncia el estado (aria-live) SIN verse ni
+   ocupar layout. Al ir en position:absolute queda FUERA de flujo, así que no
+   cuenta para el `gap` de `.voice` — la fila de segmentos no se desajusta cuando
+   el estado es transitorio/informativo (lo normal salvo error). */
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
 /* Botón "Reintentar" del estado de sesión fallida: píldora glass discreta de la
    casa (mismo vocabulario que .join, más compacta). Aparece bajo el motivo. */
 .retryBtn {

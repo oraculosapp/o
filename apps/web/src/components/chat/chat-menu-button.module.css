@@ -75,6 +75,16 @@
   transform: none;
 }
 
+/* En táctil NO hay hover real: el tap deja el :hover pegado y el letrero queda
+   flotando (p. ej. "CERRAR CHAT" sobre el chat abierto). Lo apagamos SOLO en
+   `pointer: coarse` (no en `max-width`, para que una ventana de escritorio
+   estrecha con ratón conserve sus tooltips útiles). */
+@media (pointer: coarse) {
+  .tip::after {
+    display: none;
+  }
+}
+
 @media (pointer: coarse), (max-width: 640px) {
   /* Círculo visible más chico (38px) para que los 7 botones del menú quepan en
      una sola fila; el área táctil efectiva se mantiene en 44px con el pseudo. */

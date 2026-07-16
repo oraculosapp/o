@@ -66,8 +66,15 @@ const securityHeaders = [
   { key: "X-Content-Type-Options", value: "nosniff" },
   { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
   {
+    // Permissions-Policy: apagamos todo lo que no usamos… salvo el MICRÓFONO, que
+    // la voz WebRTC P2P (S11) necesita en same-origin. `microphone=(self)` lo
+    // permite SÓLO a nuestro propio origen (no a iframes de terceros).
+    // OJO — regresión ya vivida: con `microphone=()` la Permissions API reportaba
+    // "denied" y useVoiceRoom cortaba con "Necesito permiso del micrófono…" SIN
+    // llegar a pedirlo, aunque el usuario lo hubiera concedido en el candado 🔒 de
+    // Chrome. La cabecera bloquea la feature entera, no es el permiso del usuario.
     key: "Permissions-Policy",
-    value: "camera=(), microphone=(), geolocation=(), browsing-topics=(), interest-cohort=()",
+    value: "camera=(), microphone=(self), geolocation=(), browsing-topics=(), interest-cohort=()",
   },
 ];
 

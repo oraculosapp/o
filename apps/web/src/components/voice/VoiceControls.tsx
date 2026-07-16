@@ -12,6 +12,17 @@
  *   · Dentro: botón de micrófono (mute/unmute, aria-pressed) + indicador de quién
  *     habla (puntos que pulsan) + botón "Salir".
  *
+ * Letreros de estado — regla de la casa (Julio): los textos TRANSITORIOS e
+ * INFORMATIVOS ("Preparando tu voz…", "Conectando a la voz…", "Fuera del canal",
+ * "En la voz · micrófono activo/silenciado") NO se ven: desajustaban la fila de
+ * segmentos del chat y no aportaban (el mute ya lo comunica el botón de micro con
+ * aria-pressed y el glifo tachado). Siguen ANUNCIÁNDOSE para lectores de pantalla
+ * en un elemento visually-hidden (`.srOnly`) con aria-live. VISIBLEMENTE sólo se
+ * pintan: los ERRORES de `voiceErrorMessage()` (duros y suaves) y el motivo
+ * ACCIONABLE de una sesión fallida (`enabled=false` con `onRetry`, junto al botón
+ * "Reintentar"). Cuando no hay nada que mostrar, el hueco visible no reserva
+ * espacio (el `.srOnly` va fuera de flujo, no cuenta para el gap del contenedor).
+ *
  * Accesible: aria-pressed en el micro, aria-live para el estado, focus-visible
  * dorado (design system), áreas táctiles ≥44px. Respeta prefers-reduced-motion.
  * No requiere credenciales nuevas: la voz va sobre el mismo Supabase del chat.
@@ -37,15 +48,18 @@ export interface VoiceControlsProps {
    */
   enabled?: boolean;
   /**
-   * Motivo VISIBLE del estado deshabilitado (`enabled=false`). Por defecto es
-   * transitorio ("Preparando tu voz…"); el padre puede pasar algo ACCIONABLE si
-   * sabe que la sesión falló de plano (p. ej. la causa amable: incógnito/captcha/red).
+   * Motivo del estado deshabilitado (`enabled=false`). Por defecto es transitorio
+   * ("Preparando tu voz…") y sólo se ANUNCIA (no se ve). Se pinta VISIBLEMENTE
+   * únicamente cuando es ACCIONABLE, es decir cuando además llega `onRetry` (la
+   * sesión falló de plano: incógnito/captcha/red) — ahí acompaña al botón
+   * "Reintentar". La distinción transitorio↔fallido la decide el padre (ChatDock).
    */
   disabledReason?: string;
   /**
-   * Si se pasa, muestra un botón "Reintentar" bajo el motivo deshabilitado: la
-   * sesión falló de plano y el viajero puede reintentar sin recargar a mano. Sólo
-   * tiene sentido junto con `enabled=false` (estado sin sesión).
+   * Si se pasa, la sesión falló DE PLANO: el motivo se muestra VISIBLE y debajo
+   * aparece un botón "Reintentar" para reconectar sin recargar a mano. Su presencia
+   * es también la señal de que `disabledReason` es accionable (no un transitorio).
+   * Sólo tiene sentido junto con `enabled=false` (estado sin sesión).
    */
   onRetry?: () => void;
   /** Clase extra opcional para el contenedor (posicionamiento del slot). */
@@ -83,10 +97,16 @@ export function VoiceControls({
 
   // --- Gating: identidad aún no lista → mismo botón "Unirse a voz", pero
   // deshabilitado. El botón SIEMPRE existe (nunca desaparece en silencio: eso
-  // dejaba al usuario sin entender por qué no hay voz) y el MOTIVO se pinta
-  // debajo y se anuncia (aria-describedby + role=status). Sin leyendas confusas:
-  // la etiqueta es siempre la acción real.
+  // dejaba al usuario sin entender por qué no hay voz) y el MOTIVO se anuncia
+  // (aria-describedby + role=status). Sin leyendas confusas: la etiqueta es
+  // siempre la acción real.
+  //
+  // El motivo sólo se VE cuando es accionable (hay `onRetry` → sesión fallida);
+  // el transitorio ("Preparando tu voz…") se queda en el elemento .srOnly, que se
+  // anuncia pero no desajusta la fila. Con `onRetry`, motivo visible + botón
+  // "Reintentar" juntos, tal cual.
   if (!enabled) {
+    const reasonActionable = Boolean(onRetry);
     return (
       <div className={containerClass}>
         <button
@@ -100,7 +120,12 @@ export function VoiceControls({
           <MicGlyph muted />
           <span>Unirse a voz</span>
         </button>
-        <p id={statusId} className={styles.status} role="status" aria-live="polite">
+        <p
+          id={statusId}
+          className={reasonActionable ? styles.status : styles.srOnly}
+          role="status"
+          aria-live="polite"
+        >
           {disabledReason}
         </p>
         {onRetry && (
@@ -118,6 +143,19 @@ export function VoiceControls({
   // conexión P2P). Un par fallido estando ya dentro es un aviso SUAVE, no rojo.
   const errorMsg = voiceErrorMessage(errorReason, joined);
   const hardError = isHardVoiceError(errorReason, joined);
+  // Estado INFORMATIVO (no error): sólo para lectores de pantalla. El texto de
+  // mute/actividad no se pinta (lo dice el botón de micro); aquí existe para que
+  // aria-live lo anuncie en cada transición.
+  const informativeStatus = joined
+    ? muted
+      ? "En la voz · micrófono silenciado"
+      : "En la voz · micrófono activo"
+    : connecting
+      ? "Conectando a la voz…"
+      : "Fuera del canal de voz";
+  // Se VE sólo si hay error; si no, el mismo nodo aria-live se queda .srOnly (se
+  // anuncia sin ocupar layout ni desajustar la fila de segmentos).
+  const statusText = errorMsg ?? informativeStatus;
 
   return (
     <div className={containerClass}>
@@ -159,23 +197,20 @@ export function VoiceControls({
         </div>
       )}
 
-      {/* Estado para lectores de pantalla (y visible el hint de error). El mensaje de
-          error refleja la CAUSA real; un par P2P fallido estando dentro es un aviso
-          suave (no rojo). */}
+      {/* Estado en un ÚNICO nodo aria-live: siempre anuncia (a lectores) el estado
+          actual, pero sólo se VE cuando es un ERROR. El mensaje de error refleja la
+          CAUSA real; un par P2P fallido estando dentro es un aviso suave (no rojo).
+          Sin error, el nodo va .srOnly: se anuncia sin ocupar espacio ni desajustar
+          la fila de segmentos. */}
       <p
         id={statusId}
-        className={`${styles.status} ${hardError ? styles.statusError : ""}`}
+        className={
+          errorMsg ? `${styles.status} ${hardError ? styles.statusError : ""}` : styles.srOnly
+        }
         role="status"
         aria-live="polite"
       >
-        {errorMsg ??
-          (joined
-            ? muted
-              ? "En la voz · micrófono silenciado"
-              : "En la voz · micrófono activo"
-            : connecting
-              ? "Conectando a la voz…"
-              : "Fuera del canal de voz")}
+        {statusText}
       </p>
     </div>
   );

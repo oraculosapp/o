@@ -38,8 +38,12 @@ export function ChatMenuButton() {
       onClick={toggle}
       aria-pressed={open}
       aria-label={open ? "Colapsar el chat" : "Abrir el chat"}
-      title={open ? "Cerrar chat" : "Chat"}
-      data-tip={open ? "Cerrar chat" : "Chat"}
+      // Con el chat ABIERTO no dejamos letrero de marca en NINGUNA plataforma:
+      // en táctil el :hover se queda pegado tras el tap y el tooltip flota sobre
+      // el chat abierto. Sin data-tip ni title, no hay nada que mostrar; el estado
+      // sigue anunciándose por aria-label + aria-pressed (se conservan intactos).
+      title={open ? undefined : "Chat"}
+      data-tip={open ? undefined : "Chat"}
     >
       <ChatGlyph />
     </button>
