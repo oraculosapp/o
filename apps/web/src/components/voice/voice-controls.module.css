@@ -78,7 +78,9 @@
     border-color var(--dur-fast) var(--ease-brand),
     box-shadow var(--dur-fast) var(--ease-brand);
 }
-.mic:hover {
+/* Hover SÓLO cuando NO está activo (no muteado): el micro activo ya luce dorado con
+   halo, así que hover no debe "degradar" su borde ni hacerlo parpadear. */
+.mic:hover:not([aria-pressed="true"]) {
   color: var(--gold-bright);
   border-color: var(--gold-dim);
 }
@@ -158,6 +160,11 @@
   font-size: 0.72rem;
   color: var(--text-faint);
   max-width: 18rem;
+}
+/* Fallo DURO (permiso / sin micro / ocupado / HTTPS / conexión total): terracota,
+   para distinguirlo del estado normal y del aviso suave de un par P2P fallido. */
+.statusError {
+  color: var(--terra);
 }
 
 @keyframes voicePulse {

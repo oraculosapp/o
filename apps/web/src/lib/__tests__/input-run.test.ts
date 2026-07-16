@@ -91,6 +91,29 @@ describe("InputManager — correr móvil", () => {
   });
 });
 
+describe("InputManager — VOLAR (pressFly)", () => {
+  it("pressFly() encola un edge de vuelo de un solo frame", () => {
+    const input = new InputManager(fakeContainer());
+    expect(input.consumeMove().fly).toBe(false);
+
+    input.pressFly();
+    expect(input.consumeMove().fly).toBe(true);
+    // Edge: se consume, no queda encendido.
+    expect(input.consumeMove().fly).toBe(false);
+    input.dispose();
+  });
+
+  it("setInputEnabled(false) descarta el edge de vuelo (no queda pendiente)", () => {
+    const input = new InputManager(fakeContainer());
+    input.pressFly();
+    input.setInputEnabled(false); // p.ej. el chat tomó foco
+    expect(input.consumeMove().fly).toBe(false);
+    input.setInputEnabled(true);
+    expect(input.consumeMove().fly).toBe(false);
+    input.dispose();
+  });
+});
+
 describe("InputManager — ActionState con flying", () => {
   it("notifica el cambio de `flying` (el botón de salto pasa a 'Caer')", () => {
     const input = new InputManager(fakeContainer());

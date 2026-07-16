@@ -6,9 +6,9 @@
  * ciclo de vida vía `useVoiceRoom`. Pensado para montarse en el `voiceSlot` del chat.
  *
  * Estados de UI:
- *   · Identidad no lista (`enabled=false`): botón "Unirse a la voz" deshabilitado
+ *   · Identidad no lista (`enabled=false`): botón "Unirse a voz" deshabilitado
  *     (transitorio; el nombre aleatorio llega al entrar).
- *   · Fuera del canal: botón de marca "Unirse a la voz".
+ *   · Fuera del canal: botón de marca "Unirse a voz".
  *   · Dentro: botón de micrófono (mute/unmute, aria-pressed) + indicador de quién
  *     habla (puntos que pulsan) + botón "Salir".
  *
@@ -18,6 +18,7 @@
  */
 import { useId } from "react";
 import { useVoiceRoom, type VoiceParticipant } from "@/lib/voice/useVoiceRoom";
+import { isHardVoiceError, voiceErrorMessage } from "@/lib/voice/errors";
 import styles from "./voice-controls.module.css";
 
 export interface VoiceControlsProps {
@@ -36,6 +37,12 @@ export interface VoiceControlsProps {
   enabled?: boolean;
   /** Clase extra opcional para el contenedor (posicionamiento del slot). */
   className?: string;
+  /**
+   * Clase del BOTÓN "Unirse a voz". El chat la inyecta (su `.segment`) para que la
+   * voz se vea IGUAL que los tabs General/Privado (una fila de tres controles con
+   * el mismo tamaño, forma y glass). Si falta, usa el estilo propio de marca.
+   */
+  buttonClassName?: string;
 }
 
 export function VoiceControls({
@@ -44,18 +51,22 @@ export function VoiceControls({
   displayName,
   enabled = true,
   className,
+  buttonClassName,
 }: VoiceControlsProps) {
-  const { joined, join, leave, muted, toggleMute, participants, connectionState } = useVoiceRoom({
-    biosphereId,
-    identity,
-    displayName,
-    enabled,
-  });
+  const { joined, join, leave, muted, toggleMute, participants, connectionState, errorReason } =
+    useVoiceRoom({
+      biosphereId,
+      identity,
+      displayName,
+      enabled,
+    });
 
   const statusId = useId();
   const containerClass = [styles.voice, className].filter(Boolean).join(" ");
+  // El botón "Unirse a voz" usa la clase del chat (segmento unificado) si se inyecta.
+  const joinClass = buttonClassName ?? styles.join;
 
-  // --- Gating: identidad aún no lista → mismo botón "Unirse a la voz", pero
+  // --- Gating: identidad aún no lista → mismo botón "Unirse a voz", pero
   // deshabilitado (transitorio; todos reciben un nombre aleatorio al entrar). Sin
   // leyendas confusas: la etiqueta es siempre la acción real.
   if (!enabled) {
@@ -63,13 +74,13 @@ export function VoiceControls({
       <div className={containerClass}>
         <button
           type="button"
-          className={styles.join}
+          className={joinClass}
           disabled
           aria-disabled="true"
           title="Preparando tu voz…"
         >
           <MicGlyph muted />
-          <span>Unirse a la voz</span>
+          <span>Unirse a voz</span>
         </button>
       </div>
     );
@@ -77,19 +88,23 @@ export function VoiceControls({
 
   const connecting = connectionState === "connecting";
   const speaking = participants.filter((p) => p.speaking);
+  // Mensaje HONESTO según la causa real (permiso / sin micro / ocupado / HTTPS /
+  // conexión P2P). Un par fallido estando ya dentro es un aviso SUAVE, no rojo.
+  const errorMsg = voiceErrorMessage(errorReason, joined);
+  const hardError = isHardVoiceError(errorReason, joined);
 
   return (
     <div className={containerClass}>
       {!joined ? (
         <button
           type="button"
-          className={styles.join}
+          className={joinClass}
           onClick={() => void join()}
           disabled={connecting}
           aria-describedby={statusId}
         >
           <MicGlyph muted />
-          <span>{connecting ? "Conectando…" : "Unirse a la voz"}</span>
+          <span>{connecting ? "Conectando…" : "Unirse a voz"}</span>
         </button>
       ) : (
         <div className={styles.live}>
@@ -118,17 +133,23 @@ export function VoiceControls({
         </div>
       )}
 
-      {/* Estado para lectores de pantalla (y visible el hint de error). */}
-      <p id={statusId} className={styles.status} role="status" aria-live="polite">
-        {connectionState === "error"
-          ? "No se pudo conectar la voz (revisa el permiso del micrófono)."
-          : joined
+      {/* Estado para lectores de pantalla (y visible el hint de error). El mensaje de
+          error refleja la CAUSA real; un par P2P fallido estando dentro es un aviso
+          suave (no rojo). */}
+      <p
+        id={statusId}
+        className={`${styles.status} ${hardError ? styles.statusError : ""}`}
+        role="status"
+        aria-live="polite"
+      >
+        {errorMsg ??
+          (joined
             ? muted
               ? "En la voz · micrófono silenciado"
               : "En la voz · micrófono activo"
             : connecting
               ? "Conectando a la voz…"
-              : "Fuera del canal de voz"}
+              : "Fuera del canal de voz")}
       </p>
     </div>
   );

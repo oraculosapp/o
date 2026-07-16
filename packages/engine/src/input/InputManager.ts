@@ -9,6 +9,8 @@ export interface InputFrame {
   jump: boolean;
   /** true sólo el frame en que se presionó E (agarrar/lanzar, edge). */
   grab: boolean;
+  /** true sólo el frame en que se pidió alternar VUELO (botón Volar / tecla Q, edge). */
+  fly: boolean;
 }
 
 /**
@@ -52,6 +54,8 @@ export class InputManager {
   private keys = new Set<string>();
   private jumpEdge = false;
   private grabEdge = false;
+  /** Edge de alternar VUELO (botón Volar móvil o tecla Q). Consumible por frame. */
+  private flyEdge = false;
   /** Correr desde el botón MÓVIL (hold): OR con Shift del teclado. */
   private mobileRun = false;
   private pointers = new Map<number, PointerRec>();
@@ -181,6 +185,11 @@ export class InputManager {
       // Edge de agarrar/lanzar (una emisión por pulsación, no por auto-repeat).
       if (!this.keys.has("e")) this.grabEdge = true;
       this.keys.add("e");
+    } else if (k === "q") {
+      // Tecla VOLAR: edge de alternar vuelo (una emisión por pulsación, no por
+      // auto-repeat). El guard de arriba ya ignora Q cuando el foco está en el chat.
+      if (!this.keys.has("q")) this.flyEdge = true;
+      this.keys.add("q");
     } else {
       this.keys.add(k);
     }
@@ -227,6 +236,7 @@ export class InputManager {
       this.joyVec.set(0, 0);
       this.jumpEdge = false;
       this.grabEdge = false;
+      this.flyEdge = false;
       this.mobileRun = false; // suelta el correr móvil al perder el input
     }
   }
@@ -246,6 +256,15 @@ export class InputManager {
   /** Encola un E (botón móvil): agarra la pelota cercana o lanza la que llevas. */
   pressGrab(): void {
     this.grabEdge = true;
+  }
+
+  /**
+   * Encola un toggle de VUELO (botón "Volar" móvil / tecla Q). El mundo lo consume
+   * en el loop (`consumeMove().fly`) y llama `controller.toggleFly()`. Es un edge de
+   * un solo frame, igual que pressJump/pressGrab.
+   */
+  pressFly(): void {
+    this.flyEdge = true;
   }
 
   /**
@@ -400,7 +419,8 @@ export class InputManager {
     if (!this.inputEnabled) {
       this.jumpEdge = false;
       this.grabEdge = false;
-      return { moveAxis: this._axis, run: false, jump: false, grab: false };
+      this.flyEdge = false;
+      return { moveAxis: this._axis, run: false, jump: false, grab: false, fly: false };
     }
     if (this.joyVec.lengthSq() > 0.001) {
       this._axis.copy(this.joyVec);
@@ -414,9 +434,11 @@ export class InputManager {
     const run = this.keys.has("shift") || this.mobileRun;
     const jump = this.jumpEdge;
     const grab = this.grabEdge;
+    const fly = this.flyEdge;
     this.jumpEdge = false;
     this.grabEdge = false;
-    return { moveAxis: this._axis, run, jump, grab };
+    this.flyEdge = false;
+    return { moveAxis: this._axis, run, jump, grab, fly };
   }
 
   /** Deltas de órbita acumulados (px) y los resetea. */

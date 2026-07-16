@@ -38,6 +38,8 @@ export interface WorldActionState {
 export interface WorldInputHooks {
   pressJump?(): void;
   pressGrab?(): void;
+  /** Botón VOLAR móvil / tecla Q: alterna el modo VUELO del personaje. */
+  pressFly?(): void;
   /** Botón CORRER móvil en HOLD (mantener = correr). */
   setRun?(on: boolean): void;
   /** Botón CORRER móvil en TOGGLE (alterna correr/caminar). */

@@ -564,56 +564,62 @@ export function ChatDock({ biosphereId, getWorldNet, getWorld, voiceSlot }: Chat
           onPointerUp={floating ? endDrag : undefined}
           onPointerCancel={floating ? endDrag : undefined}
         >
-          <div className={styles.tabs} role="tablist" aria-label="Canales de chat" onKeyDown={onTabsKey}>
-            <button
-              id="chat-tab-open"
-              role="tab"
-              aria-selected={tab === "open"}
-              aria-controls="chat-panel-open"
-              tabIndex={tab === "open" ? 0 : -1}
-              ref={(el) => {
-                tabRefs.current.open = el;
-              }}
-              className={`${styles.tab} ${tab === "open" ? styles.tabActive : ""}`}
-              onClick={() => setTab("open")}
-            >
-              Chat general
-              {bio.roster.length > 0 && <span className={styles.tabCount}>{bio.roster.length}</span>}
-            </button>
-            <button
-              id="chat-tab-paqo"
-              role="tab"
-              aria-selected={tab === "paqo"}
-              aria-controls="chat-panel-paqo"
-              tabIndex={tab === "paqo" ? 0 : -1}
-              ref={(el) => {
-                tabRefs.current.paqo = el;
-              }}
-              className={`${styles.tab} ${tab === "paqo" ? styles.tabActive : ""}`}
-              onClick={() => setTab("paqo")}
-            >
-              Privado con Paqo
-              {unregisteredHint && <span className={styles.tabSpark} aria-hidden>✦</span>}
-            </button>
-          </div>
+          {/* Fila UNIFICADA de los tres controles: General · Privado con Paqo ·
+              Unirse a voz. Los dos primeros son tabs (role=tab, en el tablist con
+              roving/aria-selected); el tercero es una ACCIÓN (role=button dentro de
+              VoiceControls). Se ven iguales (misma clase `.segment`) pero conservan
+              su semántica y a11y. */}
+          <div className={styles.segments}>
+            <div className={styles.tabs} role="tablist" aria-label="Canales de chat" onKeyDown={onTabsKey}>
+              <button
+                id="chat-tab-open"
+                role="tab"
+                aria-selected={tab === "open"}
+                aria-controls="chat-panel-open"
+                tabIndex={tab === "open" ? 0 : -1}
+                ref={(el) => {
+                  tabRefs.current.open = el;
+                }}
+                className={`${styles.segment} ${tab === "open" ? styles.segmentActive : ""}`}
+                onClick={() => setTab("open")}
+              >
+                General
+                {bio.roster.length > 0 && <span className={styles.tabCount}>{bio.roster.length}</span>}
+              </button>
+              <button
+                id="chat-tab-paqo"
+                role="tab"
+                aria-selected={tab === "paqo"}
+                aria-controls="chat-panel-paqo"
+                tabIndex={tab === "paqo" ? 0 : -1}
+                ref={(el) => {
+                  tabRefs.current.paqo = el;
+                }}
+                className={`${styles.segment} ${tab === "paqo" ? styles.segmentActive : ""}`}
+                onClick={() => setTab("paqo")}
+              >
+                Privado con Paqo
+                {unregisteredHint && <span className={styles.tabSpark} aria-hidden>✦</span>}
+              </button>
+            </div>
 
-          {/* Controles de VOZ en la cabecera. Si el orquestador inyecta un
-              voiceSlot, tiene prioridad; si no, el chat monta VoiceControls con la
-              identidad de useBiosphere. Como TODOS reciben un nombre aleatorio al
-              entrar, el botón es directamente "Unirse a la voz" (sin leyendas
-              confusas): mientras la sesión se prepara, VoiceControls lo muestra
-              deshabilitado (enabled={hasSession}). El cambio de nombre vive en el
-              nameChip del composer. */}
-          <div className={styles.voiceSlot}>
-            {voiceSlot ??
-              (bio.sessionId ? (
-                <VoiceControls
-                  biosphereId={biosphereId}
-                  identity={bio.sessionId}
-                  displayName={bio.name ?? "Viajero"}
-                  enabled={hasSession}
-                />
-              ) : null)}
+            {/* Controles de VOZ, en la MISMA fila que los tabs. Si el orquestador
+                inyecta un voiceSlot, tiene prioridad; si no, el chat monta
+                VoiceControls con la identidad de useBiosphere y le pasa `.segment`
+                para que "Unirse a voz" luzca IGUAL que los tabs. Mientras la sesión
+                se prepara, se muestra deshabilitado (enabled={hasSession}). */}
+            <div className={styles.voiceSlot}>
+              {voiceSlot ??
+                (bio.sessionId ? (
+                  <VoiceControls
+                    biosphereId={biosphereId}
+                    identity={bio.sessionId}
+                    displayName={bio.name ?? "Viajero"}
+                    enabled={hasSession}
+                    buttonClassName={styles.segment}
+                  />
+                ) : null)}
+            </div>
           </div>
 
           <div className={styles.headerRight}>

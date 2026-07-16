@@ -26,6 +26,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { getSupabaseBrowserClient } from "@/lib/supabase";
 import { isSupabaseConfigured } from "@/lib/realtime";
+import { classifyGetUserMediaError, type VoiceErrorReason } from "./errors";
 import {
   VoiceSignaling,
   answerMessage,
@@ -38,6 +39,8 @@ import {
 
 /** Estado agregado de la malla, para pintar un hint de conexión. */
 export type VoiceConnectionState = "idle" | "connecting" | "connected" | "error";
+
+export type { VoiceErrorReason } from "./errors";
 
 export interface VoiceParticipant {
   identity: string;
@@ -59,6 +62,12 @@ export interface UseVoiceRoom {
   /** Roster de la voz con indicador de quién habla. */
   participants: VoiceParticipant[];
   connectionState: VoiceConnectionState;
+  /**
+   * Motivo del último fallo (o null). Separa el fallo de MICRÓFONO (permission /
+   * no-mic / in-use / insecure) del fallo de CONEXIÓN P2P (connection) para que la
+   * UI muestre el mensaje correcto en vez de un genérico engañoso.
+   */
+  errorReason: VoiceErrorReason;
 }
 
 export interface UseVoiceRoomParams {
@@ -108,6 +117,7 @@ export function useVoiceRoom(params: UseVoiceRoomParams): UseVoiceRoom {
   const [muted, setMuted] = useState(true);
   const [participants, setParticipants] = useState<VoiceParticipant[]>([]);
   const [connectionState, setConnectionState] = useState<VoiceConnectionState>("idle");
+  const [errorReason, setErrorReason] = useState<VoiceErrorReason>(null);
 
   const mountedRef = useRef(true);
   const signalingRef = useRef<VoiceSignaling | null>(null);
@@ -141,11 +151,17 @@ export function useVoiceRoom(params: UseVoiceRoomParams): UseVoiceRoom {
   }, [identity, displayName]);
 
   // --- Estado agregado de conexión de la malla -------------------------------
+  // OJO: un par WebRTC en `failed` (sin TURN / red restrictiva) NO es un problema de
+  // micrófono. Si el micro se obtuvo y estamos en el canal, seguimos "connected"; el
+  // fallo de un par se anota como aviso SUAVE (errorReason="connection") y NUNCA se
+  // pinta como error rojo total ni dispara el mensaje de "revisa el micrófono".
   const refreshConnectionState = useCallback(() => {
     if (!mountedRef.current) return;
     const peers = peersRef.current;
     if (peers.size === 0) {
       setConnectionState("connected"); // en el canal, sin pares aún: todo ok.
+      // Si veníamos de un aviso de par fallido y ya no hay pares, límpialo.
+      setErrorReason((r) => (r === "connection" ? null : r));
       return;
     }
     let anyConnecting = false;
@@ -154,9 +170,17 @@ export function useVoiceRoom(params: UseVoiceRoomParams): UseVoiceRoom {
       const s = pc.connectionState;
       if (s === "connected") continue;
       if (s === "failed") anyFailed = true;
-      else anyConnecting = true;
+      else anyConnecting = true; // new / connecting / disconnected: aún negociando.
     }
-    setConnectionState(anyFailed && !anyConnecting ? "error" : anyConnecting ? "connecting" : "connected");
+    if (anyConnecting) {
+      setConnectionState("connecting");
+      return;
+    }
+    // Ya no hay pares negociando: todos resolvieron a connected o failed. El micro y
+    // el canal están bien → seguimos "connected". Si algún par quedó en `failed`,
+    // lo señalamos como aviso suave (no como error de micrófono).
+    setConnectionState("connected");
+    setErrorReason((r) => (anyFailed ? "connection" : r === "connection" ? null : r));
   }, []);
 
   // --- Adjuntar/soltar audio remoto ------------------------------------------
@@ -315,6 +339,7 @@ export function useVoiceRoom(params: UseVoiceRoomParams): UseVoiceRoom {
       mutedRef.current = true;
       setParticipants([]);
       setConnectionState("idle");
+      setErrorReason(null);
     }
   }, [closePeer]);
 
@@ -352,15 +377,69 @@ export function useVoiceRoom(params: UseVoiceRoomParams): UseVoiceRoom {
   // --- join ------------------------------------------------------------------
   const join = useCallback(async () => {
     if (!enabled || signalingRef.current || !isSupabaseConfigured()) return;
-    if (typeof navigator === "undefined" || !navigator.mediaDevices) return;
-    setConnectionState("connecting");
-    try {
-      // 1) Micro (entramos MUTEADOS: deshabilita las pistas de salida).
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
-      if (!mountedRef.current) {
-        for (const t of stream.getTracks()) t.stop();
-        return;
+
+    // 0) Contexto seguro + API disponible. getUserMedia sólo existe en HTTPS (o
+    // localhost); si falta, no tiene sentido intentar: mensaje "necesita HTTPS".
+    const insecure =
+      typeof navigator === "undefined" ||
+      !navigator.mediaDevices ||
+      typeof navigator.mediaDevices.getUserMedia !== "function" ||
+      (typeof window !== "undefined" && window.isSecureContext === false);
+    if (insecure) {
+      if (mountedRef.current) {
+        setConnectionState("error");
+        setErrorReason("insecure");
       }
+      return;
+    }
+
+    setErrorReason(null); // limpia el error del intento anterior (reintento).
+    setConnectionState("connecting");
+
+    // 0.5) Pre-chequeo del permiso (best-effort; no todos los navegadores soportan
+    // el nombre "microphone" en la Permissions API). Si ya está DENEGADO de forma
+    // persistente, no llames a getUserMedia en vano: dirige directo al candado 🔒.
+    try {
+      const permissions = navigator.permissions;
+      if (permissions?.query) {
+        const status = await permissions.query({
+          name: "microphone",
+        } as unknown as PermissionDescriptor);
+        if (status.state === "denied") {
+          if (mountedRef.current) {
+            setConnectionState("error");
+            setErrorReason("permission");
+          }
+          return;
+        }
+      }
+    } catch {
+      /* Permissions API sin soporte para "microphone": seguimos a getUserMedia. */
+    }
+
+    // 1) Micro (entramos MUTEADOS). getUserMedia dispara el prompt del navegador la
+    // PRIMERA vez, tras el gesto del usuario (botón "Unirse a voz") y en contexto
+    // seguro. Si falla, CATEGORIZAMOS el DOMException para un mensaje honesto.
+    let stream: MediaStream;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+    } catch (err) {
+      console.warn("[voz]", err); // diagnóstico real (antes se tiraba con `void err`).
+      if (mountedRef.current) {
+        setConnectionState("error");
+        setErrorReason(classifyGetUserMediaError(err));
+        setJoined(false);
+      }
+      return;
+    }
+    if (!mountedRef.current) {
+      for (const t of stream.getTracks()) t.stop();
+      return;
+    }
+
+    // A partir de aquí el MICRO está bien: cualquier fallo posterior es de
+    // señalización/negociación (red/servidor), NO de micrófono → "connection".
+    try {
       localStreamRef.current = stream;
       mutedRef.current = true;
       setMuted(true);
@@ -406,7 +485,12 @@ export function useVoiceRoom(params: UseVoiceRoomParams): UseVoiceRoom {
           },
           onStatus: (s) => {
             if (!mountedRef.current) return;
-            if (s === "error") setConnectionState("error");
+            // Fallo del CANAL de señalización (Supabase caído/timeout): no es el
+            // micrófono → categoría "connection".
+            if (s === "error") {
+              setConnectionState("error");
+              setErrorReason("connection");
+            }
           },
         }
       );
@@ -416,19 +500,20 @@ export function useVoiceRoom(params: UseVoiceRoomParams): UseVoiceRoom {
       startMeter();
       setJoined(true);
       setConnectionState("connected");
+      setErrorReason(null);
       refreshParticipants();
     } catch (err) {
-      // Permiso denegado u otro fallo: limpia y marca error.
-      const stream = localStreamRef.current;
-      if (stream) for (const t of stream.getTracks()) t.stop();
+      // El micro fue bien; esto es un fallo de señalización/negociación (no del micro).
+      console.warn("[voz]", err);
+      for (const t of stream.getTracks()) t.stop();
       localStreamRef.current = null;
       signalingRef.current?.leave();
       signalingRef.current = null;
       if (mountedRef.current) {
         setConnectionState("error");
+        setErrorReason("connection");
         setJoined(false);
       }
-      void err;
     }
   }, [
     enabled,
@@ -482,5 +567,6 @@ export function useVoiceRoom(params: UseVoiceRoomParams): UseVoiceRoom {
     toggleMute,
     participants,
     connectionState,
+    errorReason,
   };
 }

@@ -41,7 +41,11 @@ function useIsTouch(): boolean {
  *         (world.input.pressGrab());
  *       - lejos de pelotas → "Dibuja" (toggle: encendido = dorado; vuelve a picar
  *         para apagar) → world.setDrawing.
- *   · CORRER (hold, feel arcade) → world.input.setRun(true/false).
+ *   · VOLAR (toggle) → world.input.pressFly(); alterna el modo vuelo (entrada
+ *     alternativa al triple salto). Encendido (dorado) mientras vuela; tocarlo de
+ *     nuevo = bajar. Va ARRIBA de Correr, en su misma columna.
+ *   · CORRER (toggle, como Dibuja) → world.input.pressRun(); un toque enciende y se
+ *     queda (dorado); otro toque apaga.
  *   · SALTAR → world.input.pressJump(); el triple toque encadena al VUELO y, en
  *     vuelo, la etiqueta pasa a "Caer" (misma acción: pulsar salto cae).
  *
@@ -87,9 +91,12 @@ export function MobileControls({ getWorld }: MobileControlsProps) {
   if (!isTouch) return null;
 
   const pressJump = () => getWorld?.()?.input?.pressJump?.();
-  const setRun = (on: boolean) => {
-    getWorld?.()?.input?.setRun?.(on);
-    setRunning(on);
+  const pressFly = () => getWorld?.()?.input?.pressFly?.();
+  // Correr en TOGGLE (como Dibuja): un toque enciende y se queda; otro toque apaga.
+  // El estado "corriendo" se refleja localmente (dorado + aria-pressed).
+  const toggleRun = () => {
+    getWorld?.()?.input?.pressRun?.();
+    setRunning((r) => !r);
   };
 
   const onAction = () => {
@@ -127,24 +134,34 @@ export function MobileControls({ getWorld }: MobileControlsProps) {
       </button>
 
       <div className={styles.row}>
-        <button
-          type="button"
-          className={`${styles.btn} ${styles.run} ${running ? styles.runOn : ""}`}
-          onPointerDown={(e) => {
-            e.preventDefault();
-            setRun(true);
-          }}
-          onPointerUp={(e) => {
-            e.preventDefault();
-            setRun(false);
-          }}
-          onPointerLeave={() => running && setRun(false)}
-          onPointerCancel={() => running && setRun(false)}
-          aria-label="Correr"
-          aria-pressed={running}
-        >
-          Correr
-        </button>
+        {/* Columna izquierda: Volar ARRIBA, Correr ABAJO. */}
+        <div className={styles.col}>
+          <button
+            type="button"
+            className={`${styles.btn} ${styles.fly} ${state.flying ? styles.flyOn : ""}`}
+            onPointerDown={(e) => {
+              e.preventDefault();
+              pressFly();
+            }}
+            aria-label="Volar"
+            aria-pressed={state.flying}
+          >
+            Volar
+          </button>
+
+          <button
+            type="button"
+            className={`${styles.btn} ${styles.run} ${running ? styles.runOn : ""}`}
+            onPointerDown={(e) => {
+              e.preventDefault();
+              toggleRun();
+            }}
+            aria-label="Correr"
+            aria-pressed={running}
+          >
+            Correr
+          </button>
+        </div>
 
         <button
           type="button"

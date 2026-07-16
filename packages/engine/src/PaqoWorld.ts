@@ -963,6 +963,9 @@ export class PaqoWorld {
     if (z) this.follow.zoom(z);
 
     const f = this.input.consumeMove();
+    // [VUELO] Botón "Volar" / tecla Q: alterna el modo vuelo del controller (entrada
+    // ALTERNATIVA al triple salto, que se conserva). Edge de un frame.
+    if (f.fly) this.controller.toggleFly();
     let throttle = 0;
     this._worldDir.set(0, 0, 0);
 

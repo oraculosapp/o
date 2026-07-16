@@ -223,20 +223,36 @@
   /* "Más onda": velo dorado sutil que se difumina hacia abajo. */
   background: linear-gradient(180deg, rgba(227, 176, 99, 0.1), rgba(227, 176, 99, 0) 90%);
 }
-.tabs {
+/* --- Los TRES controles unificados: General · Privado con Paqo · Unirse a voz ---
+   Antes eran dos estilos distintos (píldoras .tab + botón glass de voz). Ahora los
+   tres comparten `.segment` (mismo tamaño, forma, tipografía y glass) y viven en una
+   sola fila `.segments`. Semántica intacta: General/Privado son role=tab (en .tabs,
+   tablist con roving/aria-selected); "Unirse a voz" es role=button — se VEN iguales
+   pero se COMPORTAN según su rol. El chat inyecta `.segment` al botón de voz. */
+.segments {
   display: inline-flex;
-  gap: 0.25rem;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  min-width: 0;
 }
-.tab {
+.tabs {
   display: inline-flex;
   align-items: center;
   gap: 0.3rem;
-  /* Etiquetas más largas ("Chat general" / "Privado con Paqo"): padding y tracking
-     más ajustados + nowrap para que cada pestaña no se parta en dos líneas. */
-  padding: 0.4rem 0.55rem;
-  border: 1px solid transparent;
+}
+.segment {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.3rem;
+  min-height: 32px;
+  /* Etiquetas largas ("Privado con Paqo"): padding y tracking ajustados + nowrap
+     para que ningún segmento se parta en dos líneas. */
+  padding: 0.4rem 0.7rem;
+  border: 1px solid var(--line-soft);
   border-radius: var(--radius-pill);
-  background: transparent;
+  background: rgba(255, 255, 255, 0.03);
   color: var(--text-dim);
   font-family: var(--font-display);
   font-size: 0.68rem;
@@ -246,14 +262,29 @@
   cursor: pointer;
   transition:
     color var(--dur-fast) var(--ease-brand),
-    background var(--dur-fast) var(--ease-brand);
+    background var(--dur-fast) var(--ease-brand),
+    border-color var(--dur-fast) var(--ease-brand);
 }
-.tab:hover {
+/* Hover SÓLO en los NO activos: el segmento activo (tab seleccionado) se queda firme
+   y no parpadea al pasar el ratón (problema 2). */
+.segment:hover:not(.segmentActive):not(:disabled) {
   color: var(--text);
+  border-color: var(--gold-dim);
 }
-.tabActive {
+.segment:focus-visible {
+  outline: 2px solid var(--gold-bright);
+  outline-offset: 2px;
+  border-color: var(--gold-dim);
+}
+.segment:disabled {
+  cursor: not-allowed;
+  color: var(--text-faint);
+  opacity: 0.7;
+}
+.segmentActive {
   color: var(--bg-0);
   background: linear-gradient(180deg, var(--gold-bright), var(--gold));
+  border-color: var(--gold);
 }
 .tabCount {
   font-size: 0.64rem;
@@ -262,7 +293,7 @@
 .tabSpark {
   color: var(--gold);
 }
-.tabActive .tabSpark {
+.segmentActive .tabSpark {
   color: var(--bg-0);
 }
 .headerRight {
@@ -285,7 +316,9 @@
     color var(--dur-fast) var(--ease-brand),
     border-color var(--dur-fast) var(--ease-brand);
 }
-.iconBtn:hover {
+/* Hover SÓLO cuando NO está en estado activo: el toggle presionado (aria-pressed)
+   ya luce dorado, así que hover no debe cambiarle el borde ni hacerlo parpadear. */
+.iconBtn:hover:not([aria-pressed="true"]) {
   color: var(--gold-bright);
   border-color: var(--gold-dim);
 }
@@ -308,7 +341,9 @@
   cursor: grabbing;
 }
 
-/* Slot de los controles de VOZ en la cabecera (VoiceControls o aviso). */
+/* Slot de los controles de VOZ dentro de la fila `.segments`. El botón "Unirse a
+   voz" recibe la clase `.segment` (mismo look que los tabs); el <p> de estado cuelga
+   debajo (aria-live). Alineado al centro para casar con los tabs de la fila. */
 .voiceSlot {
   display: inline-flex;
   align-items: center;
@@ -835,34 +870,16 @@
     bottom: calc(14px + env(safe-area-inset-bottom));
   }
 
-  /* VOZ SIEMPRE accesible en móvil: en escritorio vive inline en la cabecera, pero
-     en móvil el ancho no da y quedaba oculta/cortada. Aquí baja a su PROPIA fila,
-     de ancho completo, bajo los tabs (el header hace flex-wrap): tabs + colapsar en
-     la 1ª fila; "Unirse a la voz" (VoiceControls intacto) centrado en la 2ª. */
-  .voiceSlot {
-    order: 3;
-    flex-basis: 100%;
-    justify-content: center;
-    margin-top: 0.1rem;
-    padding-top: 0.4rem;
-    border-top: 1px solid var(--line-soft);
-  }
-  .voiceSlot:empty {
-    /* Sin sesión aún (VoiceControls no montado): no dejes una franja/borde vacío. */
-    border-top: none;
-    padding-top: 0;
-    margin-top: 0;
-  }
-  .headerRight {
-    order: 2;
-  }
+  /* Los tres segmentos (General · Privado · Unirse a voz) siguen en la MISMA fila,
+     unificados; `.segments` envuelve a la siguiente línea si el ancho no da. Ya no
+     hace falta bajar la voz a una fila aparte con borde: comparten estilo y flujo. */
 
   /* Áreas táctiles ≥44px en TODOS los controles del HUD de chat (problema 6). */
   .iconBtn {
     width: 44px;
     height: 44px;
   }
-  .tab {
+  .segment {
     min-height: 44px;
   }
   .nameChip {

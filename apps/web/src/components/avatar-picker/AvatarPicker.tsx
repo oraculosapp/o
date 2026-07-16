@@ -1,11 +1,11 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { thumbUrl } from "@/lib/avatars";
 import { PASTEL_COLORS } from "@/lib/names";
 import { defaultSelection, type AvatarSelection } from "@/lib/avatar-store";
 import { useFocusTrap } from "@/components/useFocusTrap";
 import { useModalLock } from "@/components/modal-lock";
+import { AvatarLivePreview } from "./AvatarLivePreview";
 import styles from "./avatar-picker.module.css";
 
 export interface AvatarPickerProps {
@@ -51,8 +51,6 @@ export function AvatarPicker({ open, initial, onClose, onApply }: AvatarPickerPr
 
   if (!open) return null;
 
-  const thumb = thumbUrl();
-
   return (
     <div className={styles.overlay} role="dialog" aria-modal="true" aria-label="Elige tu color">
       <section className={styles.panel} ref={panelRef}>
@@ -65,23 +63,9 @@ export function AvatarPicker({ open, initial, onClose, onApply }: AvatarPickerPr
           <h2 className={styles.title}>Elige tu color</h2>
         </header>
 
-        {/* Retrato de nube tintado en vivo: la miniatura (body blanco) con un
-            overlay del color en multiply, enmascarado por la propia imagen. */}
-        <div className={styles.nubeStage}>
-          <div className={styles.nubeFigure}>
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={thumb} alt="" aria-hidden className={styles.nubeImg} />
-            <span
-              className={styles.nubeTint}
-              aria-hidden
-              style={{
-                backgroundColor: color,
-                WebkitMaskImage: `url(${thumb})`,
-                maskImage: `url(${thumb})`,
-              }}
-            />
-          </div>
-        </div>
+        {/* Mini-visor 3D EN VIVO del avatar nube: camina en el sitio, parpadea y
+            cambia de color al instante. Cae al retrato estático si WebGL falla. */}
+        <AvatarLivePreview color={color} />
 
         {/* Paleta pastel-plastilina (chips) + picker libre */}
         <div className={styles.controlGroup}>

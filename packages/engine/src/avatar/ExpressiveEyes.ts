@@ -11,7 +11,7 @@ import * as THREE from "three";
  *   · walk : normales (con parpadeo).
  *   · run  : entrecerrados decididos (escala Y ~0.6).
  *   · jump : MUY abiertos (escala 1.3).
- *   · fly  : abiertos + BRILLO (escala 1.25 + emissive).
+ *   · fly  : TRIÁNGULOS traviesos ▲ (tercera geometría; ojo redondo oculto, sin tinte).
  *   · dance: felices — "ojos sonrientes" ∩ (segunda geometría de media luna).
  *
  * Al ir anclados al hueso `Head`, siguen la animación de la cabeza (idle, marcha,
@@ -50,7 +50,7 @@ const EXPR: Record<EyeState, THREE.Vector3> = {
   walk: new THREE.Vector3(1, 1, 1),
   run: new THREE.Vector3(1, 0.6, 1), // entrecerrados
   jump: new THREE.Vector3(1.3, 1.3, 1.3), // muy abiertos
-  fly: new THREE.Vector3(1.25, 1.25, 1.25), // abiertos + brillo
+  fly: new THREE.Vector3(1, 1, 1), // usa geometría ▲ (round oculto)
   dance: new THREE.Vector3(1, 1, 1), // usa geometría ∩ (round oculto)
 };
 
@@ -62,8 +62,9 @@ const BLINK_MAX = 6;
 const BLINK_DUR = 0.12;
 /** Factor de cierre del parpadeo (escala Y en el pico). */
 const BLINK_CLOSE = 0.08;
-/** Intensidad emissive objetivo en vuelo (brillo). */
-const FLY_GLOW = 0.9;
+/** Radio del triángulo de vuelo (sobre EYE_RADIUS) y ladeo por ojo (rad). */
+const TRI_RADIUS = EYE_RADIUS * 1.25;
+const TRI_TILT = 0.16;
 
 /** Normaliza un nombre de hueso Mixamo para reconocer la cabeza. */
 function isHeadBone(raw: string): boolean {
@@ -80,6 +81,7 @@ function isHeadBone(raw: string): boolean {
 interface EyeMeshes {
   round: THREE.Mesh; // ojo normal (elipse)
   arc: THREE.Mesh; // "∩" feliz (media luna)
+  tri: THREE.Mesh; // "▲" travieso (vuelo)
 }
 
 export class ExpressiveEyes {
@@ -89,10 +91,11 @@ export class ExpressiveEyes {
   private eyes: EyeMeshes[] = [];
   private roundMat?: THREE.MeshToonMaterial;
   private arcMat?: THREE.MeshToonMaterial;
+  private triMat?: THREE.MeshToonMaterial;
 
   // Blend de expresión.
   private cur = new THREE.Vector3(1, 1, 1); // multiplicador actual amortiguado
-  private glow = 0; // emissiveIntensity actual amortiguado
+  private flyW = 0; // peso amortiguado del "modo vuelo" (0..1) para el ▲
   private state: EyeState = "idle";
 
   // Parpadeo (solo en idle/walk).
@@ -115,40 +118,50 @@ export class ExpressiveEyes {
       this.applied = false;
       return;
     }
+    const headBone = head; // captura para las closures de abajo (narrowing estable)
 
-    // Materiales negros toon (misma familia de la casa). El emissive (apagado por
-    // defecto) da el brillo del vuelo sin depender de luces.
-    const mk = () => {
-      const m = new THREE.MeshToonMaterial({ color: 0x141118 });
+    // Materiales negros toon (misma familia de la casa). Sin emissive: en vuelo la
+    // expresión la da la GEOMETRÍA (triángulo), no un tinte de color.
+    const mk = (side: THREE.Side = THREE.FrontSide) => {
+      const m = new THREE.MeshToonMaterial({ color: 0x141118, side });
       if (ramp) m.gradientMap = ramp;
-      m.emissive = new THREE.Color(0x66ccff);
-      m.emissiveIntensity = 0;
       return m;
     };
     this.roundMat = mk();
     this.arcMat = mk();
+    // El triángulo es una malla plana (ShapeGeometry) → visible por ambas caras
+    // sea cual sea la orientación del hueso tras el export.
+    this.triMat = mk(THREE.DoubleSide);
 
-    // Geometrías compartidas por ambos ojos (una esfera + una media luna).
+    // Geometrías compartidas por todos los ojos (esfera + media luna + triángulo).
     const sphere = new THREE.SphereGeometry(EYE_RADIUS, 16, 10);
     // Torus (arco 0..π = media luna ∩, abriendo hacia abajo → ojo feliz).
     const torus = new THREE.TorusGeometry(EYE_RADIUS * 0.95, EYE_RADIUS * 0.32, 6, 14, Math.PI);
+    // Triángulo equilátero ▲ apuntando hacia arriba, centrado en el origen (plano XY).
+    const r = TRI_RADIUS;
+    const triShape = new THREE.Shape();
+    triShape.moveTo(0, r);
+    triShape.lineTo(-r * 0.866, -r * 0.5);
+    triShape.lineTo(r * 0.866, -r * 0.5);
+    triShape.closePath();
+    const triGeo = new THREE.ShapeGeometry(triShape);
 
     const rootQ = root.getWorldQuaternion(new THREE.Quaternion());
-    const headQ = head.getWorldQuaternion(new THREE.Quaternion());
+    const headQ = headBone.getWorldQuaternion(new THREE.Quaternion());
     // Orientación local (respecto al hueso) que deja el grupo mirando al frente
     // del avatar: worldQuat(grupo) = rootQ ⇒ localQuat = inverse(headQ)·rootQ.
     const localQ = headQ.clone().invert().multiply(rootQ);
 
-    for (const [bx, by, bz] of EYE_BLENDER_XYZ) {
+    EYE_BLENDER_XYZ.forEach(([bx, by, bz], i) => {
       // Blender (bx,by,bz) → three root-local (bx, bz, −by).
       const rootLocal = new THREE.Vector3(bx, bz, -by);
       const world = root.localToWorld(rootLocal.clone());
-      const local = head.worldToLocal(world.clone());
+      const local = headBone.worldToLocal(world.clone());
 
       const group = new THREE.Object3D();
       group.position.copy(local);
       group.quaternion.copy(localQ);
-      head.add(group);
+      headBone.add(group);
 
       const round = new THREE.Mesh(sphere, this.roundMat);
       round.scale.copy(EYE_BASE);
@@ -156,10 +169,15 @@ export class ExpressiveEyes {
       // La media luna: plana contra la cara y del tamaño del ojo.
       arc.scale.set(EYE_BASE.x, EYE_BASE.y, 0.4);
       arc.visible = false;
+      const tri = new THREE.Mesh(triGeo, this.triMat);
+      // Ladeo opuesto por ojo (izq/der) → gesto travieso/aventurero.
+      tri.rotation.z = i === 0 ? TRI_TILT : -TRI_TILT;
+      tri.visible = false;
       group.add(round);
       group.add(arc);
-      this.eyes.push({ round, arc });
-    }
+      group.add(tri);
+      this.eyes.push({ round, arc, tri });
+    });
 
     this.applied = true;
   }
@@ -169,12 +187,12 @@ export class ExpressiveEyes {
     if (!this.applied || dt <= 0) return;
     this.state = state;
 
-    // Blend suave del multiplicador de escala y del brillo hacia el objetivo.
+    // Blend suave del multiplicador de escala y del peso de vuelo hacia el objetivo.
     const target = EXPR[state];
     const k = 1 - Math.exp(-dt / BLEND_TAU);
     this.cur.lerp(target, k);
-    const glowTarget = state === "fly" ? FLY_GLOW : 0;
-    this.glow += (glowTarget - this.glow) * k;
+    const flyTarget = state === "fly" ? 1 : 0;
+    this.flyW += (flyTarget - this.flyW) * k;
 
     // Parpadeo solo en estados de ojos "normales" (idle/walk).
     const canBlink = state === "idle" || state === "walk";
@@ -201,21 +219,23 @@ export class ExpressiveEyes {
       this.blinking = false;
     }
 
-    // Modo feliz (dance): media luna ∩ visible, ojo redondo oculto.
+    // Modo feliz (dance): media luna ∩. Modo vuelo: triángulo ▲ (crece con flyW).
     const happy = state === "dance";
+    const flying = this.flyW > 0.01;
 
-    for (const { round, arc } of this.eyes) {
-      round.visible = !happy;
+    for (const { round, arc, tri } of this.eyes) {
+      // El ▲ crece desde 0 y el redondo se retira pasado el cruce → fundido suave.
+      round.visible = !happy && this.flyW < 0.6;
       arc.visible = happy;
+      tri.visible = !happy && flying;
       this._s.set(
         EYE_BASE.x * this.cur.x,
         EYE_BASE.y * this.cur.y * blinkY,
         EYE_BASE.z * this.cur.z,
       );
       round.scale.copy(this._s);
+      tri.scale.set(this.flyW, this.flyW, 1);
     }
-    if (this.roundMat) this.roundMat.emissiveIntensity = this.glow;
-    if (this.arcMat) this.arcMat.emissiveIntensity = this.glow;
   }
 
   dispose(): void {
@@ -224,12 +244,15 @@ export class ExpressiveEyes {
     if (first) {
       first.round.geometry.dispose();
       first.arc.geometry.dispose();
+      first.tri.geometry.dispose();
     }
     this.roundMat?.dispose();
     this.arcMat?.dispose();
-    for (const { round, arc } of this.eyes) {
+    this.triMat?.dispose();
+    for (const { round, arc, tri } of this.eyes) {
       round.removeFromParent();
       arc.removeFromParent();
+      tri.removeFromParent();
     }
     this.eyes = [];
   }

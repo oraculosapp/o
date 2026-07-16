@@ -26,10 +26,18 @@
   pointer-events: none;
 }
 
-/* Fila inferior del clúster: Correr (izq) + Saltar (der), lado a lado. */
+/* Fila inferior del clúster: columna [Volar/Correr] (izq) + Saltar (der). */
 .row {
   display: flex;
   flex-direction: row;
+  align-items: flex-end;
+  gap: 0.7rem;
+}
+
+/* Columna izquierda: Volar ARRIBA, Correr ABAJO. */
+.col {
+  display: flex;
+  flex-direction: column;
   align-items: flex-end;
   gap: 0.7rem;
 }
@@ -103,24 +111,30 @@
   box-shadow: var(--shadow), 0 0 24px var(--glow);
 }
 
-/* Correr: neutro; encendido (hold) resalta con dorado tenue. ~15% más chico (66→56),
-   por encima del mínimo táctil de 44px. */
-.run {
+/* Correr y Volar: neutros de base; ~15% más chicos (56px), sobre el mínimo táctil
+   de 44px. Encendidos (toggle) resaltan en dorado sólido con halo, como Dibuja. */
+.run,
+.fly {
   width: 56px;
   height: 56px;
   font-size: 0.6rem;
 }
-.runOn {
-  background: linear-gradient(180deg, rgba(227, 176, 99, 0.34), rgba(227, 176, 99, 0.16));
-  border-color: var(--gold-dim);
-  transform: scale(0.96);
+/* Estado "on" persistente (toggle): dorado encendido con halo — mismo lenguaje que
+   .drawingOn, para que "activo" se lea igual en todo el mando. */
+.runOn,
+.flyOn {
+  background: linear-gradient(180deg, rgba(227, 176, 99, 0.55), rgba(227, 176, 99, 0.3));
+  border-color: var(--gold-bright);
+  color: #1a130a;
+  box-shadow: var(--shadow), 0 0 24px var(--glow);
 }
 
 @media (prefers-reduced-motion: reduce) {
   .pad,
   .btn,
   .action,
-  .run {
+  .run,
+  .fly {
     transition: none;
     animation: none;
   }

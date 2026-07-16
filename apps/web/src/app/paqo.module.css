@@ -36,6 +36,16 @@
   max-width: min(calc(100vw - 28px), 620px);
 }
 
+/* En móvil (coarse) achicamos los 7 botones del menú (44→38px) para que quepan
+   TODOS en una sola fila a lo ancho de teléfonos comunes (~360-390px). Con gap 8px:
+   7×38 + 6×8 = 314px < (100vw-28px) incluso a 360px. Cada botón conserva su área
+   táctil efectiva de 44px vía un pseudo-elemento transparente (ver cada módulo). */
+@media (pointer: coarse), (max-width: 640px) {
+  .topMenu {
+    gap: 8px;
+  }
+}
+
 /* Loader de marca sobre nebulosa mientras compila la escena. */
 .loader {
   position: absolute;

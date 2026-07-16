@@ -157,6 +157,12 @@
   width: min(230px, 56vw);
   aspect-ratio: 1;
 }
+/* Host del mini-visor 3D EN VIVO (canvas propio, fondo transparente). */
+.liveHost {
+  width: min(260px, 60vw);
+  aspect-ratio: 1;
+  filter: drop-shadow(0 10px 22px rgba(8, 10, 18, 0.45));
+}
 .nubeImg {
   display: block;
   width: 100%;

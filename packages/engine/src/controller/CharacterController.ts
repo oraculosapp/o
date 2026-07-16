@@ -33,10 +33,18 @@ const TMP = {
   tangent: new THREE.Vector3(),
   flyTarget: new THREE.Vector3(),
 };
-/** Frecuencia angular del bob de flotación idle en vuelo (0.5 Hz → 2π·0.5). */
-const FLY_BOB_W = Math.PI;
-/** Amplitud del bob de flotación idle en vuelo (u). */
-const FLY_BOB_AMP = 0.15;
+/**
+ * Frecuencia angular del bob de flotación idle en vuelo. 0.35 Hz (→ 2π·0.35): más
+ * LENTO que la v1 (0.5 Hz) para un flote gentil y pausado — feedback de Julio
+ * ("que suba y baje poco y con ease").
+ */
+const FLY_BOB_W = 2 * Math.PI * 0.35;
+/**
+ * Amplitud (u) del bob de flotación idle en vuelo. SUTIL: 0.07 (v1 era 0.15) —
+ * "sube y baja poco". El desplazamiento pico ≈ FLY_BOB_AMP porque la curva de ease
+ * cumple ease(±1)=±1 (ver `updateFly`).
+ */
+const FLY_BOB_AMP = 0.07;
 
 /**
  * Character controller PLANAR de isla flotante: up constante (0,1,0), gravedad
@@ -73,6 +81,14 @@ export class CharacterController {
   private readonly flyAccel = 20;
   /** ¿En modo VUELO? (gravedad off; se mueve hacia donde mira). */
   private flying = false;
+  /**
+   * Impulso vertical de despegue (u/s) al ENTRAR a vuelo desde el suelo (botón
+   * "Volar"/tecla Q). Sin él, la colisión de §4 volvería a posar al personaje en
+   * el mismo frame (pies ≈ suelo, vertVel≤0) y saldría del vuelo al instante. Con
+   * el impulso se separa del umbral de aterrizaje (~0.9 u de altura) y queda en
+   * vuelo estable. Entrar a vuelo EN EL AIRE no lo usa (ya está despegado).
+   */
+  private readonly flyLiftoff = 6;
   /** ¿El vuelo tiene input de movimiento este frame? (para la pose del rig). */
   private flyMoving = false;
   /** Reloj del bob de flotación idle (s). */
@@ -243,6 +259,40 @@ export class CharacterController {
   /** ¿En modo VUELO? (para el rig, la anim de red y la etiqueta del botón "Caer"). */
   isFlying(): boolean {
     return this.flying;
+  }
+
+  /**
+   * Alterna el modo VUELO — ENTRADA ALTERNATIVA al triple salto (botón "Volar" en
+   * móvil, tecla Q en escritorio). NO reemplaza el triple salto: ambos caminos
+   * conviven (el 3er salto sigue activando el vuelo en `update` §2).
+   *   · En suelo o aire y NO vuela → entra a vuelo: gravedad off, `jumpsUsed` a tope
+   *     (coherente con el 3er salto), bob reiniciado. Desde el SUELO da un impulso
+   *     de despegue (`flyLiftoff`) para no re-aterrizar en el mismo frame; en el
+   *     aire conserva su altura (vertVel a cero, como el 3er salto).
+   *   · Si YA vuela → sale: cae con gravedad normal desde reposo vertical.
+   * Conserva TODO el vuelo actual (crucero, flotación idle, salto-en-vuelo = caer).
+   */
+  toggleFly(): void {
+    this.setFlying(!this.flying);
+  }
+
+  /** Fija el modo VUELO explícitamente (idempotente). Ver {@link toggleFly}. */
+  setFlying(on: boolean): void {
+    if (on === this.flying) return;
+    if (on) {
+      const wasGrounded = this.grounded;
+      this.flying = true;
+      this.jumpsUsed = this.maxJumps;
+      this.flyBobT = 0;
+      this.grounded = false;
+      // Despegue desde el suelo: impulso hacia arriba para separarse del umbral de
+      // aterrizaje. En el aire NO da tirón (parte de reposo vertical, como el 3er salto).
+      this.vertVel = wasGrounded ? this.flyLiftoff : 0;
+    } else {
+      this.flying = false;
+      this.flyMoving = false;
+      this.vertVel = 0;
+    }
   }
 
   isFalling(): boolean {
@@ -453,7 +503,7 @@ export class CharacterController {
    * cuánto el movimiento va "hacia delante" respecto a la cámara. Así, mirar
    * arriba y avanzar (W) sube; mirar abajo baja; el strafe queda nivelado. La
    * velocidad 3D se suaviza (flyAccel). Sin input: la velocidad decae a cero y se
-   * añade un bob senoidal sutil (flotación idle). NO hay gravedad aquí.
+   * añade un bob CON EASE, sutil (flotación idle delicada). NO hay gravedad aquí.
    */
   private updateFly(dt: number, intent: MoveIntent): void {
     TMP.desired.copy(intent.worldDir);
@@ -499,12 +549,20 @@ export class CharacterController {
       this.vertVel = cy + dy * k;
     }
 
-    // Flotación idle: sin input, bob senoidal ±0.15 u @0.5 Hz sumado a la velocidad
-    // vertical (su integral es el desplazamiento senoidal; no acumula deriva porque
-    // la velocidad base decae a 0).
+    // Flotación idle SUTIL CON EASE: sin input, un flote delicado ±FLY_BOB_AMP u
+    // @0.35 Hz sumado a la velocidad vertical (su integral es el desplazamiento, no
+    // acumula deriva porque la velocidad base decae a 0).
+    //   Desplazamiento = FLY_BOB_AMP · ease(sin φ),  ease(u) = 1.5u − 0.5u³.
+    // La curva `ease` REDONDEA cimas y valles (pendiente nula en los extremos: el
+    // flote se demora gentilmente arriba y abajo) → se siente un flote con ease, no
+    // un balanceo mecánico. Sumamos su DERIVADA temporal exacta como velocidad:
+    //   d/dt = FLY_BOB_AMP · ease'(sin φ) · cos φ · FLY_BOB_W,  ease'(u) = 1.5 − 1.5u².
     if (!hasInput) {
       this.flyBobT += dt;
-      this.vertVel += FLY_BOB_AMP * FLY_BOB_W * Math.cos(FLY_BOB_W * this.flyBobT);
+      const phase = FLY_BOB_W * this.flyBobT;
+      const s = Math.sin(phase);
+      const easeDeriv = 1.5 - 1.5 * s * s; // ease'(u) con u = sin φ
+      this.vertVel += FLY_BOB_AMP * FLY_BOB_W * easeDeriv * Math.cos(phase);
     }
   }
 
