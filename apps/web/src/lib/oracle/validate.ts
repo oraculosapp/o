@@ -30,6 +30,14 @@ export interface OracleRequest {
    * respuesta con `is_oracle = true`. Si se omite, el handler usa `oracleId`.
    */
   biosphereId?: string;
+  /**
+   * Nombre público (nickname) de quien habla en el chat general. Sólo se usa en
+   * `mode: "public"` para que Paqo pueda dirigirse a la persona por su nombre.
+   * Ya viene sanitizado por `validateOracleRequest` (recortado, sin control
+   * chars, cap `MAX_SPEAKER_NAME_LEN`). Es DATO de usuario: el handler lo trata
+   * como un nombre, nunca como instrucción. Ausente si venía vacío/ilegible.
+   */
+  speakerName?: string;
 }
 
 export interface ValidationOk {
@@ -46,6 +54,8 @@ export type ValidationResult = ValidationOk | ValidationErr;
 export const MAX_MESSAGE_LEN = 2_000;
 export const MAX_MESSAGES = 40;
 export const MAX_ORACLE_ID_LEN = 64;
+/** Tope del nickname del hablante inyectado en el prompt público. */
+export const MAX_SPEAKER_NAME_LEN = 40;
 /**
  * Tope del tamaño TOTAL de entrada por petición (suma de chars de `messages`).
  * Corta el vector "muchos mensajes casi-máximos" que quemaría presupuesto de
@@ -54,6 +64,26 @@ export const MAX_ORACLE_ID_LEN = 64;
 export const MAX_TOTAL_INPUT_CHARS = 6_000;
 
 const ORACLE_ID_RE = /^[a-z0-9-]{1,64}$/;
+
+/**
+ * Sanea el nickname del hablante para inyectarlo con seguridad en el prompt
+ * público. Es DATO de usuario, así que:
+ *  · elimina saltos de línea y caracteres de control (evita romper el prompt o
+ *    colar líneas tipo "system:"),
+ *  · colapsa espacios,
+ *  · recorta y capa a `MAX_SPEAKER_NAME_LEN`.
+ * Devuelve "" si no queda nada legible (el llamador lo trata como ausente).
+ */
+export function sanitizeSpeakerName(raw: string): string {
+  return raw
+    // Control chars (incl. saltos de linea y tabs) y DEL -> espacio.
+    // eslint-disable-next-line no-control-regex
+    .replace(/[\u0000-\u001F\u007F]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, MAX_SPEAKER_NAME_LEN)
+    .trim();
+}
 
 /**
  * LISTA BLANCA de Oráculos (A-1): la lista REAL de voces escritas del paquete de
@@ -161,7 +191,22 @@ export function validateOracleRequest(body: unknown): ValidationResult {
     biosphereId = b.biosphereId;
   }
 
-  return { ok: true, value: { oracleId, mode, messages, conversationId, biosphereId } };
+  // Nombre del hablante (chat público). Opcional y saneado: es DATO de usuario,
+  // no una instrucción. Si tras sanear queda vacío/ilegible, se omite (el prompt
+  // se comporta como si no viniera nombre).
+  let speakerName: string | undefined;
+  if (b.speakerName !== undefined) {
+    if (typeof b.speakerName !== "string") {
+      return { ok: false, error: "speakerName debe ser string." };
+    }
+    const clean = sanitizeSpeakerName(b.speakerName);
+    if (clean.length > 0) speakerName = clean;
+  }
+
+  return {
+    ok: true,
+    value: { oracleId, mode, messages, conversationId, biosphereId, speakerName },
+  };
 }
 
 /**

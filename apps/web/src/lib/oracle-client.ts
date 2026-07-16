@@ -145,6 +145,13 @@ export async function mentionPaqoPublic(params: {
   biosphereId: string;
   messages: WireMessage[];
   sessionId?: string;
+  /**
+   * Nombre público (nickname) de quien menciona a Paqo. Se envía para que Paqo
+   * pueda dirigirse a la persona por su nombre en el chat general. El servidor
+   * lo sanitiza (longitud, control chars) y lo trata como un NOMBRE, nunca como
+   * instrucción. Si se omite o queda vacío, el comportamiento es el de siempre.
+   */
+  speakerName?: string;
 }): Promise<void> {
   try {
     const res = await fetch("/api/oracle", {
@@ -158,6 +165,7 @@ export async function mentionPaqoPublic(params: {
         mode: "public",
         biosphereId: params.biosphereId,
         messages: params.messages,
+        ...(params.speakerName ? { speakerName: params.speakerName } : {}),
       }),
     });
     // Drenamos el cuerpo para cerrar la conexión limpiamente; no lo usamos.

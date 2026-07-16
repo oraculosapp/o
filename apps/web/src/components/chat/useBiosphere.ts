@@ -131,10 +131,15 @@ export function useBiosphere(params: {
       if (row) pushMessage(row); // eco optimista (postgres_changes deduplica)
 
       if (mentionsPaqo(trimmed)) {
+        const id = rt.getIdentity();
         void mentionPaqoPublic({
           biosphereId,
           messages: [{ role: "user", content: trimmed }],
-          sessionId: rt.getIdentity()?.sessionId,
+          sessionId: id?.sessionId,
+          // El displayName del realtime ya es el nombre público del viajero
+          // (nombre guardado o DEFAULT_NAME). Así Paqo puede dirigirse a la
+          // persona por su nickname en el chat general.
+          speakerName: id?.displayName ?? DEFAULT_NAME,
         });
       }
     },

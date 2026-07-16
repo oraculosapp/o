@@ -121,6 +121,34 @@ describe("POST /api/oracle", () => {
     );
   });
 
+  it("en público inyecta el speakerName en el system prompt (para nombrar a la persona)", async () => {
+    const capture: { messages?: ChatMessage[] } = {};
+    const POST = createOracleRoute(
+      baseDeps({ createChatModel: () => stubModel(["ok"], capture) })
+    );
+    await POST(makeReq({ ...publicBody, speakerName: "Lucía" })).then(readSse);
+    const sys = capture.messages?.find((m) => m.role === "system");
+    // El nombre llega al modelo enmarcado como NOMBRE, no como turno del usuario.
+    expect(sys?.content).toContain("Lucía");
+    expect(sys?.content).toContain("el nombre del viajero");
+    // Sigue sin fundir el mensaje del usuario en el system.
+    expect(sys?.content).not.toContain("¿a dónde voy?");
+    // El nombre NO se inyecta como un turno de usuario extra.
+    const userTurns = capture.messages?.filter((m) => m.role === "user") ?? [];
+    expect(userTurns).toHaveLength(1);
+  });
+
+  it("sin speakerName no añade contexto de nombre al system prompt (compat)", async () => {
+    const capture: { messages?: ChatMessage[] } = {};
+    const POST = createOracleRoute(
+      baseDeps({ createChatModel: () => stubModel(["ok"], capture) })
+    );
+    await POST(makeReq(publicBody)).then(readSse);
+    const sys = capture.messages?.find((m) => m.role === "system");
+    expect(sys?.content).toBe("SYSTEM_PAQO");
+    expect(sys?.content).not.toContain("el nombre del viajero");
+  });
+
   it("devuelve 400 con payload inválido", async () => {
     const POST = createOracleRoute(baseDeps());
     const res = await POST(makeReq({ oracleId: "paqo", mode: "public", messages: [] }));

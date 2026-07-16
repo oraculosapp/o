@@ -17,7 +17,7 @@ export default function PrivacidadPage() {
   return (
     <LegalPage
       title="Aviso de privacidad"
-      updated="11 de julio de 2026"
+      updated="16 de julio de 2026"
       intro={
         <>
           En Phygitalia queremos que explorar el mundo de los Oráculos se sienta seguro. Aquí te
@@ -55,9 +55,28 @@ export default function PrivacidadPage() {
       <h2>Dónde vive tu información</h2>
       <p>
         Nos apoyamos en proveedores de confianza para operar: <strong>Supabase</strong> (base de
-        datos y cuentas), <strong>Vercel</strong> (alojamiento del sitio) y <strong>OpenAI</strong>{" "}
-        (generación de las respuestas de los Oráculos). Cada uno procesa únicamente lo necesario
-        para su función. <b>No vendemos ni comerciamos con tus datos.</b>
+        datos y cuentas), <strong>Vercel</strong> (alojamiento del sitio), <strong>OpenAI</strong>{" "}
+        (generación de las respuestas de los Oráculos) y <strong>Cloudflare</strong> (verificación
+        anti-abuso, ver más abajo). Cada uno procesa únicamente lo necesario para su función.{" "}
+        <b>No vendemos ni comerciamos con tus datos.</b>
+      </p>
+
+      <h2>Verificación anti-abuso (Cloudflare Turnstile)</h2>
+      <p>
+        Para frenar bots y proteger el mundo, al iniciar sesión usamos{" "}
+        <strong>Cloudflare Turnstile</strong>, un servicio que verifica que eres una persona real{" "}
+        <b>sin resolver captchas molestos</b> y, en modo invisible, sin que aparezca nada en
+        pantalla. Para ello Cloudflare puede procesar datos técnicos mínimos de tu navegador. No lo
+        usamos para publicidad ni para seguirte por la web. Al usar Phygitalia, este tratamiento se
+        rige por la{" "}
+        <a
+          href="https://www.cloudflare.com/turnstile-privacy-policy/"
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          Adenda de Privacidad de Turnstile de Cloudflare
+        </a>
+        .
       </p>
 
       <div className="note">

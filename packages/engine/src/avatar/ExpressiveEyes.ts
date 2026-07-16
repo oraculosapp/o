@@ -11,7 +11,7 @@ import * as THREE from "three";
  *   · walk : normales (con parpadeo).
  *   · run  : entrecerrados decididos (escala Y ~0.6).
  *   · jump : MUY abiertos (escala 1.3).
- *   · fly  : TRIÁNGULOS traviesos ▲ (tercera geometría; ojo redondo oculto, sin tinte).
+ *   · fly  : TRIÁNGULOS traviesos ▲ con VOLUMEN (prisma extruido; redondo oculto, sin tinte).
  *   · dance: felices — "ojos sonrientes" ∩ (segunda geometría de media luna).
  *
  * Al ir anclados al hueso `Head`, siguen la animación de la cabeza (idle, marcha,
@@ -62,8 +62,12 @@ const BLINK_MAX = 6;
 const BLINK_DUR = 0.12;
 /** Factor de cierre del parpadeo (escala Y en el pico). */
 const BLINK_CLOSE = 0.08;
-/** Radio del triángulo de vuelo (sobre EYE_RADIUS) y ladeo por ojo (rad). */
+/** Triángulo de vuelo: radio (sobre EYE_RADIUS), grosor extruido, bisel y ladeo (rad). */
 const TRI_RADIUS = EYE_RADIUS * 1.25;
+/** Grosor del prisma triangular → da VOLUMEN achatado, en línea con la esfera. */
+const TRI_DEPTH = EYE_RADIUS * 0.55;
+/** Bisel sutil → borde redondeadito, como el sombreado de los ojos redondos. */
+const TRI_BEVEL = EYE_RADIUS * 0.12;
 const TRI_TILT = 0.16;
 
 /** Normaliza un nombre de hueso Mixamo para reconocer la cabeza. */
@@ -129,22 +133,35 @@ export class ExpressiveEyes {
     };
     this.roundMat = mk();
     this.arcMat = mk();
-    // El triángulo es una malla plana (ShapeGeometry) → visible por ambas caras
-    // sea cual sea la orientación del hueso tras el export.
-    this.triMat = mk(THREE.DoubleSide);
+    // El triángulo ahora es un PRISMA extruido (sólido cerrado) con VOLUMEN → comparte
+    // el MISMO acabado toon negro y FrontSide que los ojos redondos.
+    this.triMat = mk();
 
     // Geometrías compartidas por todos los ojos (esfera + media luna + triángulo).
     const sphere = new THREE.SphereGeometry(EYE_RADIUS, 16, 10);
     // Torus (arco 0..π = media luna ∩, abriendo hacia abajo → ojo feliz).
     const torus = new THREE.TorusGeometry(EYE_RADIUS * 0.95, EYE_RADIUS * 0.32, 6, 14, Math.PI);
-    // Triángulo equilátero ▲ apuntando hacia arriba, centrado en el origen (plano XY).
-    const r = TRI_RADIUS;
+    // Triángulo equilátero ▲ apuntando hacia arriba (plano XY), EXTRUIDO en Z para
+    // darle grosor → mismo bulto/volumen que la esfera achatada de los ojos redondos.
+    // Se compensa el bisel en el radio para conservar el tamaño aparente del ▲ plano.
+    const r = TRI_RADIUS - TRI_BEVEL;
     const triShape = new THREE.Shape();
     triShape.moveTo(0, r);
     triShape.lineTo(-r * 0.866, -r * 0.5);
     triShape.lineTo(r * 0.866, -r * 0.5);
     triShape.closePath();
-    const triGeo = new THREE.ShapeGeometry(triShape);
+    const triGeo = new THREE.ExtrudeGeometry(triShape, {
+      depth: TRI_DEPTH,
+      bevelEnabled: true,
+      bevelThickness: TRI_BEVEL,
+      bevelSize: TRI_BEVEL,
+      bevelSegments: 2,
+      steps: 1,
+      curveSegments: 1,
+    });
+    // Centrar la profundidad en el origen → bulto simétrico frente/fondo, igual que la
+    // esfera del ojo redondo (mitad dentro, mitad fuera de la cara).
+    triGeo.translate(0, 0, -TRI_DEPTH / 2);
 
     const rootQ = root.getWorldQuaternion(new THREE.Quaternion());
     const headQ = headBone.getWorldQuaternion(new THREE.Quaternion());

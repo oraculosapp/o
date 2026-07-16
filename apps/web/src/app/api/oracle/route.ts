@@ -6,7 +6,11 @@
  *     oracleId: string,                 // p.ej. "paqo"
  *     mode: "public" | "private",
  *     messages: [{ role: "user"|"oracle", content: string }, ...],
- *     conversationId?: string           // opcional, para continuar memoria privada
+ *     conversationId?: string,          // opcional, para continuar memoria privada
+ *     biosphereId?: string,             // canal del chat público (mode "public")
+ *     speakerName?: string              // opcional (mode "public"): nickname del
+ *                                       //   hablante; Paqo lo usa para dirigirse
+ *                                       //   a la persona por su nombre (saneado)
  *   }
  * Cabeceras opcionales:
  *   Authorization: Bearer <access_token>   // sesión Supabase (memoria en private)
