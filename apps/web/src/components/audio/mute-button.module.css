@@ -1,14 +1,8 @@
 /* Botón mute del HUD — side-button glass (mismo lenguaje que campanita/perfil).
-   Vive en el clúster superior-IZQUIERDA (sobre el juego), como slot 5 "sonido":
-   tras ánimo/clima (left:160) y antes del botón de chat (left:256). Así NO se
-   solapa con la columna del chat (derecha, todo lo alto). */
+   Es el control 5 "sonido" del menú superior; ya NO se auto-posiciona: es un hijo
+   flex directo del `<nav>` del menú. */
 
 .button {
-  position: fixed;
-  top: 16px;
-  /* Slot 4 "sonido": tras ánimo/clima (left:160, 40px). */
-  left: 208px;
-  z-index: 35;
   display: inline-grid;
   place-content: center;
   width: 40px;
@@ -46,11 +40,8 @@
 }
 
 @media (pointer: coarse), (max-width: 640px) {
-  /* Fila 1: slot 4 "sonido" con rítmica de 52px (44px + 8px) y áreas seguras. */
+  /* Área táctil ≥44px (WCAG 2.5.5) — glifo intacto a ~20px. */
   .button {
-    top: calc(12px + env(safe-area-inset-top));
-    left: calc(220px + env(safe-area-inset-left));
-    /* Área táctil ≥44px (WCAG 2.5.5) — glifo intacto a ~20px. */
     width: 44px;
     height: 44px;
   }

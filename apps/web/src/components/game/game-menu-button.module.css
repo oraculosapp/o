@@ -1,13 +1,8 @@
 /* Botón "Comenzar / Detener juego" del MENÚ superior — side-button glass (mismo
-   lenguaje que mute/campanita/cuenta). Es el 7º y último control del clúster
-   superior-IZQUIERDA (slot tras el botón de chat). */
+   lenguaje que mute/campanita/cuenta). Es el 7º y último control del menú superior
+   (tras el botón de chat); ya NO se auto-posiciona: es un hijo flex del `<nav>`. */
 
 .button {
-  position: fixed;
-  top: 16px;
-  /* Slot 6: tras el botón de chat (left:256, 40px). */
-  left: 304px;
-  z-index: 35;
   display: inline-grid;
   place-content: center;
   width: 40px;
@@ -85,23 +80,10 @@
 }
 
 @media (pointer: coarse), (max-width: 640px) {
-  /* Fila 1: slot 6 con rítmica de 52px (44px + 8px) y áreas seguras. */
+  /* Área táctil ≥44px (WCAG 2.5.5) — glifo intacto a ~20px. */
   .button {
-    top: calc(12px + env(safe-area-inset-top));
-    left: calc(324px + env(safe-area-inset-left));
-    /* Área táctil ≥44px (WCAG 2.5.5) — glifo intacto a ~20px. */
     width: 44px;
     height: 44px;
-  }
-}
-
-/* ≤400px: 7 botones no caben en una fila (borde derecho ~368px) → chat y juego
-   bajan a la SEGUNDA fila (problema 6). El juego se ancla a la izquierda, tras el
-   chat. La banda superior de la hoja del chat se agranda en chat.module.css. */
-@media (max-width: 400px) {
-  .button {
-    top: calc(64px + env(safe-area-inset-top));
-    left: calc(64px + env(safe-area-inset-left));
   }
 }
 

@@ -1,18 +1,6 @@
-/* Controles del HUD en el clúster superior-IZQUIERDA (sobre el juego, NO sobre la
-   columna del chat de la derecha): FAB de cuenta (perfil/cuenta) + campanita
-   (notificaciones), en ese orden. Son los slots 1–2 del menú: avatar (left:16),
-   cuenta (left:64) · campanita (~left:112), ánimo/clima (left:160), sonido
-   (left:208), chat (left:256), juego (left:304). */
-
-.cluster {
-  position: fixed;
-  top: 16px;
-  left: 64px;
-  z-index: 35;
-  display: inline-flex;
-  align-items: center;
-  gap: 0.5rem;
-}
+/* Controles del HUD: botón "editar avatar" (slot 1) + FAB de cuenta y campanita
+   (slots 2–3). Ya NO se auto-posicionan: son hijos flex directos del `<nav>` del
+   menú (ver .topMenu en app/paqo.module.css), que los alinea y hace wrap solo. */
 
 /* Enlace al perfil: mismo lenguaje que el icon-button de la campanita. */
 .profileLink {
@@ -46,15 +34,6 @@
   outline: 2px solid var(--gold-bright);
   outline-offset: 2px;
   border-color: var(--gold-dim);
-}
-
-/* Slot del botón “Editar avatar”: PRIMER control del menú (slot 0, left:16), antes
-   del FAB de cuenta. */
-.avatarSlot {
-  position: fixed;
-  top: 16px;
-  left: 16px;
-  z-index: 35;
 }
 
 /* El botón de avatar aloja un retrato circular a sangre; recorta el contenido. */
@@ -112,27 +91,12 @@
 }
 
 @media (pointer: coarse), (max-width: 640px) {
-  /* Fila 1: avatar (slot 0) y cuenta+campanita (slots 1–2), rítmica de 52px
-     (44px + 8px), con áreas seguras. */
-  .avatarSlot {
-    top: calc(12px + env(safe-area-inset-top));
-    left: calc(12px + env(safe-area-inset-left));
-  }
-  .cluster {
-    top: calc(12px + env(safe-area-inset-top));
-    left: calc(64px + env(safe-area-inset-left));
-  }
   /* Área táctil ≥44px (WCAG 2.5.5) — glifo intacto a ~20px. */
   .profileLink {
     width: 44px;
     height: 44px;
   }
 }
-
-/* Las 5 utilidades (avatar · cuenta · campanita · ánimo · sonido) siempre caben en
-   la fila 1 (borde derecho ~264px); sólo chat y juego reflowan a la segunda fila en
-   ≤400px (ver chat-menu-button/ game-menu-button.module.css). El clúster de
-   cuenta+campanita, por tanto, se queda en la fila 1 en todos los anchos. */
 
 @media (prefers-reduced-motion: reduce) {
   .profileLink,

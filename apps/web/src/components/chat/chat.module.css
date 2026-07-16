@@ -467,19 +467,38 @@
   /* Burbuja translúcida sobre el mundo brillante: sombra sutil de texto para AA. */
   text-shadow: var(--chat-text-shadow);
 }
-/* Cola de la burbuja (ajeno/Paqo: a la izquierda). */
-.bubble::before {
+/* Cola de la burbuja (ajeno/Paqo: a la izquierda).
+   TÉCNICA: dos triángulos por BORDES (width/height 0), no un cuadrado rotado.
+   ::before = borde exterior (continúa el borde de la burbuja); ::after = relleno
+   SÓLIDO (no `inherit` translúcido) que aproxima el tono compuesto de la burbuja.
+   El pico queda FLUSH contra el borde (base en x=0, sin solapar el cuerpo), así no
+   hay doble-composite ni esquina de rombo. ::after se pinta sobre ::before y lo
+   cubre salvo el rim de ~1px exterior = el borde que continúa. */
+.bubble::before,
+.bubble::after {
   content: "";
   position: absolute;
-  left: -4px;
+  width: 0;
+  height: 0;
+  border-top-style: solid;
+  border-bottom-style: solid;
+  border-color: transparent;
+}
+/* Borde exterior del pico (rim ~1px, 1px más grande y centrado sobre el relleno). */
+.bubble::before {
+  top: 10px;
+  left: -9px;
+  border-top-width: 8px;
+  border-bottom-width: 8px;
+  border-right: 9px solid var(--line-soft);
+}
+/* Relleno SÓLIDO — compuesto aprox. de la burbuja ajena sobre el vidrio del dock. */
+.bubble::after {
   top: 11px;
-  width: 9px;
-  height: 9px;
-  background: inherit;
-  border-left: 1px solid var(--line-soft);
-  border-bottom: 1px solid var(--line-soft);
-  border-bottom-left-radius: 2px;
-  transform: rotate(45deg);
+  left: -8px;
+  border-top-width: 7px;
+  border-bottom-width: 7px;
+  border-right: 8px solid rgb(40, 44, 58);
 }
 
 /* Paqo (oráculo): borde dorado, velo cálido y cola dorada. */
@@ -488,7 +507,10 @@
   border: 1px solid var(--gold-dim);
 }
 .rowOracle .bubble::before {
-  border-color: var(--gold-dim);
+  border-right-color: var(--gold-dim);
+}
+.rowOracle .bubble::after {
+  border-right-color: rgb(90, 82, 73);
 }
 
 /* Míos: pegados a la derecha, gradiente dorado, cola a la derecha. */
@@ -511,15 +533,18 @@
   background: var(--chat-bubble-mine);
   border: 1px solid var(--line);
 }
+/* Míos: el pico apunta a la DERECHA (espejo). Base flush en el borde derecho. */
 .rowMine .bubble::before {
   left: auto;
-  right: -4px;
-  border-left: none;
-  border-bottom: none;
-  border-right: 1px solid var(--line);
-  border-top: 1px solid var(--line);
-  border-bottom-left-radius: 0;
-  border-top-right-radius: 2px;
+  right: -9px;
+  border-right: none;
+  border-left: 9px solid var(--line);
+}
+.rowMine .bubble::after {
+  left: auto;
+  right: -8px;
+  border-right: none;
+  border-left: 8px solid rgb(105, 92, 76);
 }
 
 @keyframes rowIn {

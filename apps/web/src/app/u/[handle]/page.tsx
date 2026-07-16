@@ -111,7 +111,7 @@ export default async function PublicProfilePage({ params }: PageParams) {
         )}
 
         <footer className={styles.foot}>
-          <Link href="/b/paqo" className={styles.enter}>
+          <Link href="/" className={styles.enter}>
             Entrar a Phygitalia
           </Link>
         </footer>

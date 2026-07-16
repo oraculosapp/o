@@ -6,12 +6,12 @@ import { AccountFab } from "./AccountFab";
 import styles from "./hud-controls.module.css";
 
 /**
- * Grupo de controles del HUD anclado arriba-IZQUIERDA (sobre el viewport del
- * juego, NO sobre la columna del chat de la derecha). Aporta 3 de los 7 slots del
- * MENÚ: (1) editar avatar (.avatarSlot, left:16), (2) perfil/cuenta (AccountFab) y
- * (3) notificaciones (Bell), estos dos en el .cluster (left:64). Los demás slots
- * (ánimo/clima, sonido, chat, juego) los montan otros componentes. Discreto, glass,
- * no estorba el joystick (abajo-izquierda) ni la columna del chat.
+ * Aporta los 3 PRIMEROS controles del MENÚ superior, como HERMANOS de fragmento
+ * (sin wrapper de posición) para que sean hijos flex directos del `<nav>` del menú
+ * en el orden pedido: (1) editar avatar, (2) perfil/cuenta (AccountFab) y
+ * (3) notificaciones (Bell). El menú los alinea y hace wrap automáticamente; cada
+ * botón ya sólo aporta su forma (glass, redondo). Los demás controles (ánimo/clima,
+ * sonido, chat, juego) los montan otros componentes como hermanos flex siguientes.
  */
 export interface HudControlsProps {
   /** Si se pasa, muestra el botón “Cambiar avatar” junto al clúster. */
@@ -29,17 +29,12 @@ export function HudControls({
 }: HudControlsProps = {}) {
   return (
     <>
-      <div className={styles.cluster}>
-        {/* Orden del menú: (2) perfil/cuenta, luego (3) notificaciones. */}
-        <AccountFab />
-        <Bell />
-      </div>
-      {/* “Editar avatar”: PRIMER slot del menú (.avatarSlot, left:16). Muestra el
-          RETRATO del avatar actual (o su tinte) para distinguirlo del "Perfil". */}
+      {/* (1) “Editar avatar”: PRIMER control del menú. Muestra el RETRATO del avatar
+          actual (o su tinte) para distinguirlo del "Perfil". */}
       {onChangeAvatar && (
         <button
           type="button"
-          className={`${styles.profileLink} ${styles.avatarSlot} ${styles.tip} ${styles.avatarButton}`}
+          className={`${styles.profileLink} ${styles.tip} ${styles.avatarButton}`}
           onClick={onChangeAvatar}
           aria-label="Cambiar avatar"
           data-tip="Cambiar avatar"
@@ -47,6 +42,9 @@ export function HudControls({
           <AvatarPortrait thumbUrl={avatarThumbUrl} tint={avatarTint} />
         </button>
       )}
+      {/* (2) perfil/cuenta, luego (3) notificaciones — hermanos flex directos. */}
+      <AccountFab />
+      <Bell />
     </>
   );
 }

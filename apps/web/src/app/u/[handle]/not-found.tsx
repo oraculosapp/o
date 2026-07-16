@@ -18,7 +18,7 @@ export default function ProfileNotFound() {
           nombre, o que la niebla lo esté ocultando.
         </p>
         <footer className={styles.foot}>
-          <Link href="/b/paqo" className={styles.enter}>
+          <Link href="/" className={styles.enter}>
             Entrar a Phygitalia
           </Link>
         </footer>

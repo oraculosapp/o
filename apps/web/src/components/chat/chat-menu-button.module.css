@@ -1,14 +1,10 @@
 /* Botón de CHAT del MENÚ superior — side-button glass (mismo lenguaje que
-   mute/campanita/cuenta). Slot 5 del clúster superior-IZQUIERDA (tras el mute,
-   antes del botón de juego). NOTA: este módulo es del equipo HUD-MENÚ; el vidrio
-   del chat (chat.module.css) lo mantiene el equipo de chat. */
+   mute/campanita/cuenta). Es el control 6 del menú (tras el mute, antes del botón
+   de juego); ya NO se auto-posiciona: es un hijo flex directo del `<nav>`. NOTA:
+   este módulo es del equipo HUD-MENÚ; el vidrio del chat (chat.module.css) lo
+   mantiene el equipo de chat. */
 
 .button {
-  position: fixed;
-  top: 16px;
-  /* Slot 5: tras el mute (left:208, 40px). */
-  left: 256px;
-  z-index: 35;
   display: inline-grid;
   place-content: center;
   width: 40px;
@@ -80,22 +76,10 @@
 }
 
 @media (pointer: coarse), (max-width: 640px) {
-  /* Fila 1: slot 5 con rítmica de 52px (44px + 8px) y áreas seguras. */
+  /* Área táctil ≥44px (WCAG 2.5.5) — glifo intacto a ~20px. */
   .button {
-    top: calc(12px + env(safe-area-inset-top));
-    left: calc(272px + env(safe-area-inset-left));
-    /* Área táctil ≥44px (WCAG 2.5.5) — glifo intacto a ~20px. */
     width: 44px;
     height: 44px;
-  }
-}
-
-/* ≤400px: chat y juego bajan a la SEGUNDA fila (problema 6). El chat se ancla a la
-   izquierda; el juego a su derecha. */
-@media (max-width: 400px) {
-  .button {
-    top: calc(64px + env(safe-area-inset-top));
-    left: calc(12px + env(safe-area-inset-left));
   }
 }
 

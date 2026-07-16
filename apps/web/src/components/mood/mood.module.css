@@ -1,13 +1,11 @@
 /* MoodPanel — píldora glass del HUD (mismo lenguaje que mute/campanita/cuenta) +
-   panel de cristal con dos filas de chips (Ánimo / Clima). Es el slot 4 del menú
-   "ánimo y clima": tras el clúster cuenta+campanita (que termina ~left:152) y
-   antes del mute (left:208). Ritmo de 48px del HUD. */
+   panel de cristal con dos filas de chips (Ánimo / Clima). Es el control 4 "ánimo y
+   clima" del menú superior; ya NO se auto-posiciona: es un hijo flex del `<nav>`.
+   El wrapper `.root` es relativo para anclar el panel a SU botón. */
 
 .root {
-  position: fixed;
-  top: 16px;
-  left: 160px;
-  z-index: 35;
+  position: relative;
+  display: inline-flex;
 }
 
 .button {
@@ -156,11 +154,6 @@
 }
 
 @media (pointer: coarse), (max-width: 640px) {
-  /* Fila 1: slot 4 "ánimo/clima" con rítmica de 52px (44px + 8px) y áreas seguras. */
-  .root {
-    top: calc(12px + env(safe-area-inset-top));
-    left: calc(168px + env(safe-area-inset-left));
-  }
   /* Área táctil ≥44px (WCAG 2.5.5) — glifo intacto a ~20px. */
   .button {
     width: 44px;
@@ -174,10 +167,6 @@
     width: min(244px, calc(100vw - 24px));
   }
 }
-
-/* Ánimo/clima es una de las 5 utilidades que se quedan en la fila 1 en todos los
-   anchos (borde derecho de la fila ~212px, siempre cabe). Sólo chat y juego bajan a
-   la 2ª fila en ≤400px. */
 
 @media (prefers-reduced-motion: reduce) {
   .button,

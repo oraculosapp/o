@@ -69,7 +69,7 @@ export function UsuarioClient() {
     return (
       <div className={styles.center}>
         <p className={styles.dimNote}>Perfil en reposo · falta configurar Supabase</p>
-        <Link href="/b/paqo" className={styles.backLink}>
+        <Link href="/" className={styles.backLink}>
           ← Volver al mundo
         </Link>
       </div>
@@ -93,7 +93,7 @@ export function UsuarioClient() {
           >
             Que Paqo me recuerde
           </button>
-          <Link href="/b/paqo" className={styles.backLink}>
+          <Link href="/" className={styles.backLink}>
             Seguir explorando sin cuenta →
           </Link>
         </section>

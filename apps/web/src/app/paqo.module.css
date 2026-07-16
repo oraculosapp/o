@@ -13,6 +13,29 @@
   height: 100%;
 }
 
+/* --- MENÚ superior unificado ------------------------------------------------
+   UN SOLO contenedor flex que agrupa los 7 controles del HUD como HERMANOS:
+   avatar · cuenta · notificaciones · ánimo/clima · sonido · chat · juego.
+   La alineación perfecta y el wrap a 2 filas parejas en móvil angosto salen
+   automáticos del flex; cada botón ya NO se auto-posiciona (se retiró el
+   position:fixed + left hardcodeado de sus módulos). Anclado arriba-IZQUIERDA
+   (sobre el juego, NO sobre la columna del chat de la derecha). */
+.topMenu {
+  position: fixed;
+  top: calc(14px + env(safe-area-inset-top));
+  left: calc(14px + env(safe-area-inset-left));
+  z-index: 35;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  /* Gap uniforme horizontal y vertical (al hacer wrap las filas quedan parejas). */
+  gap: 10px;
+  /* Un pequeño respiro bajo el menú, para que no se pegue al chat. */
+  margin-bottom: 10px;
+  /* No invadir la columna del chat (derecha, a toda altura). */
+  max-width: min(calc(100vw - 28px), 620px);
+}
+
 /* Loader de marca sobre nebulosa mientras compila la escena. */
 .loader {
   position: absolute;

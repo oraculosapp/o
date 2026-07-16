@@ -119,7 +119,7 @@ export function ProfileForm({ userId, initial, progress }: ProfileFormProps) {
   return (
     <div className={styles.page}>
       <header className={styles.topbar}>
-        <Link href="/b/paqo" className={styles.backLink}>
+        <Link href="/" className={styles.backLink}>
           ← Al mundo
         </Link>
         <h1 className={styles.pageTitle}>Tu perfil</h1>

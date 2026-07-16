@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { isNewVersion, parseVersion } from "./update-check";
+import { forceReload, isReloadArmed, requestReload } from "./reload-coordinator";
 import styles from "./update-sentinel.module.css";
 
 /**
@@ -13,67 +14,36 @@ import styles from "./update-sentinel.module.css";
  * NEXT_PUBLIC_BUILD_ID) y lo compara contra el del deploy VIVO que sirve
  * `/api/version`. Comprueba: al montar, cada 5 min, y en `visibilitychange`
  * (volver a la pestaña — el momento clave en móvil, donde los timers se
- * suspenden en background).
+ * suspenden en background). El beacon de versión es la señal PRINCIPAL en
+ * background; el flujo del Service Worker es la red de seguridad para cuando lo
+ * que cambia es el propio SW.
  *
  * Al detectar diferencia:
- *   · Pestaña en BACKGROUND o REGRESO a la pestaña → recarga SILENCIOSA (sin
- *     UI), en cuanto sea seguro.
+ *   · Pestaña en BACKGROUND o REGRESO a la pestaña → recarga SILENCIOSA (sin UI),
+ *     en cuanto sea seguro.
  *   · Usuario MIRANDO activamente (chequeo periódico) → píldora dorada
  *     "✨ Nueva versión disponible — Actualizar"; al tocarla, recarga.
  *
- * Nunca interrumpe una partida activa de ¡Dale a Paqo!: la recarga silenciosa se
- * pospone mientras `window.__PAQO__.game.snapshot().phase === "running"` (el
- * equipo Juego expone ese global); si no existe, degrada a "no hay partida".
- * La píldora manual, en cambio, siempre respeta la decisión del usuario.
+ * Ambas recargas pasan por el COORDINADOR común (`reload-coordinator`), que
+ * comparte el guardarraíl de partida y un flag anti-bucle con el flujo del SW:
+ * si el SW ya va a recargar, el centinela no duplica; si el centinela ya recargó,
+ * el SW no vuelve a hacerlo. La recarga silenciosa se pospone mientras haya una
+ * partida de ¡Dale a Paqo! en curso; la píldora manual, en cambio, siempre
+ * respeta la decisión del usuario (recarga aunque haya partida).
  *
  * Se monta una vez en el layout raíz. No pinta nada salvo la píldora.
  */
 
 const EMBEDDED_BUILD_ID = process.env.NEXT_PUBLIC_BUILD_ID;
 const CHECK_INTERVAL_MS = 5 * 60 * 1000; // 5 min
-const PENDING_POLL_MS = 20 * 1000; // reintento de recarga pospuesta
-
-/** ¿Hay una partida de ¡Dale a Paqo! en curso? (degrada a `false` si no existe el global). */
-function isPaqoGameRunning(): boolean {
-  try {
-    const w = window as unknown as {
-      __PAQO__?: { game?: { snapshot?: () => { phase?: string } } };
-    };
-    return w.__PAQO__?.game?.snapshot?.().phase === "running";
-  } catch {
-    return false;
-  }
-}
 
 export function UpdateSentinel() {
   const [showToast, setShowToast] = useState(false);
-  const pendingRef = useRef(false);
-  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
 
     let cancelled = false;
-
-    /** Recarga silenciosa SOLO cuando es seguro: pestaña visible y sin partida. */
-    const silentReloadWhenSafe = () => {
-      if (document.visibilityState !== "visible") return; // esperar a volver
-      if (isPaqoGameRunning()) return; // no interrumpir la partida
-      window.location.reload();
-    };
-
-    /** Mientras haya recarga pendiente pero bloqueada, reintentar en bucle lento. */
-    const ensurePendingPoll = () => {
-      if (pollRef.current != null) return;
-      pollRef.current = setInterval(() => {
-        if (!pendingRef.current) {
-          if (pollRef.current != null) clearInterval(pollRef.current);
-          pollRef.current = null;
-          return;
-        }
-        silentReloadWhenSafe();
-      }, PENDING_POLL_MS);
-    };
 
     const check = async (trigger: "mount" | "interval" | "visible") => {
       let remote: string | null = null;
@@ -87,14 +57,15 @@ export function UpdateSentinel() {
       if (cancelled) return;
       if (!isNewVersion(EMBEDDED_BUILD_ID, remote)) return;
 
-      // Hay una versión nueva desplegada.
-      pendingRef.current = true;
+      // Hay una versión nueva desplegada. Si el flujo del SW ya armó la recarga,
+      // no hacemos nada (evita doble camino / doble píldora).
+      if (isReloadArmed()) return;
 
       const hidden = document.visibilityState !== "visible";
       if (hidden || trigger === "visible") {
-        // Background o regreso a la pestaña → recarga silenciosa, sin molestar.
-        silentReloadWhenSafe();
-        ensurePendingPoll();
+        // Background o regreso a la pestaña → recarga silenciosa (el coordinador
+        // la aplaza si hay partida y la dispara en cuanto sea seguro).
+        requestReload();
       } else {
         // Usuario mirando activamente → ofrecer la píldora (no dar el tirón).
         setShowToast(true);
@@ -103,8 +74,9 @@ export function UpdateSentinel() {
 
     const onVisibility = () => {
       if (document.visibilityState !== "visible") return;
-      // Al volver: cerrar una recarga pendiente y re-chequear por si hubo deploy.
-      if (pendingRef.current) silentReloadWhenSafe();
+      // Al volver: re-chequear por si hubo deploy. Una recarga silenciosa ya
+      // pendiente la retoma el propio coordinador (tiene su listener de
+      // visibilidad); aquí solo detectamos deploys nuevos.
       void check("visible");
     };
 
@@ -115,8 +87,6 @@ export function UpdateSentinel() {
     return () => {
       cancelled = true;
       clearInterval(interval);
-      if (pollRef.current != null) clearInterval(pollRef.current);
-      pollRef.current = null;
       document.removeEventListener("visibilitychange", onVisibility);
     };
   }, []);
@@ -129,11 +99,7 @@ export function UpdateSentinel() {
   return (
     <div role="status" aria-live="polite">
       {showToast && (
-        <button
-          type="button"
-          className={styles.toast}
-          onClick={() => window.location.reload()}
-        >
+        <button type="button" className={styles.toast} onClick={() => forceReload()}>
           <span className={styles.spark} aria-hidden>
             ✨
           </span>

@@ -1,7 +1,7 @@
 "use client";
 
-// ⚠️ DESCONECTADO (S8, dirección "nube"): la raíz (page.tsx) ya redirige directo
-// a /b/paqo con color+nombre aleatorios. Este splash ceremonial (ruleta 3D de
+// ⚠️ DESCONECTADO (S8, dirección "nube"): la raíz (page.tsx) ES el mundo y entra
+// directo con color+nombre aleatorios. Este splash ceremonial (ruleta 3D de
 // arquetipos) se conserva por si se reactiva como página de marca más adelante;
 // solo se adaptó al nuevo avatar-store `{ color }` para que siga compilando.
 
@@ -163,7 +163,7 @@ export default function SplashHome() {
     storeName(clean);
     // S8: el avatar es único ("nube"); solo se persiste el color del viajero.
     storeAvatar({ color: colorRef.current });
-    router.push("/b/paqo");
+    router.push("/");
   };
 
   return (
