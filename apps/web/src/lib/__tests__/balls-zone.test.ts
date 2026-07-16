@@ -33,16 +33,16 @@ describe("Balls — regla de zona central (respawn instantáneo)", () => {
     const after = balls.stateOf(0).pos;
     expect(xz(after)).toBeLessThan(18); // volvió a la zona
     expect(xz(after)).toBeCloseTo(homeR, 5); // exactamente su slot casa determinista
-    expect(balls.isThrownLive(0)).toBe(false);
+    expect(balls.isLiveByLocal(0)).toBe(false);
   });
 
-  it("respawnToHome teleporta a casa, limpia thrownLive y emite onRespawn", () => {
+  it("respawnToHome teleporta a casa, limpia la atribución local y emite onRespawn", () => {
     const balls = new Balls(flatField as never);
     balls.build();
     const seen: Array<{ id: number; reason: string }> = [];
     balls.onRespawn((id, _s, reason) => seen.push({ id, reason }));
     balls.respawnToHome(3, "hit");
-    expect(balls.isThrownLive(3)).toBe(false);
+    expect(balls.isLiveByLocal(3)).toBe(false);
     expect(xz(balls.stateOf(3).pos)).toBeLessThan(18);
     expect(seen).toContainEqual({ id: 3, reason: "hit" });
   });
@@ -56,7 +56,7 @@ describe("Balls — regla de zona central (respawn instantáneo)", () => {
     // Lánzala con una velocidad ENORME hacia +X (hereda 0.5·playerVel).
     expect(balls.grab(0)).toBe(true);
     balls.throwBall(new THREE.Vector3(1, 0, 0), new THREE.Vector3(400, 0, 0));
-    expect(balls.isThrownLive(0)).toBe(true);
+    expect(balls.isLiveByLocal(0)).toBe(true);
 
     // Unos frames: sale volando de r>18 y la zona la repone a casa.
     const far = new THREE.Vector3(0, -100, 0); // jugador lejos: no la vuelve a patear
@@ -64,11 +64,11 @@ describe("Balls — regla de zona central (respawn instantáneo)", () => {
     for (let i = 0; i < 4; i++) balls.update(0.1, far, noVel);
 
     expect(respawns.some((r) => r.id === 0 && r.reason === "out")).toBe(true);
-    expect(balls.isThrownLive(0)).toBe(false);
+    expect(balls.isLiveByLocal(0)).toBe(false);
     expect(xz(balls.stateOf(0).pos)).toBeLessThan(18);
   });
 
-  it("throwBall marca thrownLive y emite onThrow (la patada al caminar NO)", () => {
+  it("throwBall atribuye la pelota al local y emite onThrow (la patada NO emite onThrow)", () => {
     const balls = new Balls(flatField as never);
     balls.build();
     const thrown: number[] = [];
@@ -76,6 +76,35 @@ describe("Balls — regla de zona central (respawn instantáneo)", () => {
     balls.grab(2);
     balls.throwBall(new THREE.Vector3(0, 0, -1), new THREE.Vector3());
     expect(thrown).toContain(2);
-    expect(balls.isThrownLive(2)).toBe(true);
+    expect(balls.isLiveByLocal(2)).toBe(true);
+  });
+});
+
+describe("Balls — atribución por PATADA del jugador local", () => {
+  it("caminar contra una pelota (tryKick) la atribuye al local para puntuar", () => {
+    const balls = new Balls(flatField as never);
+    balls.build();
+    // La pelota 0 en su slot casa: llevamos al jugador local justo encima, moviéndose.
+    const home = balls.stateOf(0).pos; // [x, 0.35, z] sobre suelo plano
+    const player = new THREE.Vector3(home[0], 1.0, home[2]);
+    const vel = new THREE.Vector3(3, 0, 0); // caminando hacia +X
+    // feetY=0: rel = ballY(0.35) − 0 dentro de la ventana vertical de patada.
+    balls.update(0.016, player, vel, 0);
+    expect(balls.isLiveByLocal(0)).toBe(true);
+  });
+
+  it("la atribución por patada expira si nadie local la vuelve a tocar", () => {
+    const balls = new Balls(flatField as never);
+    balls.build();
+    // Patea la 0 y luego mándala fuera de contacto: la fricción la duerme y/o la
+    // ventana de atribución vence → deja de contar como movida por mí.
+    const home = balls.stateOf(0).pos;
+    const player = new THREE.Vector3(home[0], 1.0, home[2]);
+    balls.update(0.016, player, new THREE.Vector3(3, 0, 0), 0);
+    expect(balls.isLiveByLocal(0)).toBe(true);
+    const far = new THREE.Vector3(0, -100, 0); // jugador lejos: sin nuevos contactos
+    const noVel = new THREE.Vector3();
+    for (let i = 0; i < 60; i++) balls.update(0.1, far, noVel); // ~6 s
+    expect(balls.isLiveByLocal(0)).toBe(false);
   });
 });

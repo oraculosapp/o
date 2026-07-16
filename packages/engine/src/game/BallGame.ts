@@ -249,13 +249,13 @@ export class BallGame {
     this.updateFx(dt);
     this.refreshTotem();
 
-    // Detección de golpe: SOLO para las pelotas thrownLive del jugador local
-    // (autoridad del lanzador). Corre en todas las fases; el efecto depende de si
-    // hay partida activa.
+    // Detección de golpe: SOLO para las pelotas atribuidas al jugador local (las
+    // que él puso en movimiento por patada O lanzamiento — autoridad del que la
+    // movió). Corre en todas las fases; el efecto depende de si hay partida activa.
     if (this.cyl) {
       const balls = this.hooks.balls;
       for (let i = 0; i < balls.count; i++) {
-        if (!balls.isThrownLive(i)) continue;
+        if (!balls.isLiveByLocal(i)) continue;
         balls.positionOf(i, this._v);
         if (this.insideCyl(this._v)) this.handleHit(i, this._v);
       }

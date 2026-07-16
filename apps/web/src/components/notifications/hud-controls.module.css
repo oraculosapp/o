@@ -1,11 +1,13 @@
 /* Controles del HUD en el clúster superior-IZQUIERDA (sobre el juego, NO sobre la
-   columna del chat de la derecha): campanita + FAB de cuenta. Forman fila con
-   "Instalar app" (left:16), mute (left:68) y el retrato de avatar (left:116). */
+   columna del chat de la derecha): FAB de cuenta (perfil/cuenta) + campanita
+   (notificaciones), en ese orden. Son los slots 1–2 del menú: avatar (left:16),
+   cuenta (left:64) · campanita (~left:112), ánimo/clima (left:160), sonido
+   (left:208), chat (left:256), juego (left:304). */
 
 .cluster {
   position: fixed;
   top: 16px;
-  left: 164px;
+  left: 64px;
   z-index: 35;
   display: inline-flex;
   align-items: center;
@@ -46,12 +48,12 @@
   border-color: var(--gold-dim);
 }
 
-/* Slot del botón “Cambiar avatar”: en el clúster superior-izquierda, entre el
-   mute (left:68) y la campanita+cuenta (left:164). */
+/* Slot del botón “Editar avatar”: PRIMER control del menú (slot 0, left:16), antes
+   del FAB de cuenta. */
 .avatarSlot {
   position: fixed;
   top: 16px;
-  left: 116px;
+  left: 16px;
   z-index: 35;
 }
 
@@ -110,14 +112,15 @@
 }
 
 @media (pointer: coarse), (max-width: 640px) {
-  /* Fila 1 (izquierda): avatar; campanita+cuenta a su derecha. Áreas seguras. */
-  .cluster {
-    top: calc(12px + env(safe-area-inset-top));
-    left: calc(168px + env(safe-area-inset-left));
-  }
+  /* Fila 1: avatar (slot 0) y cuenta+campanita (slots 1–2), rítmica de 52px
+     (44px + 8px), con áreas seguras. */
   .avatarSlot {
     top: calc(12px + env(safe-area-inset-top));
-    left: calc(116px + env(safe-area-inset-left));
+    left: calc(12px + env(safe-area-inset-left));
+  }
+  .cluster {
+    top: calc(12px + env(safe-area-inset-top));
+    left: calc(64px + env(safe-area-inset-left));
   }
   /* Área táctil ≥44px (WCAG 2.5.5) — glifo intacto a ~20px. */
   .profileLink {
@@ -126,15 +129,10 @@
   }
 }
 
-/* ≤360px: el clúster no cabe en una fila → campanita+cuenta bajan a la SEGUNDA
-   fila (bajo Instalar/mute/avatar), anclado a la izquierda (problema 7). Su
-   desplegable, al re-anclarse a la izquierda, deja de desbordar por la derecha. */
-@media (max-width: 360px) {
-  .cluster {
-    top: calc(64px + env(safe-area-inset-top));
-    left: calc(12px + env(safe-area-inset-left));
-  }
-}
+/* Las 5 utilidades (avatar · cuenta · campanita · ánimo · sonido) siempre caben en
+   la fila 1 (borde derecho ~264px); sólo chat y juego reflowan a la segunda fila en
+   ≤400px (ver chat-menu-button/ game-menu-button.module.css). El clúster de
+   cuenta+campanita, por tanto, se queda en la fila 1 en todos los anchos. */
 
 @media (prefers-reduced-motion: reduce) {
   .profileLink,

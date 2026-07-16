@@ -24,13 +24,19 @@ const ISLAND_EDGE_BASE = 56;
  * `target` = hojas a posar (se reintenta hasta alcanzarlo o agotar el guard);
  * el conteo real se reporta en build. Total objetivo ~40–55k en 3 draw calls.
  */
+// `heightScale` recorta la ALTURA (no la densidad) de la hoja por anillo: el pasto
+// alto tapaba al avatar (~1.7u) al caminar por la pradera. Con estos factores el
+// avatar queda visible de la cintura para arriba (cerca ~0.55×, medio ~0.6×) y el
+// pasto lejano —escenografía— conserva algo más de porte (~0.8×). NO toca el pasto
+// del claro interior (rama `inClearing`), que ya nace bajito.
 const GRASS_RINGS = [
-  // cercano: pradera densa que abraza el claro/tótem (sensación actual, +un pelín).
-  { rMin: 5, rMax: 26, target: 16000, detailed: true, align: 0.7, edgeLimited: false },
-  // medio: ~60% densidad, misma hoja detallada, alineación más suave.
-  { rMin: 26, rMax: 42, target: 15500, detailed: true, align: 0.5, edgeLimited: false },
+  // cercano: pradera densa que abraza el claro/tótem (misma densidad; hoja más baja).
+  { rMin: 5, rMax: 26, target: 16000, detailed: true, align: 0.7, edgeLimited: false, heightScale: 0.55 },
+  // medio: ~60% densidad, misma hoja detallada, alineación más suave, algo más baja.
+  { rMin: 26, rMax: 42, target: 15500, detailed: true, align: 0.5, edgeLimited: false, heightScale: 0.6 },
   // lejano: ~35% densidad, hoja BARATA (cruz de 2 quads), vertical, hasta filo−margen.
-  { rMin: 42, rMax: 58, target: 11000, detailed: false, align: 0.0, edgeLimited: true },
+  // Escenografía lejana: puede quedar algo más alta (el fog + la distancia perdonan).
+  { rMin: 42, rMax: 58, target: 11000, detailed: false, align: 0.0, edgeLimited: true, heightScale: 0.8 },
 ] as const;
 /** El anillo lejano se detiene a `edgeRadiusAt(x,z) − margen` (no cuelga del filo). */
 const GRASS_EDGE_MARGIN = 3;
@@ -49,6 +55,8 @@ const GRASS_TRIES_FACTOR = 7;
 // así los knobs de arte (paqo.json) siguen mandando y aterrizamos en ~3×.
 const TREE_COUNT = 210; // × trees.density (~0.35 → ~73 árboles)
 const FERN_COUNT = 620; // × shrubs.density (~0.4 → ~248 helechos)
+/** Recorte sutil de la altura de los helechos (solo Y): no tapan al avatar en rutas. */
+const FERN_HEIGHT_TRIM = 0.8;
 const SHRUB_COUNT = 400; // × shrubs.density (~0.4 → ~160 matas)
 const FLOWER_COUNT = 2600; // × flowers.density (~0.15 → ~390 flores)
 const ROCK_SCATTER = 120; // × rockScatter.density (~0.3 → ~36) + menhires
@@ -471,7 +479,15 @@ export class Vegetation {
    */
   private buildGrassRing(
     rand: () => number,
-    ring: { rMin: number; rMax: number; target: number; detailed: boolean; align: number; edgeLimited: boolean },
+    ring: {
+      rMin: number;
+      rMax: number;
+      target: number;
+      detailed: boolean;
+      align: number;
+      edgeLimited: boolean;
+      heightScale: number;
+    },
   ): void {
     const g = this.preset.vegetation?.grass ?? {};
     const height = g.height ?? 1.4;
@@ -513,7 +529,9 @@ export class Vegetation {
       this.field.surfaceNormal(x, z, this._nrm);
       if (Math.acos(THREE.MathUtils.clamp(this._nrm.y, -1, 1)) > maxSlope) continue;
       const sc = 0.7 + rand() * 0.6;
-      const ySc = inClearing ? 0.22 + rand() * 0.07 : 0.85 + rand() * 0.4;
+      // Altura: el pasto del claro (inClearing) ya nace bajito y NO se toca; el de
+      // la pradera se recorta por `heightScale` del anillo para no tapar al avatar.
+      const ySc = inClearing ? 0.22 + rand() * 0.07 : (0.85 + rand() * 0.4) * ring.heightScale;
       this._s.set(sc, ySc, sc);
       const sink = 0.06 + 0.05 * sc;
       // Compón la matriz reutilizando la normal ya calculada (sin re-muestrear).
@@ -572,7 +590,11 @@ export class Vegetation {
       if (this.field.clearingMask(x, z) > 0.3) continue;
       const yaw = rand() * Math.PI * 2;
       const sc = 0.85 + rand() * 0.7;
-      this._s.set(sc, sc * (0.85 + rand() * 0.35), sc);
+      // Recorte sutil de ALTURA (solo Y): los helechos son la pieza que más compite
+      // con la silueta del avatar cerca de las rutas caminables. `FERN_HEIGHT_TRIM`
+      // baja su porte sin tocar su huella (las matas/arbustos son redondeados y bajos
+      // — no compiten, se dejan igual).
+      this._s.set(sc, sc * (0.85 + rand() * 0.35) * FERN_HEIGHT_TRIM, sc);
       const sink = 0.05 + 0.05 * sc;
       mesh.setMatrixAt(placed, this.placeMatrix(x, z, yaw, this._s, sink, this._m, 0.65));
       col.copy(cSage).lerp(cAccent, 0.2 + rand() * 0.45);

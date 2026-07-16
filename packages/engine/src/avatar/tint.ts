@@ -4,6 +4,20 @@ import type { TintZone } from "./types";
 
 const ZONES: TintZone[] = ["primary", "secondary", "hair", "skin", "accent"];
 
+/**
+ * KNOB — Boost EMISIVO del CUERPO (zona `primary`/material "body"). Fracción del
+ * color YA tintado del cuerpo que se re-inyecta como emisivo para que el color
+ * elegido "se vea" bajo la iluminación toon y los LUTs de clima/mood: el avatar
+ * queda "iluminado desde dentro" de forma sutil, conservando el hue elegido bajo
+ * tormenta/bruma/grading. Rango de diseño 0.22–0.28; 0.25 = 25%.
+ *
+ * Sólo se aplica a la zona `primary` (cuerpo/ropa principal), NO a pelo/piel/acento,
+ * para no volver farolas los rasgos. El emisivo se suma DESPUÉS de la iluminación,
+ * así sobrevive al toon-shading y al color grading. No hace bloom: los avatares NO
+ * están en la selección del bloom selectivo (ver postfx/BloomComposer — sólo la runa).
+ */
+export const BODY_EMISSIVE_BOOST = 0.25;
+
 /** Centro de hue (0..1) y ancho de banda para el enmascarado por color en modo hueMask. */
 export interface HueBand {
   zone: TintZone;
@@ -53,16 +67,29 @@ export class TintController {
   /** Estrategia A: tinta el material entero con el color de una zona. */
   patchZone(mat: THREE.Material, zone: TintZone): void {
     const uniform = this.uniformFor(zone);
+    // Sólo el CUERPO (primary) se ilumina desde dentro: emisivo ∝ color ya tintado.
+    const glowBody = zone === "primary";
     mat.onBeforeCompile = (shader) => {
       shader.uniforms.uTint = uniform;
-      shader.fragmentShader =
+      let frag =
         "uniform vec3 uTint;\n" +
         shader.fragmentShader.replace(
           "#include <map_fragment>",
           "#include <map_fragment>\n  diffuseColor.rgb *= uTint;",
         );
+      if (glowBody) {
+        // `diffuseColor` ya trae el tinte (map_fragment corre antes). Sumamos una
+        // fracción como emisivo → el hue elegido "brilla" y aguanta toon + LUTs.
+        frag = frag.replace(
+          "#include <emissivemap_fragment>",
+          `#include <emissivemap_fragment>\n  totalEmissiveRadiance += diffuseColor.rgb * ${BODY_EMISSIVE_BOOST.toFixed(
+            3,
+          )};`,
+        );
+      }
+      shader.fragmentShader = frag;
     };
-    mat.customProgramCacheKey = () => `phy-tint-zone-${zone}`;
+    mat.customProgramCacheKey = () => `phy-tint-zone-${zone}${glowBody ? "-glow" : ""}`;
     mat.needsUpdate = true;
   }
 

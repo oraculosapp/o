@@ -1,76 +1,15 @@
 /* HUD del mini-juego ¡Dale a Paqo! (design system Phygitalia: glass oscuro,
-   Chakra Petch, acento ámbar #e3b063). IDLE: píldora discreta abajo-izquierda
-   (por encima de PerfOverlay dev y del joystick móvil). RUNNING: tarjeta compacta
-   arriba-centro (no pelea con el clúster izq ni el chat der). RESULTS: banner. */
+   Chakra Petch, acento ámbar #e3b063). El arranque (idle) vive ahora en el MENÚ
+   superior (GameMenuButton). Aquí sólo el estado ACTIVO, centrado arriba y con
+   MARGEN bajo la banda del menú: RUNNING → tarjeta compacta; RESULTS → banner. */
 
-/* --- IDLE: píldora discreta -------------------------------------------------- */
-.startPill {
-  position: fixed;
-  /* Centro-abajo: se eleva sobre la hoja del chat (--chat-sheet-h, publicado por
-     ChatDock) y se centra para NO caer sobre el joystick (mitad izquierda) ni sobre
-     los mandos táctiles (derecha). El translateX(-50%) se conserva en cada estado. */
-  left: 50%;
-  bottom: calc(72px + var(--chat-sheet-h, 0px));
-  transform: translateX(-50%);
-  z-index: 26;
-  display: inline-flex;
-  align-items: center;
-  gap: 0.4rem;
-  padding: 0.5rem 0.85rem;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-pill);
-  background: var(--panel-hud);
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
-  box-shadow: var(--shadow);
-  color: var(--gold-bright);
-  font-family: var(--font-display);
-  font-size: 0.72rem;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  cursor: pointer;
-  transition:
-    opacity var(--dur-slow) var(--ease-brand),
-    transform var(--dur-slow) var(--ease-brand),
-    visibility var(--dur-slow) var(--ease-brand),
-    border-color var(--dur-fast) var(--ease-brand),
-    box-shadow var(--dur-fast) var(--ease-brand);
-}
-/* DENTRO del claro de Paqo: discreta (0.55) → plena en hover/foco. */
-.startPillVisible {
-  opacity: 0.55;
-  transform: translateX(-50%) translateY(0);
-  visibility: visible;
-  pointer-events: auto;
-}
-/* FUERA del claro: aparición suave (fade + leve slide), sin interacción. */
-.startPill.startPillHidden {
-  opacity: 0;
-  transform: translateX(-50%) translateY(8px);
-  visibility: hidden;
-  pointer-events: none;
-}
-.startPill:hover:not(:disabled),
-.startPill:focus-visible {
-  opacity: 1;
-  transform: translateX(-50%) translateY(-2px);
-  border-color: var(--gold-dim);
-  box-shadow: var(--shadow), 0 0 20px var(--glow);
-}
-.startPillVisible:disabled {
-  opacity: 0.3;
-  cursor: default;
-}
-.startDot {
-  color: var(--gold);
-  font-size: 0.9rem;
-  line-height: 1;
-}
-
-/* --- RUNNING: tarjeta arriba-centro ------------------------------------------ */
+/* --- RUNNING: tarjeta arriba-centro ------------------------------------------
+   top:72px la baja bajo la banda del menú (botones a top:16, ~56px de alto) para
+   que la tarjeta centrada no colisione con los controles (p. ej. el botón de juego,
+   que en pantallas anchas queda a la izquierda del centro). */
 .card {
   position: fixed;
-  top: 16px;
+  top: 72px;
   left: 50%;
   transform: translateX(-50%);
   z-index: 26;
@@ -178,7 +117,8 @@
 /* --- RESULTS: banner --------------------------------------------------------- */
 .banner {
   position: fixed;
-  top: 20px;
+  /* Bajo la banda del menú (igual que la tarjeta), para no chocar con los controles. */
+  top: 72px;
   left: 50%;
   transform: translateX(-50%);
   z-index: 26;
@@ -224,7 +164,6 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .startPill,
   .stopBtn {
     transition: none;
   }
@@ -234,18 +173,27 @@
   }
 }
 
-/* En móvil, baja la tarjeta un pelín y estréchala para no tapar el clúster.
-   Respeta el área segura superior (notch/status bar) — sólo reacomodo de posición. */
-@media (max-width: 560px) {
+/* Móvil: la tarjeta/banner respetan el área segura superior y quedan bajo la banda
+   del menú (fila 1 de botones a top:12, ~56px). Estrecha un poco la tarjeta. */
+@media (pointer: coarse), (max-width: 560px) {
   .card {
-    top: calc(16px + env(safe-area-inset-top));
+    top: calc(72px + env(safe-area-inset-top));
     min-width: 150px;
     padding: 0.6rem 0.7rem 0.5rem;
   }
   .banner {
-    top: calc(20px + env(safe-area-inset-top));
+    top: calc(72px + env(safe-area-inset-top));
   }
   .clock {
     font-size: 1.45rem;
+  }
+}
+
+/* ≤400px el menú usa DOS filas (chat+juego reflowan abajo, ~112px de banda): baja
+   la tarjeta/banner para no chocar con la segunda fila. */
+@media (max-width: 400px) {
+  .card,
+  .banner {
+    top: calc(128px + env(safe-area-inset-top));
   }
 }

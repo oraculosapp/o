@@ -46,6 +46,12 @@ export interface AvatarDriveState {
   grounded: boolean;
   /** ¿En fase de salto/aéreo? */
   jumping: boolean;
+  /**
+   * ¿En modo VUELO? (triple salto). Opcional: la locomoción lo ignora (el vuelo
+   * usa la misma pose de aire que el salto), pero los ojos expresivos lo usan para
+   * distinguir "fly" (abiertos + brillo) de "jump" (muy abiertos). Omitido = false.
+   */
+  flying?: boolean;
 }
 
 /**

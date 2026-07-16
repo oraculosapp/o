@@ -38,8 +38,9 @@
   pointer-events: auto;
   display: inline-grid;
   place-content: center;
-  width: 74px;
-  height: 74px;
+  /* Botones ~15% más chicos (Saltar 74→64) manteniendo el mínimo táctil de 44px. */
+  width: 64px;
+  height: 64px;
   border-radius: 50%;
   border: 1px solid var(--line);
   background: var(--panel-hud);
@@ -81,11 +82,12 @@
   color: #cfe0ff;
 }
 
-/* Acción (Tomar/Lanzar/Dibuja): siempre visible, un pelín mayor, encabeza el clúster. */
+/* Acción (Tomar/Lanzar/Dibuja): siempre visible, encabeza el clúster. ~15% más chico
+   (76→64). */
 .action {
-  width: 76px;
-  height: 76px;
-  font-size: 0.68rem;
+  width: 64px;
+  height: 64px;
+  font-size: 0.66rem;
 }
 /* Con pelota en mano → acento terracota (Lanzar). */
 .holding {
@@ -101,11 +103,12 @@
   box-shadow: var(--shadow), 0 0 24px var(--glow);
 }
 
-/* Correr: neutro; encendido (hold) resalta con dorado tenue. */
+/* Correr: neutro; encendido (hold) resalta con dorado tenue. ~15% más chico (66→56),
+   por encima del mínimo táctil de 44px. */
 .run {
-  width: 66px;
-  height: 66px;
-  font-size: 0.64rem;
+  width: 56px;
+  height: 56px;
+  font-size: 0.6rem;
 }
 .runOn {
   background: linear-gradient(180deg, rgba(227, 176, 99, 0.34), rgba(227, 176, 99, 0.16));

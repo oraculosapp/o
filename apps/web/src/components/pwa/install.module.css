@@ -7,31 +7,116 @@
   align-items: center;
 }
 
-/* Variante HUD: fija arriba-izquierda del mundo 3D (lejos del chat/joystick
-   abajo-izquierda y de los controles arriba-derecha). */
-.hud {
+/* --- HUD: NOTIFICACIÓN (toast) ----------------------------------------------
+   El instalar ya NO es un botón permanente del menú: en el mundo 3D se ofrece como
+   un toast del design system (mismo glass dorado que UpdateSentinel), abajo-centro
+   pero ELEVADO sobre el toast de "Nueva versión" (bottom mayor) para que, si ambos
+   coincidieran, no se pisen. Descartable con ×; el descarte se recuerda 7 días. */
+.toast {
   position: fixed;
-  top: 16px;
-  left: 16px;
-  z-index: 35;
-}
-/* En el HUD la píldora es un icono redondo discreto (mismo lenguaje que los
-   demás icon-buttons del HUD), para no competir con el resto de controles. */
-.hud .pill {
-  width: 40px;
-  height: 40px;
-  padding: 0;
+  left: 50%;
+  bottom: calc(76px + env(safe-area-inset-bottom));
+  transform: translateX(-50%);
+  z-index: 55;
+
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  flex-wrap: wrap;
   justify-content: center;
-  border-radius: 50%;
+  max-width: min(92vw, 26rem);
+  padding: 0.4rem 0.5rem 0.4rem 0.6rem;
+
+  border: 1px solid var(--gold-dim);
+  border-radius: var(--radius-pill);
+  background: var(--panel-hi);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  box-shadow:
+    var(--shadow),
+    0 0 26px var(--glow);
+
+  animation: hintIn var(--dur-slow) var(--ease-brand);
 }
+/* Acción principal: instalar (o desplegar instrucciones iOS). */
+.toastAction {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.35rem 0.7rem;
+  border: none;
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  font-family: var(--font-display);
+  font-size: 0.72rem;
+  font-weight: 500;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  transition: color var(--dur-fast) var(--ease-brand);
+}
+.toastAction svg {
+  color: var(--gold);
+}
+.toastAction:hover {
+  color: var(--gold-bright);
+}
+.toastAction:focus-visible {
+  outline: 2px solid var(--gold-bright);
+  outline-offset: 2px;
+}
+/* Botón × de descarte: discreto, área táctil holgada. */
+.toastDismiss {
+  display: inline-grid;
+  place-content: center;
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+  line-height: 1;
+  font-size: 1rem;
+  transition:
+    color var(--dur-fast) var(--ease-brand),
+    border-color var(--dur-fast) var(--ease-brand);
+}
+.toastDismiss:hover {
+  color: var(--gold-bright);
+  border-color: var(--gold-dim);
+}
+.toastDismiss:focus-visible {
+  outline: 2px solid var(--gold-bright);
+  outline-offset: 2px;
+}
+/* Instrucciones iOS dentro del toast: ocupan toda la fila (flex-basis 100%). */
+.toastIosText {
+  flex-basis: 100%;
+  margin: 0.15rem 0.2rem 0.1rem;
+  color: var(--text);
+  font-size: 0.8rem;
+  line-height: 1.45;
+  text-transform: none;
+  letter-spacing: normal;
+}
+.toastIosText b {
+  color: var(--gold-bright);
+}
+.toastIosText svg {
+  color: var(--gold);
+}
+
 @media (pointer: coarse), (max-width: 640px) {
-  /* Fila 1 (izquierda): Instalar, con áreas seguras (notch/gestos). */
-  .hud {
-    top: calc(12px + env(safe-area-inset-top));
-    left: calc(12px + env(safe-area-inset-left));
+  .toast {
+    bottom: calc(70px + env(safe-area-inset-bottom));
   }
-  /* Área táctil ≥44px (WCAG 2.5.5). */
-  .hud .pill {
+  /* Áreas táctiles ≥44px (WCAG 2.5.5). */
+  .toastAction {
+    min-height: 44px;
+  }
+  .toastDismiss {
     width: 44px;
     height: 44px;
   }
@@ -95,10 +180,6 @@
   box-shadow: var(--shadow);
   z-index: 2;
   animation: hintIn var(--dur-slow) var(--ease-brand);
-}
-.hud .iosHint {
-  left: 0;
-  transform: none;
 }
 .iosText {
   margin: 0;

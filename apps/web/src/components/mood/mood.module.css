@@ -1,16 +1,12 @@
 /* MoodPanel — píldora glass del HUD (mismo lenguaje que mute/campanita/cuenta) +
-   panel de cristal con dos filas de chips (Ánimo / Clima). Vive en el clúster
-   superior-IZQUIERDA, en el slot siguiente al clúster de campanita+cuenta.
-
-   NOTA de posición: el enunciado sugería left:212, pero ahí ya cae el FAB de
-   cuenta (el clúster left:164 abarca Bell 164–204 + Cuenta 212–252). Para NO
-   solapar un control interactivo, esta píldora se ancla en left:260 (8px tras el
-   borde derecho del clúster), respetando el ritmo de ~48px del HUD. */
+   panel de cristal con dos filas de chips (Ánimo / Clima). Es el slot 4 del menú
+   "ánimo y clima": tras el clúster cuenta+campanita (que termina ~left:152) y
+   antes del mute (left:208). Ritmo de 48px del HUD. */
 
 .root {
   position: fixed;
   top: 16px;
-  left: 260px;
+  left: 160px;
   z-index: 35;
 }
 
@@ -160,10 +156,10 @@
 }
 
 @media (pointer: coarse), (max-width: 640px) {
-  /* Fila 1 (derecha del clúster): ánimo/clima, con áreas seguras. */
+  /* Fila 1: slot 4 "ánimo/clima" con rítmica de 52px (44px + 8px) y áreas seguras. */
   .root {
     top: calc(12px + env(safe-area-inset-top));
-    left: calc(272px + env(safe-area-inset-left));
+    left: calc(168px + env(safe-area-inset-left));
   }
   /* Área táctil ≥44px (WCAG 2.5.5) — glifo intacto a ~20px. */
   .button {
@@ -179,16 +175,9 @@
   }
 }
 
-/* ≤360px: la fila superior no cabe → la píldora de ánimo baja a la SEGUNDA fila,
-   anclada a la DERECHA para que su panel (right:0) quede siempre en pantalla
-   (problema 7). */
-@media (max-width: 360px) {
-  .root {
-    top: calc(64px + env(safe-area-inset-top));
-    left: auto;
-    right: calc(12px + env(safe-area-inset-right));
-  }
-}
+/* Ánimo/clima es una de las 5 utilidades que se quedan en la fila 1 en todos los
+   anchos (borde derecho de la fila ~212px, siempre cabe). Sólo chat y juego bajan a
+   la 2ª fila en ≤400px. */
 
 @media (prefers-reduced-motion: reduce) {
   .button,

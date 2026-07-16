@@ -1,0 +1,113 @@
+/* Botón "Comenzar / Detener juego" del MENÚ superior — side-button glass (mismo
+   lenguaje que mute/campanita/cuenta). Es el 7º y último control del clúster
+   superior-IZQUIERDA (slot tras el botón de chat). */
+
+.button {
+  position: fixed;
+  top: 16px;
+  /* Slot 6: tras el botón de chat (left:256, 40px). */
+  left: 304px;
+  z-index: 35;
+  display: inline-grid;
+  place-content: center;
+  width: 40px;
+  height: 40px;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  background: var(--panel);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  box-shadow: var(--shadow);
+  color: var(--gold-bright);
+  cursor: pointer;
+  transition:
+    transform var(--dur-fast) var(--ease-brand),
+    border-color var(--dur-fast) var(--ease-brand),
+    box-shadow var(--dur-fast) var(--ease-brand),
+    color var(--dur-fast) var(--ease-brand);
+}
+.button:hover:not(:disabled) {
+  transform: translateY(-2px);
+  color: var(--gold-bright);
+  border-color: var(--gold-dim);
+  box-shadow:
+    var(--shadow),
+    0 0 20px var(--glow);
+}
+.button:focus-visible {
+  outline: 2px solid var(--gold-bright);
+  outline-offset: 2px;
+  border-color: var(--gold-dim);
+}
+/* Corriendo (Detener): acento pleno para señalar partida activa. */
+.button[aria-pressed="true"] {
+  border-color: var(--gold-dim);
+}
+/* Fuera del claro (o aún no listo): apagado, sin interacción posible. */
+.button:disabled {
+  color: var(--text-faint);
+  cursor: default;
+}
+
+/* --- Tooltip de marca (glass), calcado del clúster del HUD ------------------- */
+.tip {
+  position: relative;
+}
+.tip::after {
+  content: attr(data-tip);
+  position: absolute;
+  top: calc(100% + 8px);
+  /* Anclado a la DERECHA: el botón cae cerca del borde derecho de la fila, así el
+     tooltip no desborda por la derecha del viewport. */
+  right: 0;
+  padding: 0.3rem 0.55rem;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--line);
+  background: var(--panel-hud);
+  box-shadow: var(--shadow);
+  color: var(--text);
+  font-family: var(--font-display);
+  font-size: 0.58rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  opacity: 0;
+  transform: translateY(-4px);
+  pointer-events: none;
+  transition:
+    opacity var(--dur-fast) var(--ease-brand),
+    transform var(--dur-fast) var(--ease-brand);
+}
+.tip:hover::after,
+.tip:focus-visible::after {
+  opacity: 1;
+  transform: none;
+}
+
+@media (pointer: coarse), (max-width: 640px) {
+  /* Fila 1: slot 6 con rítmica de 52px (44px + 8px) y áreas seguras. */
+  .button {
+    top: calc(12px + env(safe-area-inset-top));
+    left: calc(324px + env(safe-area-inset-left));
+    /* Área táctil ≥44px (WCAG 2.5.5) — glifo intacto a ~20px. */
+    width: 44px;
+    height: 44px;
+  }
+}
+
+/* ≤400px: 7 botones no caben en una fila (borde derecho ~368px) → chat y juego
+   bajan a la SEGUNDA fila (problema 6). El juego se ancla a la izquierda, tras el
+   chat. La banda superior de la hoja del chat se agranda en chat.module.css. */
+@media (max-width: 400px) {
+  .button {
+    top: calc(64px + env(safe-area-inset-top));
+    left: calc(64px + env(safe-area-inset-left));
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .button,
+  .tip::after {
+    transition: none;
+  }
+}

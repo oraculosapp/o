@@ -241,6 +241,15 @@ export class PaqoWorld {
     this.net.start();
     // [DIBUJO] Puente hacia el DrawTrail para la difusión de trazos por red.
     this.net.setDrawTrail(this.drawTrail);
+    // [MANDOS] Táctil (puntero grueso): el sprite de la tecla "E" no aplica (hay
+    // botón "Tomar"). Lo cableamos al media query y seguimos cambios de puntero.
+    if (typeof window !== "undefined" && typeof window.matchMedia === "function") {
+      const coarseMq = window.matchMedia("(pointer: coarse)");
+      this.net.setKeyHintEnabled(!coarseMq.matches);
+      coarseMq.addEventListener?.("change", (e) => {
+        if (!this.disposed) this.net.setKeyHintEnabled(!e.matches);
+      });
+    }
 
     // Director de clima (equipo Atmos): modula fog/cielo/luces y, vía callbacks,
     // el viento de la vegetación y la densidad del shell de niebla. Stub no-op.

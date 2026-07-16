@@ -5,6 +5,7 @@ import { PaqoWorld, type BiospherePreset, type AvatarConfig } from "@phygitalia/
 import paqo from "@phygitalia/content/biospheres/paqo.json";
 import { PerfOverlay } from "@/components/dev/PerfOverlay";
 import { ChatDock } from "@/components/chat/ChatDock";
+import { ChatMenuButton } from "@/components/chat/ChatMenuButton";
 // HintToasts (los llamados de Paqo) OCULTOS por ahora — se reactivará más adelante.
 // import { HintToasts } from "@/components/hints/HintToasts";
 import { HudControls } from "@/components/notifications/HudControls";
@@ -15,6 +16,7 @@ import { AvatarPicker } from "@/components/avatar-picker/AvatarPicker";
 import { EmoteMenu } from "@/components/avatar-picker/EmoteMenu";
 import { MoodPanel } from "@/components/mood/MoodPanel";
 import { GameHud } from "@/components/game/GameHud";
+import { GameMenuButton } from "@/components/game/GameMenuButton";
 import { thumbUrl } from "@/lib/avatars";
 import { randomName } from "@/lib/names";
 import {
@@ -168,28 +170,38 @@ export default function PaqoBiosphere() {
       {/* Botones táctiles de saltar/agarrar (sólo en dispositivos touch). */}
       <MobileControls getWorld={getWorld} />
 
-      {/* Clúster superior-IZQUIERDA sobre el juego (NO sobre la columna del chat,
-          que ocupa la derecha a toda altura): Instalar · mute · avatar ·
-          campanita+cuenta, en fila. */}
-
-      {/* Píldora "Instalar app" (left:16); se autooculta si no aplica. */}
-      <InstallButton placement="hud" />
-
-      {/* Botón mute del soundscape (left:68). */}
-      <MuteButton />
-
-      {/* Campanita + perfil + “Cambiar avatar” (avatar left:116, cluster left:164).
-          El avatar muestra el retrato/tinte actual para no confundirse con Perfil. */}
+      {/* MENÚ superior-IZQUIERDA sobre el juego (NO sobre la columna del chat, que
+          ocupa la derecha a toda altura). Orden EXACTO izq→der (cada control se ancla
+          por su propio CSS al slot indicado):
+            (1) editar avatar   — HudControls .avatarSlot (left:16)
+            (2) perfil/cuenta   — HudControls .cluster → AccountFab (left:64)
+            (3) notificaciones  — HudControls .cluster → Bell (~left:112)
+            (4) ánimo y clima   — MoodPanel (left:160)
+            (5) sonido          — MuteButton (left:208)
+            (6) chat            — ChatMenuButton (left:256)
+            (7) comenzar juego  — GameMenuButton (left:304)
+          El montaje aquí no fija el orden visual (todos son position:fixed); lo fijan
+          los `left` de cada módulo. */}
       <HudControls
         onChangeAvatar={() => setPickerOpen(true)}
         avatarThumbUrl={avatarSel ? thumbUrl() : null}
         avatarTint={avatarSel?.color ?? null}
       />
-
-      {/* Panel de mood/clima (equipo Atmos) y HUD del mini-juego (equipo Juego).
-          Stubs: montados con el getter perezoso del mundo; aún no pintan nada. */}
       <MoodPanel getWorld={getWorld} />
+      <MuteButton />
+      {/* Botón de CHAT: alterna la apertura del ChatDock por evento "phy:toggle-chat"
+          (reemplaza al antiguo launcher flotante). */}
+      <ChatMenuButton />
+      {/* Botón COMENZAR/DETENER juego: habilitado sólo dentro del claro de Paqo. */}
+      <GameMenuButton getWorld={getWorld} />
+
+      {/* HUD del mini-juego (equipo Juego): SÓLO el marcador (running) y el banner de
+          resultados, centrados arriba con margen bajo el menú. */}
       <GameHud getWorld={getWorld} />
+
+      {/* Instalar PWA: ya NO es botón del menú → notificación/toast diferida (~20s),
+          descartable, recordando el descarte 7 días. Se autooculta si no aplica. */}
+      <InstallButton placement="hud" />
 
       <AvatarPicker
         open={pickerOpen}

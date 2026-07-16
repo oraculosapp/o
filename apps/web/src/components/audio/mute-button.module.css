@@ -1,13 +1,13 @@
 /* Botón mute del HUD — side-button glass (mismo lenguaje que campanita/perfil).
-   Vive en el clúster superior-IZQUIERDA (sobre el juego), a la derecha de la
-   píldora "Instalar app" y a la izquierda del retrato de avatar. Así NO se solapa
-   con la columna del chat (derecha, todo lo alto). */
+   Vive en el clúster superior-IZQUIERDA (sobre el juego), como slot 5 "sonido":
+   tras ánimo/clima (left:160) y antes del botón de chat (left:256). Así NO se
+   solapa con la columna del chat (derecha, todo lo alto). */
 
 .button {
   position: fixed;
   top: 16px;
-  /* Tras "Instalar app" (left:16, 40px) + margen. */
-  left: 68px;
+  /* Slot 4 "sonido": tras ánimo/clima (left:160, 40px). */
+  left: 208px;
   z-index: 35;
   display: inline-grid;
   place-content: center;
@@ -46,10 +46,10 @@
 }
 
 @media (pointer: coarse), (max-width: 640px) {
-  /* Fila 1 (izquierda): mute tras Instalar, con áreas seguras. */
+  /* Fila 1: slot 4 "sonido" con rítmica de 52px (44px + 8px) y áreas seguras. */
   .button {
     top: calc(12px + env(safe-area-inset-top));
-    left: calc(64px + env(safe-area-inset-left));
+    left: calc(220px + env(safe-area-inset-left));
     /* Área táctil ≥44px (WCAG 2.5.5) — glifo intacto a ~20px. */
     width: 44px;
     height: 44px;

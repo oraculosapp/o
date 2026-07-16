@@ -7,12 +7,11 @@ import styles from "./hud-controls.module.css";
 
 /**
  * Grupo de controles del HUD anclado arriba-IZQUIERDA (sobre el viewport del
- * juego, NO sobre la columna del chat de la derecha): campanita de
- * notificaciones + FAB de cuenta (crear cuenta / entrar / perfil / cerrar
- * sesión). Forma fila con "Instalar app", mute y el retrato de avatar. Discreto,
- * glass, no estorba el joystick (abajo-izquierda) ni la columna del chat.
- *
- * Pensado para montarse en una línea desde la page de la Biósfera.
+ * juego, NO sobre la columna del chat de la derecha). Aporta 3 de los 7 slots del
+ * MENÚ: (1) editar avatar (.avatarSlot, left:16), (2) perfil/cuenta (AccountFab) y
+ * (3) notificaciones (Bell), estos dos en el .cluster (left:64). Los demás slots
+ * (ánimo/clima, sonido, chat, juego) los montan otros componentes. Discreto, glass,
+ * no estorba el joystick (abajo-izquierda) ni la columna del chat.
  */
 export interface HudControlsProps {
   /** Si se pasa, muestra el botón “Cambiar avatar” junto al clúster. */
@@ -31,12 +30,11 @@ export function HudControls({
   return (
     <>
       <div className={styles.cluster}>
-        <Bell />
-        {/* FAB de cuenta: menú con crear cuenta / entrar / perfil / cerrar sesión. */}
+        {/* Orden del menú: (2) perfil/cuenta, luego (3) notificaciones. */}
         <AccountFab />
+        <Bell />
       </div>
-      {/* “Cambiar avatar” en su propio slot fijo dentro del clúster superior-
-          izquierda (left:116, entre el mute y la campanita+cuenta). Muestra el
+      {/* “Editar avatar”: PRIMER slot del menú (.avatarSlot, left:16). Muestra el
           RETRATO del avatar actual (o su tinte) para distinguirlo del "Perfil". */}
       {onChangeAvatar && (
         <button

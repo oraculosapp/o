@@ -4,7 +4,7 @@
  *   · Se crean THREE.Bone para los huesos Mixamo (piernas incluidas).
  *   · Los huesos mínimos de ProceduralLocomotion están (hips + 2×UpLeg + 2×Leg).
  *   · Hay una SkinnedMesh con skeleton enlazado.
- *   · Los 5 materiales nombrados por zona sobreviven.
+ *   · El material nombrado "body" sobrevive (los ojos los pone el engine).
  *
  * Uso:  cd tools/assets && node ../avatars/verify-load.mjs [archivo.glb]
  */
@@ -28,8 +28,9 @@ function normBone(n) {
   return n.toLowerCase().replace(/^mixamorig[:_]?/, "").replace(/_\d+$/, "");
 }
 const REQUIRED = ["hips", "leftupleg", "rightupleg", "leftleg", "rightleg", "leftfoot", "rightfoot", "head"];
-// Avatar "nube": 2 materiales nombrados (body tintable + eyes negro).
-const ZONES = ["body", "eyes"];
+// Avatar "nube": 1 material nombrado (body tintable). Los ojos los anima el
+// engine (ExpressiveEyes), ya no se hornean en la malla.
+const ZONES = ["body"];
 
 const file = process.argv[2] || readdirSync(GEN).filter((f) => f.endsWith(".glb")).sort()[0];
 const glbPath = path.isAbsolute(file) ? file : path.join(GEN, file);
@@ -62,7 +63,7 @@ loader.parse(
     const ok = missingBones.length === 0 && missingMats.length === 0 && hasSkeleton;
     if (missingBones.length) console.log(`  FALTAN huesos: ${missingBones.join(", ")}`);
     if (missingMats.length) console.log(`  FALTAN materiales: ${missingMats.join(", ")}`);
-    console.log(ok ? "  => OK: carga como esqueleto skinned con huesos de pierna + materiales body/eyes" : "  => FALLO");
+    console.log(ok ? "  => OK: carga como esqueleto skinned con huesos de pierna + material body" : "  => FALLO");
     process.exit(ok ? 0 : 1);
   },
   (err) => {

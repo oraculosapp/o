@@ -125,6 +125,15 @@ export class WorldNet implements WorldNetHooks {
     this.balls.setLocalId(id);
   }
 
+  /**
+   * Activa/desactiva el sprite de la tecla "E" de las pelotas (pass-through a Balls).
+   * En punteros gruesos (táctil) se apaga: allí manda el botón "Tomar". Lo cablea
+   * PaqoWorld con `matchMedia("(pointer: coarse)")`.
+   */
+  setKeyHintEnabled(on: boolean): void {
+    this.balls.setKeyHintEnabled(on);
+  }
+
   onZoneSignal(cb: (signal: ZoneSignal) => void): () => void {
     return this.zones.onSignal(cb);
   }

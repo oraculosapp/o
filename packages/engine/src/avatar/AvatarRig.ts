@@ -5,6 +5,7 @@ import { MeshoptDecoder } from "three/examples/jsm/libs/meshopt_decoder.module.j
 import { AnimationDriver, type Locomotion } from "./AnimationDriver";
 import { ProceduralLocomotion, type LocomotionQA } from "./ProceduralLocomotion";
 import { EmoteDriver, isEmoteId } from "./EmoteDriver";
+import { ExpressiveEyes, type EyeState } from "./ExpressiveEyes";
 import { TintController, toToonMaterial, avatarToonRamp, type HueBand } from "./tint";
 import type { AvatarDriveState, IAvatarRig, PropSocket, TintZone } from "./types";
 
@@ -73,6 +74,8 @@ export class AvatarRig implements IAvatarRig {
   private loco?: ProceduralLocomotion;
   /** Animador procedural de emotes (one-shot que se mezcla y vuelve a idle). */
   private emote?: EmoteDriver;
+  /** Ojos EXPRESIVOS por código (anclados al hueso Head). No-op si no hay cabeza. */
+  private eyes?: ExpressiveEyes;
   private tint = new TintController();
   private sockets: Record<PropSocket, THREE.Object3D>;
   private ramp: THREE.DataTexture;
@@ -113,6 +116,12 @@ export class AvatarRig implements IAvatarRig {
 
     // Emotes procedurales (si el esqueleto mapea como humanoide Mixamo).
     this.emote = EmoteDriver.tryCreate(this.root) ?? undefined;
+
+    // Ojos expresivos: se anclan al hueso Head en las posiciones que tenían
+    // horneadas en el GLB previo y se deforman por estado (parpadeo, entrecerrado,
+    // muy abiertos, brillo de vuelo, sonrientes en dance). No-op si no hay cabeza.
+    const eyes = new ExpressiveEyes(this.root, this.ramp);
+    if (eyes.applied) this.eyes = eyes;
 
     // ── Normalización de escala ──────────────────────────────────────────────
     // Modelos fuera de rango humano (Mixamo suele venir a ~1.16 u) se escalan a la
@@ -225,9 +234,16 @@ export class AvatarRig implements IAvatarRig {
     });
 
     // Estrategia de tinte según nº de materiales.
-    if (toonList.length <= 1) {
-      // Un solo material con todo horneado → máscara de hue (best-effort).
+    // El avatar "nube" trae UN solo material NOMBRADO "body" (los ojos ya no se
+    // hornean en la malla) → hay que reconocerlo como zona primary, no aplicarle la
+    // máscara de hue (que es para GLB de un material con todo horneado a la textura).
+    const soloZone = toonList.length === 1 ? this.guessZone(toonList[0].srcName) : null;
+    if (toonList.length <= 1 && soloZone === null) {
+      // Un solo material con todo horneado y sin pista de zona → máscara de hue.
       if (toonList[0]) this.tint.patchHueMask(toonList[0].mat, DEFAULT_HUE_BANDS);
+    } else if (toonList.length === 1 && soloZone !== null) {
+      // Un solo material nombrado (p.ej. "body") → zona directa (ruta precisa).
+      this.tint.patchZone(toonList[0].mat, soloZone);
     } else {
       // Varios materiales → asigna zona por material (ruta precisa). Con los GLB
       // generados (materiales NOMBRADOS primary/secondary/hair/skin/accent) el
@@ -303,6 +319,8 @@ export class AvatarRig implements IAvatarRig {
 
   update(dt: number, state: AvatarDriveState): void {
     if (this.disposed) return;
+    // Ojos: siempre (incluso durante un emote) — su estado se deriva del emote/anim.
+    this.eyes?.update(dt, this.pickEyeState(state));
     // Mientras un emote está activo, ÉL conduce los huesos; la locomoción cede y
     // retoma al terminar (los huesos vuelven al reposo con la envolvente del emote).
     if (this.emote?.isActive) {
@@ -311,6 +329,21 @@ export class AvatarRig implements IAvatarRig {
     }
     if (this.loco) this.loco.update(dt, state);
     else this.driver?.update(dt, state);
+  }
+
+  /**
+   * Deriva la expresión de los ojos del estado de conducción (mismos umbrales que
+   * el AnimationDriver/ProceduralLocomotion) y del emote activo. Automático: no
+   * requiere plomería extra desde el orquestador; funciona igual para el jugador
+   * local (controller) y los remotos (RemotePlayers pasa `flying` en su driveState).
+   */
+  private pickEyeState(state: AvatarDriveState): EyeState {
+    if (this.emote?.isActive) return "dance"; // emote → ojos felices ∩
+    if (state.jumping || !state.grounded) return state.flying ? "fly" : "jump";
+    const ratio = state.maxSpeed > 0 ? state.speed / state.maxSpeed : 0;
+    if (ratio < 0.12) return "idle";
+    if (ratio < 0.62) return "walk";
+    return "run";
   }
 
   playEmote(id: string): void {
@@ -331,6 +364,7 @@ export class AvatarRig implements IAvatarRig {
 
   dispose(): void {
     this.disposed = true;
+    this.eyes?.dispose();
     this.driver?.dispose();
     this.root.traverse((obj) => {
       const mesh = obj as THREE.Mesh;

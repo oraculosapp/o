@@ -44,8 +44,9 @@ function driveStateFor(anim: string): AvatarDriveState {
     case "jump":
       return { speed: 3, maxSpeed: 7, grounded: false, jumping: true };
     // Vuelo: pose de aire (no hay clip "fly"; el air-pose se lee mejor que idle).
+    // `flying: true` deja que los ojos expresivos usen la cara de vuelo (brillo).
     case "fly":
-      return { speed: 3, maxSpeed: 7, grounded: false, jumping: true };
+      return { speed: 3, maxSpeed: 7, grounded: false, jumping: true, flying: true };
     case "idle":
     default:
       // Cualquier string desconocido cae aquí → idle (tolerancia de red).

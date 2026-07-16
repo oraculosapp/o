@@ -21,6 +21,7 @@ import type {
   RealtimeChannel,
   RealtimePostgresChangesPayload,
   RealtimePresenceState,
+  Session,
   SupabaseClient,
 } from "@supabase/supabase-js";
 import { isEmoteId } from "@phygitalia/engine";
@@ -149,6 +150,17 @@ const REMOTE_TIMEOUT_MS = 5_000;
 const SWEEP_MS = 1_000;
 const NET_RETRY_MS = 600;
 const NET_RETRY_MAX = 20; // ~12 s intentando enganchar world.net
+
+/**
+ * Backoff de reintentos de `ensureAnonSession` en `connect()`. El bug de prod:
+ * en visitantes frescos el signup anónimo puede fallar (captcha interactivo,
+ * arranque en 2º plano en móvil, glitch de red) y ese usuario quedaba INVISIBLE
+ * en multijugador para siempre. Ahora reintentamos 3 veces con backoff creciente
+ * (2 s / 8 s / 20 s) tras el intento inicial; los retos interactivos de Turnstile
+ * tardan, así que damos margen. Si aun así falla, queda armado un último reintento
+ * en `visibilitychange→visible` (caso móvil: la pestaña arrancó en segundo plano).
+ */
+const SESSION_RETRY_BACKOFFS_MS = [2_000, 8_000, 20_000];
 
 /**
  * Valida que un `archetype` recibido por broadcast sea (a) el diseño "nube"
@@ -304,6 +316,12 @@ export class BiosphereRealtime {
   private gameWired = false;
   private gameRetryTimer: ReturnType<typeof setTimeout> | null = null;
   private disposed = false;
+  /** Timer del backoff de reintentos de sesión (se limpia al disponer). */
+  private sessionRetryTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Listener del reintento móvil (visibilitychange); null si no está armado. */
+  private onVisibility: (() => void) | null = null;
+  /** Sólo se permite UN reintento extra por visibilitychange (no reencolar). */
+  private visibilityRetryUsed = false;
 
   constructor(private readonly opts: BiosphereRealtimeOptions) {}
 
@@ -313,11 +331,62 @@ export class BiosphereRealtime {
 
   /** Arranca sesión + canal. Idempotente: reconectar tras dispose crea uno nuevo. */
   async connect(): Promise<void> {
-    if (this.disposed) return;
+    if (this.disposed || this.identity) return;
     this.opts.onStatus?.("connecting");
+    const session = await this.acquireSessionWithRetry();
+    if (this.disposed || this.identity) return;
+    if (!session) {
+      // Agotados los reintentos con backoff: deja armado un ÚLTIMO intento para
+      // cuando la pestaña vuelva a primer plano (móvil: arrancó en 2º plano).
+      this.armVisibilityRetry();
+      this.opts.onStatus?.("error");
+      return;
+    }
+    this.establish(session);
+  }
+
+  /**
+   * Pide la sesión anónima con backoff. Intento inmediato + 3 reintentos
+   * (2 s / 8 s / 20 s). Loggea cada fallo con el warn accionable. Devuelve la
+   * sesión, o null si se agotan los intentos (o si nos disponen por el camino).
+   */
+  private async acquireSessionWithRetry(): Promise<Session | null> {
+    const backoffs = SESSION_RETRY_BACKOFFS_MS;
+    const total = backoffs.length + 1;
+    for (let attempt = 0; attempt < total; attempt++) {
+      if (this.disposed) return null;
+      try {
+        return await ensureAnonSession();
+      } catch (err) {
+        const isLast = attempt === total - 1;
+        console.warn(
+          `[realtime] no se pudo iniciar sesión anónima (intento ${attempt + 1}/${total}` +
+            `${isLast ? ", último" : `, reintento en ${backoffs[attempt] / 1000}s`}):`,
+          err
+        );
+        if (isLast) return null;
+        await this.delay(backoffs[attempt]);
+        if (this.disposed) return null;
+      }
+    }
+    return null;
+  }
+
+  /** Espera `ms` de forma cancelable (el timer se limpia en `disconnect`). */
+  private delay(ms: number): Promise<void> {
+    return new Promise((resolve) => {
+      this.sessionRetryTimer = setTimeout(resolve, ms);
+    });
+  }
+
+  /** Con sesión ya obtenida: fija identidad y suscribe el canal. */
+  private establish(session: Session): void {
+    this.teardownVisibilityRetry();
+    if (this.sessionRetryTimer) {
+      clearTimeout(this.sessionRetryTimer);
+      this.sessionRetryTimer = null;
+    }
     try {
-      const session = await ensureAnonSession();
-      if (this.disposed) return;
       this.supabase = getSupabaseBrowserClient();
       const user = session.user;
       this.identity = {
@@ -331,9 +400,39 @@ export class BiosphereRealtime {
       };
       this.subscribe();
     } catch (err) {
-      console.warn("[realtime] no se pudo iniciar sesión/canal:", err);
+      console.warn("[realtime] no se pudo montar el canal tras la sesión:", err);
       this.opts.onStatus?.("error");
     }
+  }
+
+  /**
+   * Arma un ÚNICO reintento de `connect()` para cuando la pestaña vuelva a ser
+   * visible. Caso móvil real: el navegador arranca la página en segundo plano
+   * (pestaña oculta) y Turnstile / el signup fallan; al traer la pestaña al
+   * frente reintentamos una vez más. No se reencola tras usarse.
+   */
+  private armVisibilityRetry(): void {
+    if (this.disposed || this.visibilityRetryUsed || this.onVisibility) return;
+    if (typeof document === "undefined") return;
+    const handler = () => {
+      if (this.disposed || document.visibilityState !== "visible") return;
+      if (this.identity) return; // ya conectamos por otra vía
+      this.visibilityRetryUsed = true;
+      this.teardownVisibilityRetry();
+      console.warn(
+        "[realtime] reintento de sesión anónima al volver la pestaña a primer plano (caso móvil)…"
+      );
+      void this.connect();
+    };
+    this.onVisibility = handler;
+    document.addEventListener("visibilitychange", handler);
+  }
+
+  private teardownVisibilityRetry(): void {
+    if (this.onVisibility && typeof document !== "undefined") {
+      document.removeEventListener("visibilitychange", this.onVisibility);
+    }
+    this.onVisibility = null;
   }
 
   private subscribe(): void {
@@ -704,6 +803,8 @@ export class BiosphereRealtime {
     this.disposed = true;
     if (this.netRetryTimer) clearTimeout(this.netRetryTimer);
     if (this.gameRetryTimer) clearTimeout(this.gameRetryTimer);
+    if (this.sessionRetryTimer) clearTimeout(this.sessionRetryTimer);
+    this.teardownVisibilityRetry();
     if (this.sweepTimer) clearInterval(this.sweepTimer);
     for (const off of this.netUnsubs) {
       try {

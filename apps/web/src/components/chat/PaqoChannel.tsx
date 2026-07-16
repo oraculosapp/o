@@ -7,6 +7,7 @@ import {
   streamOracle,
   type WireMessage,
 } from "@/lib/oracle-client";
+import { SendIcon } from "./SendIcon";
 import styles from "./chat.module.css";
 
 interface Turn {
@@ -173,8 +174,14 @@ export function PaqoChannel({
           onChange={(e) => setDraft(e.target.value)}
           aria-label="Mensaje privado a Paqo"
         />
-        <button className={styles.sendBtn} type="submit" disabled={!draft.trim() || busy}>
-          {busy ? "…" : "Enviar"}
+        <button
+          className={styles.sendBtn}
+          type="submit"
+          disabled={!draft.trim() || busy}
+          aria-label="Enviar"
+          title="Enviar"
+        >
+          {busy ? "…" : <SendIcon />}
         </button>
       </form>
     </div>

@@ -441,6 +441,7 @@ export class CharacterController {
       maxSpeed: this.runSpeed,
       grounded: this.grounded && !this.flying,
       jumping: rigJumping,
+      flying: this.flying,
     });
 
     this.updateBlob();

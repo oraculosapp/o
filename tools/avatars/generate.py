@@ -2,9 +2,15 @@
 generate.py — Generador Blender headless del avatar "nube" de Phygitalia.
 
 NUEVA DIRECCIÓN (S8): un ÚNICO diseño NEUTRO tipo plastilina / clay ("Not
-Boring"): un cuerpo redondito de UN SOLO VOLUMEN, suave, cute, SIN detalles,
-SÓLO 2 ojos. Nada de pelo/ropa/props/nariz/boca. La personalización es SÓLO el
-color (lo pone el engine por tinte; la malla nace blanco neutro).
+Boring"): un cuerpo redondito de UN SOLO VOLUMEN, suave, cute, SIN detalles.
+Nada de pelo/ropa/props/nariz/boca. Los OJOS ya no se hornean en la malla (eran
+estáticos): los crea y ANIMA el engine (ExpressiveEyes) anclados al hueso Head,
+con expresiones por estado. La malla nace con UN solo material "body" (blanco
+neutro). La personalización es SÓLO el color (lo pone el engine por tinte).
+
+Detalle de cuerpo (S8+): dos "nalgitas" redonditas (esferas de campo) en la
+parte baja-trasera del torso, que se funden con el volumen y se insinúan de
+espaldas/perfil.
 
 Cómo se logra la suavidad (CERO costuras):
   · El cuerpo es un conjunto de METABALLS (esferas de campo) que se FUNDEN en una
@@ -22,11 +28,12 @@ Salida:
   · PNG → apps/web/public/assets/avatars/thumbs/gen/nube.png
           (thumbnail 512px, fondo transparente; tools/avatars/thumbs.mjs → .webp)
 
-Materiales NOMBRADOS: "body" (blanco neutro — zona de tinte principal en el
-engine) y "eyes" (negro). ≤ 6000 tris.
+Material NOMBRADO: "body" (blanco neutro — zona de tinte principal en el engine).
+≤ 6000 tris.
 
-Ejes: Blender Z-up, la CARA mira a +Y (ojos en +Y). El export glTF (+Y up) deja
-al avatar mirando a -Z en three.js (misma convención que el resto de avatares).
+Ejes: Blender Z-up, la CARA mira a +Y. El export glTF (+Y up) deja al avatar
+mirando a -Z en three.js (misma convención que el resto de avatares). El engine
+ancla los ojos animados en la cara (+Y Blender = -Z three).
 
 Uso (PowerShell):
   & "C:\\Program Files\\Blender Foundation\\Blender 5.0\\blender.exe" --background --python tools/avatars/generate.py
@@ -84,9 +91,9 @@ def hexcol(h):
     return (_s2l((h >> 16) & 0xFF), _s2l((h >> 8) & 0xFF), _s2l(h & 0xFF))
 
 
-# Blanco cálido neutro (el tinte del engine lo colorea) y negro para los ojos.
+# Blanco cálido neutro (el tinte del engine lo colorea). Los ojos los pone el
+# engine (ExpressiveEyes), ya no se hornean aquí.
 BODY_HEX = 0xEDEDE8
-EYE_HEX = 0x141118
 
 # --------------------------------------------------------------------------- #
 #  Esqueleto Mixamo COMPLETO (22 huesos), adaptado a la proporción TIERNA del
@@ -161,7 +168,15 @@ LEG_ELEMS = _mirror([
     (0.15, 0, 0.16, 0.115),   # espinilla
     (0.15, 0.06, 0.07, 0.13), # pie (bulbo, hacia +Y)
 ])
-ALL_ELEMS = BODY_ELEMS + ARM_ELEMS + LEG_ELEMS
+# Nalgitas redonditas: dos esferas de campo en la parte BAJA-TRASERA del torso
+# (hacia -Y = espalda), simétricas. Se funden con el volumen como todo lo demás
+# pero, al estar centradas por detrás de la superficie del torso, sobresalen ~0.1 u
+# hacia atrás → sutiles de perfil y perceptibles de espaldas (la cámara ve mucho
+# al avatar de espaldas). Un leve valle entre ambas (x=±0.105) insinúa la forma.
+BUTT_ELEMS = _mirror([
+    (0.105, -0.13, 0.49, 0.155),  # nalga (baja-trasera, hacia -Y)
+])
+ALL_ELEMS = BODY_ELEMS + ARM_ELEMS + LEG_ELEMS + BUTT_ELEMS
 
 
 # --------------------------------------------------------------------------- #
@@ -241,32 +256,6 @@ def build_metaball_body(coll, body_mat):
     # Material body (slot 0).
     body.data.materials.clear()
     body.data.materials.append(body_mat)
-    return body
-
-
-def add_eyes(coll, body, eye_mat):
-    """2 ojos: esferitas negras achatadas, apenas hundidas en la cara (+Y)."""
-    eyes = []
-    for sx in (-1, 1):
-        bpy.ops.object.select_all(action="DESELECT")
-        bpy.ops.mesh.primitive_uv_sphere_add(segments=16, ring_count=10, radius=0.052,
-                                              location=(sx * 0.135, 0.325, 1.20))
-        eye = bpy.context.view_layer.objects.active
-        eye.scale = (1.0, 0.62, 1.15)   # elipse: achatada en Y, alta en Z
-        bpy.ops.object.transform_apply(location=False, rotation=True, scale=True)
-        eye.data.materials.clear()
-        eye.data.materials.append(eye_mat)
-        for poly in eye.data.polygons:
-            poly.use_smooth = True
-        eyes.append(eye)
-
-    # Une los ojos al cuerpo → una sola malla con 2 slots (body, eyes).
-    bpy.ops.object.select_all(action="DESELECT")
-    body.select_set(True)
-    for e in eyes:
-        e.select_set(True)
-    bpy.context.view_layer.objects.active = body
-    bpy.ops.object.join()
     return body
 
 
@@ -441,11 +430,13 @@ def main():
     coll = bpy.context.scene.collection
 
     body_mat = make_material("body", BODY_HEX)
-    eye_mat = make_material("eyes", EYE_HEX, rough=0.5)
 
     arm_obj = make_armature(coll)
     body = build_metaball_body(coll, body_mat)
-    body = add_eyes(coll, body, eye_mat)
+    # Los ojos YA NO se hornean en la malla: son estáticos. Ahora los crea y anima
+    # el engine (packages/engine/src/avatar/ExpressiveEyes.ts) anclados al hueso
+    # Head, con expresiones por estado (parpadeo, entrecerrado, brillo, sonrientes).
+    # La malla queda con UN solo material: "body" (zona de tinte principal).
     tris = finish_mesh(body)
     bind_soft(body, arm_obj)
 

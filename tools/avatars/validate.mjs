@@ -6,7 +6,8 @@
  * apps/web/public/assets/avatars/gen/*.glb:
  *   · Huesos Mixamo esperados presentes (cadena completa + piernas de locomoción).
  *   · ≤ 6000 triángulos (más denso que S7: la suavidad clay lo pide).
- *   · Los 2 materiales nombrados: body (cuerpo, zona de tinte) + eyes (negro).
+ *   · El material nombrado: body (cuerpo, zona de tinte). Los ojos ya NO se
+ *     hornean en la malla — los anima el engine (ExpressiveEyes).
  *   · Skin presente con JOINTS_0/WEIGHTS_0 en las primitivas (skinning suave).
  *   · Tamaño < 300 KB.
  *
@@ -32,8 +33,9 @@ const GEN_DIR = path.join(REPO, "apps", "web", "public", "assets", "avatars", "g
 
 const MAX_TRIS = 6000;
 const MAX_BYTES = 300 * 1024;
-// El avatar "nube" tiene 2 materiales nombrados: body (tintable) + eyes (negro).
-const ZONES = ["body", "eyes"];
+// El avatar "nube" tiene 1 material nombrado: body (tintable). Los ojos los pone
+// el engine (ExpressiveEyes), ya no se hornean en la malla.
+const ZONES = ["body"];
 // Huesos mínimos que ProceduralLocomotion necesita + cadena razonable.
 const REQUIRED_BONES = [
   "Hips", "Spine", "Spine1", "Spine2", "Neck", "Head",

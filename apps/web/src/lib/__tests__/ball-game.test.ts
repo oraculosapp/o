@@ -3,9 +3,9 @@ import * as THREE from "three";
 import { BallGame, type GameEvent } from "@phygitalia/engine";
 
 /**
- * Mock ligero de Balls: sólo la superficie que consume BallGame (count, thrownLive,
+ * Mock ligero de Balls: sólo la superficie que consume BallGame (count, isLiveByLocal,
  * positionOf, respawnToHome, deflect, onRespawn). Evita canvas/WebGL de la Balls
- * real y deja controlar posiciones/lanzamientos de forma determinista.
+ * real y deja controlar posiciones/atribuciones de forma determinista.
  */
 class MockBalls {
   count = 9;
@@ -17,7 +17,7 @@ class MockBalls {
   onRespawn(): () => void {
     return () => {};
   }
-  isThrownLive(id: number): boolean {
+  isLiveByLocal(id: number): boolean {
     return this.thrown.has(id);
   }
   positionOf(id: number, out: THREE.Vector3): THREE.Vector3 {
@@ -99,7 +99,7 @@ describe("BallGame — máquina del mini-juego ¡Dale a Paqo!", () => {
     expect(sounds).toContain("start");
   });
 
-  it("golpe de pelota thrownLive dentro del cilindro puntúa al lanzador y respawnea", () => {
+  it("golpe de pelota atribuida al local dentro del cilindro puntúa y respawnea", () => {
     const { game, balls, events, sounds } = makeGame();
     game.setLocalPlayer("me");
     game.start();

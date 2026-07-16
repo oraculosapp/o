@@ -1,0 +1,107 @@
+/* Botón de CHAT del MENÚ superior — side-button glass (mismo lenguaje que
+   mute/campanita/cuenta). Slot 5 del clúster superior-IZQUIERDA (tras el mute,
+   antes del botón de juego). NOTA: este módulo es del equipo HUD-MENÚ; el vidrio
+   del chat (chat.module.css) lo mantiene el equipo de chat. */
+
+.button {
+  position: fixed;
+  top: 16px;
+  /* Slot 5: tras el mute (left:208, 40px). */
+  left: 256px;
+  z-index: 35;
+  display: inline-grid;
+  place-content: center;
+  width: 40px;
+  height: 40px;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  background: var(--panel);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  box-shadow: var(--shadow);
+  color: var(--text);
+  cursor: pointer;
+  transition:
+    transform var(--dur-fast) var(--ease-brand),
+    border-color var(--dur-fast) var(--ease-brand),
+    box-shadow var(--dur-fast) var(--ease-brand),
+    color var(--dur-fast) var(--ease-brand);
+}
+.button:hover {
+  transform: translateY(-2px);
+  color: var(--gold-bright);
+  border-color: var(--gold-dim);
+  box-shadow:
+    var(--shadow),
+    0 0 20px var(--glow);
+}
+.button:focus-visible {
+  outline: 2px solid var(--gold-bright);
+  outline-offset: 2px;
+  border-color: var(--gold-dim);
+}
+/* Chat abierto: acento dorado de marca (mismo criterio que el FAB de cuenta). */
+.button[aria-pressed="true"] {
+  color: var(--gold-bright);
+  border-color: var(--gold-dim);
+}
+
+/* --- Tooltip de marca (glass), calcado del clúster del HUD ------------------- */
+.tip {
+  position: relative;
+}
+.tip::after {
+  content: attr(data-tip);
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  padding: 0.3rem 0.55rem;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--line);
+  background: var(--panel-hud);
+  box-shadow: var(--shadow);
+  color: var(--text);
+  font-family: var(--font-display);
+  font-size: 0.58rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  opacity: 0;
+  transform: translateY(-4px);
+  pointer-events: none;
+  transition:
+    opacity var(--dur-fast) var(--ease-brand),
+    transform var(--dur-fast) var(--ease-brand);
+}
+.tip:hover::after,
+.tip:focus-visible::after {
+  opacity: 1;
+  transform: none;
+}
+
+@media (pointer: coarse), (max-width: 640px) {
+  /* Fila 1: slot 5 con rítmica de 52px (44px + 8px) y áreas seguras. */
+  .button {
+    top: calc(12px + env(safe-area-inset-top));
+    left: calc(272px + env(safe-area-inset-left));
+    /* Área táctil ≥44px (WCAG 2.5.5) — glifo intacto a ~20px. */
+    width: 44px;
+    height: 44px;
+  }
+}
+
+/* ≤400px: chat y juego bajan a la SEGUNDA fila (problema 6). El chat se ancla a la
+   izquierda; el juego a su derecha. */
+@media (max-width: 400px) {
+  .button {
+    top: calc(64px + env(safe-area-inset-top));
+    left: calc(12px + env(safe-area-inset-left));
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .button,
+  .tip::after {
+    transition: none;
+  }
+}

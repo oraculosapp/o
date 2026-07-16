@@ -89,10 +89,12 @@ export class InputManager {
   /** Se llama cuando el usuario da input manual de movimiento (cancela tap-to-move). */
   onManualMove: (() => void) | null = null;
 
-  // Joystick DOM (creado por el motor, no por React).
+  // Joystick DOM (creado por el motor, no por React). Overlay VISIBLE: un aro base
+  // (96px) que aparece flotando donde tocas y un pulgar (thumb, 44px) que sigue al
+  // dedo. Estilo glass sutil, neutro para leerse sobre biósferas claras u oscuras.
   private joyBase: HTMLDivElement;
   private joyKnob: HTMLDivElement;
-  private readonly joyRadius = 46;
+  private readonly joyRadius = 48; // aro base = 96px de diámetro
 
   private _axis = new THREE.Vector2();
 
@@ -104,26 +106,40 @@ export class InputManager {
   }
 
   private setupJoystickDom(): void {
+    // Aro BASE (96px): glass sutil "flotante". La translucidez se hornea en los
+    // rgba (NO con la propiedad `opacity`, que atenuaría también al pulgar hijo):
+    // borde claro tenue + relleno bicolor (claro→oscuro) para contrastar sobre
+    // biósferas claras u oscuras. zIndex alto para quedar sobre el lienzo WebGL y el
+    // velo de transición (fade, z-index 4).
     Object.assign(this.joyBase.style, {
       position: "absolute",
       width: `${this.joyRadius * 2}px`,
       height: `${this.joyRadius * 2}px`,
       borderRadius: "50%",
-      border: "2px solid rgba(227,176,99,0.55)",
-      background: "radial-gradient(circle, rgba(227,176,99,0.10), rgba(10,12,22,0.25))",
+      border: "1.5px solid rgba(255,255,255,0.45)",
+      background:
+        "radial-gradient(circle, rgba(255,255,255,0.14), rgba(18,20,32,0.22))",
+      boxShadow: "0 2px 16px rgba(0,0,0,0.28), inset 0 1px 0 rgba(255,255,255,0.18)",
+      backdropFilter: "blur(2px)",
       pointerEvents: "none",
       transform: "translate(-50%, -50%)",
       display: "none",
-      zIndex: "5",
+      zIndex: "6",
       touchAction: "none",
     } as CSSStyleDeclaration);
+    // Safari iOS: el prefijo -webkit- no es una clave tipada de CSSStyleDeclaration,
+    // se aplica por setProperty (móvil = donde vive el joystick).
+    this.joyBase.style.setProperty?.("-webkit-backdrop-filter", "blur(2px)");
+    // Pulgar (44px): más opaco que el aro para leerse siempre; sombra + aro oscuro
+    // para separarlo del fondo brillante.
     Object.assign(this.joyKnob.style, {
       position: "absolute",
-      width: "38px",
-      height: "38px",
+      width: "44px",
+      height: "44px",
       borderRadius: "50%",
-      background: "rgba(227,176,99,0.85)",
-      boxShadow: "0 0 14px rgba(227,176,99,0.6)",
+      background: "rgba(255,255,255,0.82)",
+      border: "1px solid rgba(0,0,0,0.18)",
+      boxShadow: "0 2px 10px rgba(0,0,0,0.35)",
       pointerEvents: "none",
       transform: "translate(-50%, -50%)",
       left: "50%",

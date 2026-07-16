@@ -220,6 +220,33 @@ export function ChatDock({ biosphereId, getWorldNet, getWorld, voiceSlot }: Chat
     return () => window.removeEventListener("keydown", onKey);
   }, [configured, open]);
 
+  // --- Toggle EXTERNO del chat (botón CHAT del menú superior) ------------------
+  // El launcher flotante desapareció: el botón de CHAT del menú controla el chat por
+  // EVENTOS de ventana (desacople, sin props compartidas):
+  //   · "phy:toggle-chat"       → alterna abrir/colapsar (en móvil, la hoja asoma).
+  //   · "phy:chat-open-query"   → el botón pide el estado actual al montar.
+  //   · "phy:chat-open" {open}  → difundimos el estado para que el botón lo refleje.
+  useEffect(() => {
+    const emit = () =>
+      window.dispatchEvent(new CustomEvent("phy:chat-open", { detail: { open } }));
+    const onToggle = () => {
+      if (open) {
+        setOpen(false);
+      } else {
+        setAutoFocusInput(false);
+        if (isTopSheet) setSnap("peek"); // la hoja siempre asoma primero, sin teclado
+        setOpen(true);
+      }
+    };
+    window.addEventListener("phy:toggle-chat", onToggle);
+    window.addEventListener("phy:chat-open-query", emit);
+    emit(); // difunde el estado actual en cada cambio (y al montar)
+    return () => {
+      window.removeEventListener("phy:toggle-chat", onToggle);
+      window.removeEventListener("phy:chat-open-query", emit);
+    };
+  }, [open, isTopSheet]);
+
   // --- Empuje del viewport del juego + chrome móvil ---------------------------
   // Empuja el juego para centrar el avatar en el área visible y publica el alto
   // ocupado abajo en `--chat-sheet-h` (px) + `data-chat-sheet` en <html>, que los
@@ -499,28 +526,9 @@ export function ChatDock({ biosphereId, getWorldNet, getWorld, voiceSlot }: Chat
   // La voz sólo se habilita si el viajero ya se identificó (nombre + sesión).
   const hasSession = Boolean(bio.sessionId && bio.name);
 
-  const openDock = () => {
-    setAutoFocusInput(false);
-    if (isTopSheet) setSnap("peek"); // la hoja siempre asoma primero, sin teclado
-    setOpen(true);
-  };
-
-  if (!open) {
-    return (
-      <button
-        type="button"
-        className={styles.launcher}
-        onClick={openDock}
-        aria-label="Abrir chat y voz (o pulsa Enter)"
-      >
-        <span className={`${styles.dot} ${statusDot}`} aria-hidden />
-        <span className={styles.launcherLabel}>Chat y voz</span>
-        {bio.roster.length > 0 && (
-          <span className={styles.launcherCount}>{bio.roster.length}</span>
-        )}
-      </button>
-    );
-  }
+  // Colapsado: NO hay launcher flotante. El chat se abre desde el botón de CHAT del
+  // menú superior (evento "phy:toggle-chat") o con Enter. Aquí no se pinta nada.
+  if (!open) return null;
 
   // Disposición según dispositivo/orientación:
   //   · PORTRAIT móvil → HOJA SUPERIOR (top sheet): cuelga desde arriba, asa abajo,
@@ -569,7 +577,7 @@ export function ChatDock({ biosphereId, getWorldNet, getWorld, voiceSlot }: Chat
               className={`${styles.tab} ${tab === "open" ? styles.tabActive : ""}`}
               onClick={() => setTab("open")}
             >
-              Abierto
+              Chat general
               {bio.roster.length > 0 && <span className={styles.tabCount}>{bio.roster.length}</span>}
             </button>
             <button
@@ -584,7 +592,7 @@ export function ChatDock({ biosphereId, getWorldNet, getWorld, voiceSlot }: Chat
               className={`${styles.tab} ${tab === "paqo" ? styles.tabActive : ""}`}
               onClick={() => setTab("paqo")}
             >
-              Paqo
+              Privado con Paqo
               {unregisteredHint && <span className={styles.tabSpark} aria-hidden>✦</span>}
             </button>
           </div>
@@ -630,7 +638,10 @@ export function ChatDock({ biosphereId, getWorldNet, getWorld, voiceSlot }: Chat
               aria-label="Colapsar el chat"
               title="Colapsar el chat"
             >
-              {isSidePanel ? "◀" : "▾"}
+              {/* Panel lateral apaisado → colapsa a la izquierda (◀). Hoja superior
+                  portrait → cuelga de arriba, colapsar = SUBIR (▴). Escritorio columna
+                  → baja (▾). Se decide por la clase/disposición activa. */}
+              {isSidePanel ? "◀" : isTopSheet ? "▴" : "▾"}
             </button>
           </div>
         </header>

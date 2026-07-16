@@ -3,65 +3,9 @@
    entrada píldora. Se puede expandir a columna de todo lo alto pegada a la
    derecha. Móvil: a la derecha (el joystick ocupa la mitad izquierda). */
 
-/* Launcher DISCRETO (problema 5): más chico y translúcido, en reposo a ~0.6 de
-   opacidad para no estorbar la jugabilidad; recupera plena presencia al hover/foco. */
-.launcher {
-  position: fixed;
-  right: 16px;
-  bottom: 16px;
-  z-index: 30;
-  display: inline-flex;
-  align-items: center;
-  gap: 0.4rem;
-  padding: 0.4rem 0.7rem;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: var(--radius-pill);
-  background: rgba(13, 15, 24, 0.5);
-  backdrop-filter: blur(18px) saturate(1.4);
-  -webkit-backdrop-filter: blur(18px) saturate(1.4);
-  box-shadow: var(--shadow), inset 0 1px 0 rgba(255, 255, 255, 0.08);
-  color: var(--text);
-  font-family: var(--font-display);
-  font-size: 0.68rem;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  cursor: pointer;
-  opacity: 0.6;
-  transition:
-    opacity var(--dur-fast) var(--ease-brand),
-    transform var(--dur-fast) var(--ease-brand),
-    border-color var(--dur-fast) var(--ease-brand),
-    box-shadow var(--dur-fast) var(--ease-brand);
-}
-.launcher:hover,
-.launcher:focus-visible,
-.launcher:focus-within {
-  opacity: 1;
-  transform: translateY(-3px);
-  border-color: var(--gold-dim);
-  box-shadow:
-    var(--shadow),
-    0 0 22px var(--glow);
-}
-.launcher:focus-visible {
-  outline: 2px solid var(--gold-bright);
-  outline-offset: 2px;
-  border-color: var(--gold-dim);
-}
-.launcherLabel {
-  color: var(--gold-bright);
-}
-.launcherCount {
-  display: inline-grid;
-  place-content: center;
-  min-width: 1.15rem;
-  height: 1.15rem;
-  padding: 0 0.3rem;
-  border-radius: var(--radius-pill);
-  background: var(--gold);
-  color: var(--bg-0);
-  font-size: 0.66rem;
-}
+/* El launcher flotante del chat se ELIMINÓ: el chat se abre/colapsa desde el botón
+   de CHAT del menú superior (ChatMenuButton, evento "phy:toggle-chat") o con Enter.
+   El punto de estado (.dot) se conserva: se sigue usando en la cabecera del dock. */
 
 .dot {
   width: 8px;
@@ -118,15 +62,16 @@
   animation: dockIn var(--dur-slow) var(--ease-brand);
 }
 
-/* COLUMNA lateral derecha (por defecto): full-height, ~360px. Reserva una franja
-   superior para que el clúster del HUD (mute/campanita/FAB, top-right, z-35) no se
-   solape con los controles de la cabecera del chat. */
+/* COLUMNA lateral derecha (por defecto): full-height, ~360px. El clúster del menú
+   vive ahora a la IZQUIERDA (el chat va a la derecha), así que NO hace falta reservar
+   la franja superior de 52px que había para el HUD viejo: la cabecera del chat (tabs)
+   arranca limpia arriba, sin hueco muerto. */
 .dockColumn {
   top: 0;
   right: 0;
   bottom: 0;
   width: min(360px, 92vw);
-  padding-top: 52px;
+  padding-top: 0;
   border-top: none;
   border-right: none;
   border-bottom: none;
@@ -166,10 +111,11 @@
   bottom: auto;
   width: 100%;
   max-width: 100%;
-  /* El notch queda arriba: reserva el área segura superior + la banda del clúster
-     del HUD (mute/campanita/FAB, top-right, ~56px en portrait) para que la cabecera
-     de la hoja no colisione con esos controles. */
-  padding-top: calc(env(safe-area-inset-top) + 56px);
+  /* El notch queda arriba: reserva el área segura superior + la banda del MENÚ
+     superior (7 controles en fila, top:12, ~56px de alto → 64px con aire) para que
+     la cabecera de la hoja no colisione con esos botones. En ≤400px el menú usa DOS
+     filas, así que la reserva sube (más abajo). Coordinado con el equipo HUD-MENÚ. */
+  padding-top: calc(env(safe-area-inset-top) + 64px);
   padding-left: env(safe-area-inset-left);
   padding-right: env(safe-area-inset-right);
   border: none;
@@ -188,6 +134,14 @@
 }
 .sheetFull {
   height: 88dvh;
+}
+/* ≤400px: el menú superior reflowa a DOS filas (chat+juego bajan a la 2ª fila), así
+   que la banda a reservar crece a ~116px (2·44 + hueco + aire). Coordinado con el
+   equipo HUD-MENÚ (breakpoint ≤400 en chat-menu-button/ game-menu-button). */
+@media (max-width: 400px) {
+  .sheet {
+    padding-top: calc(env(safe-area-inset-top) + 116px);
+  }
 }
 /* Durante el arrastre se fija el alto por JS: sin transición (sigue al dedo). */
 .dragging {
@@ -276,16 +230,19 @@
 .tab {
   display: inline-flex;
   align-items: center;
-  gap: 0.35rem;
-  padding: 0.4rem 0.75rem;
+  gap: 0.3rem;
+  /* Etiquetas más largas ("Chat general" / "Privado con Paqo"): padding y tracking
+     más ajustados + nowrap para que cada pestaña no se parta en dos líneas. */
+  padding: 0.4rem 0.55rem;
   border: 1px solid transparent;
   border-radius: var(--radius-pill);
   background: transparent;
   color: var(--text-dim);
   font-family: var(--font-display);
-  font-size: 0.72rem;
-  letter-spacing: 0.12em;
+  font-size: 0.68rem;
+  letter-spacing: 0.04em;
   text-transform: uppercase;
+  white-space: nowrap;
   cursor: pointer;
   transition:
     color var(--dur-fast) var(--ease-brand),
@@ -793,9 +750,17 @@
 .input:disabled {
   opacity: 0.6;
 }
+/* Botón ENVIAR: ahora aloja el avioncito de papel (SendIcon). inline-grid + center
+   para clavar el glifo; min-width/height lo mantienen cuadradito y táctil. El mismo
+   estilo sirve para el botón de texto "Listo" (confirmar nombre): con min-width y
+   padding el texto corto sigue cabiendo. */
 .sendBtn {
   flex: 0 0 auto;
-  padding: 0.5rem 0.9rem;
+  display: inline-grid;
+  place-content: center;
+  min-width: 2.5rem;
+  min-height: 2.4rem;
+  padding: 0.5rem 0.75rem;
   border: none;
   border-radius: var(--radius-pill);
   background: linear-gradient(180deg, var(--gold-bright), var(--gold));
@@ -840,15 +805,31 @@
 
 /* --- MÓVIL / TÁCTIL: puntero grueso O pantalla estrecha (problema 8) --------- */
 @media (pointer: coarse), (max-width: 640px) {
-  /* Launcher colapsado en la esquina inferior derecha, con áreas seguras. */
-  .launcher {
-    right: calc(14px + env(safe-area-inset-right));
-    bottom: calc(14px + env(safe-area-inset-bottom));
-    min-height: 44px; /* área táctil ≥44px (WCAG 2.5.5) */
-  }
   .disabledNote {
     right: calc(14px + env(safe-area-inset-right));
     bottom: calc(14px + env(safe-area-inset-bottom));
+  }
+
+  /* VOZ SIEMPRE accesible en móvil: en escritorio vive inline en la cabecera, pero
+     en móvil el ancho no da y quedaba oculta/cortada. Aquí baja a su PROPIA fila,
+     de ancho completo, bajo los tabs (el header hace flex-wrap): tabs + colapsar en
+     la 1ª fila; "Unirse a la voz" (VoiceControls intacto) centrado en la 2ª. */
+  .voiceSlot {
+    order: 3;
+    flex-basis: 100%;
+    justify-content: center;
+    margin-top: 0.1rem;
+    padding-top: 0.4rem;
+    border-top: 1px solid var(--line-soft);
+  }
+  .voiceSlot:empty {
+    /* Sin sesión aún (VoiceControls no montado): no dejes una franja/borde vacío. */
+    border-top: none;
+    padding-top: 0;
+    margin-top: 0;
+  }
+  .headerRight {
+    order: 2;
   }
 
   /* Áreas táctiles ≥44px en TODOS los controles del HUD de chat (problema 6). */
@@ -882,7 +863,6 @@
   .dock,
   .sheet,
   .sidePanel,
-  .launcher,
   .sendBtn,
   .caret,
   .row {
@@ -891,7 +871,6 @@
   .dock,
   .sheet,
   .sidePanel,
-  .launcher,
   .sendBtn {
     transition: none;
   }
@@ -913,12 +892,5 @@
     --chat-bubble-mine: linear-gradient(180deg, rgba(227, 176, 99, 0.22), rgba(227, 176, 99, 0.1));
     --chat-bubble-oracle: linear-gradient(180deg, rgba(227, 176, 99, 0.13), rgba(227, 176, 99, 0.05));
     --chat-text-shadow: none;
-  }
-  /* El launcher (fuera del .dock) también recupera su glass casi opaco. */
-  .launcher {
-    background: var(--panel-hud);
-    backdrop-filter: blur(12px);
-    -webkit-backdrop-filter: blur(12px);
-    border-color: var(--line);
   }
 }

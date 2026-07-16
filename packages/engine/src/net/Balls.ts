@@ -35,6 +35,13 @@ const KICK_LIFT = 1.4;
 const KICK_MIN = 2.0;
 /** Enfriamiento entre emisiones de patada por pelota (s). */
 const KICK_COOLDOWN = 0.2;
+/**
+ * Ventana de ATRIBUCIÓN local (s): tras patear o lanzar una pelota, queda atribuida
+ * al jugador local durante este tiempo, RENOVÁNDOSE con cada nuevo contacto. Si nadie
+ * local la vuelve a tocar, la atribución expira (deja de puntuar). Cubre el vuelo de
+ * una patada/lanzamiento hasta Paqo sin fiarse sólo de que la pelota siga "despierta".
+ */
+const LIVE_ATTRIB_TIME = 4;
 /** Duración de la reconciliación suave tras applyBallState (s). */
 const RECONCILE_TIME = 0.45;
 /**
@@ -98,12 +105,21 @@ interface Ball {
   grounded: boolean;
   kickCd: number;
   /**
-   * true si esta pelota fue LANZADA por el jugador local (throwBall) y sigue
-   * "viva" (aún no durmió, ni fue agarrada, ni respawneó). El mini-juego usa esta
-   * bandera como autoridad del lanzador: sólo este cliente detecta el golpe a Paqo
-   * de SUS pelotas; los remotos se enteran por el evento de red.
+   * Autoría de la puesta en movimiento por el jugador LOCAL: "local" mientras la
+   * atribución siga viva, o `null` si nadie local la mueve (aún no la tocó, expiró,
+   * se durmió, la agarraron o la robaron). La activa TANTO el lanzamiento
+   * (throwBall) COMO la patada al caminar (tryKick) — ambas sólo corren para el
+   * jugador local. El mini-juego la usa como autoridad del que la movió: sólo este
+   * cliente detecta el golpe a Paqo de SUS pelotas; los remotos se enteran por red.
    */
-  thrownLive: boolean;
+  liveBy: "local" | null;
+  /**
+   * Segundos restantes de la atribución local (`liveBy`). Se fija a
+   * {@link LIVE_ATTRIB_TIME} en cada contacto (patada o lanzamiento) y decae por
+   * frame; al llegar a 0 la atribución se limpia (la pelota deja de contar como
+   * "movida por mí" aunque siga rodando lejos sin que yo la vuelva a tocar).
+   */
+  liveTimer: number;
   /** Reconciliación de red: objetivo + tiempo restante de blend. */
   recPos?: THREE.Vector3;
   recVel?: THREE.Vector3;
@@ -140,6 +156,12 @@ export class Balls {
   private heldBroadcastAcc = 0;
   /** Índice de la pelota agarrable resaltada por el sprite E este frame (-1 = ninguna). */
   private hintId = -1;
+  /**
+   * ¿Se muestra el sprite de la tecla "E"? En dispositivos de puntero grueso
+   * (táctil) no aplica —ahí manda el botón "Tomar"— y se apaga permanentemente vía
+   * {@link setKeyHintEnabled}. Default true (teclado/ratón).
+   */
+  private keyHintEnabled = true;
   /** Sprite billboard con el glifo "E" que aparece sobre la pelota agarrable. */
   private eSprite?: THREE.Sprite;
   private eTex?: THREE.Texture;
@@ -175,7 +197,8 @@ export class Balls {
         vel: new THREE.Vector3(),
         grounded: true,
         kickCd: 0,
-        thrownLive: false,
+        liveBy: null,
+        liveTimer: 0,
         recTimer: 0,
       });
       this.mesh.setColorAt(i, new THREE.Color(BALL_COLOR));
@@ -361,6 +384,16 @@ export class Balls {
   }
 
   /**
+   * Activa/desactiva el sprite de la tecla "E". En punteros gruesos (táctil) la
+   * pista de teclado no aplica —hay botón "Tomar"— así que se apaga: el sprite
+   * queda oculto de forma permanente (updateEHint no lo vuelve a mostrar).
+   */
+  setKeyHintEnabled(on: boolean): void {
+    this.keyHintEnabled = on;
+    if (!on && this.eSprite) this.eSprite.visible = false;
+  }
+
+  /**
    * Suscribe RESPAWNS de pelota (salida de zona o golpe a Paqo). `reason` distingue
    * el motivo; `s` es el nuevo estado (slot casa) para FX/sonido. La difusión de red
    * reutiliza `onKick` (respawnToHome emite también por ahí), así que los remotos
@@ -376,9 +409,22 @@ export class Balls {
     return this.balls.length;
   }
 
-  /** ¿La pelota `id` fue lanzada por el jugador local y sigue viva? */
-  isThrownLive(id: number): boolean {
-    return this.balls[id]?.thrownLive === true;
+  /**
+   * ¿La pelota `id` está atribuida al jugador local (la movió por patada o
+   * lanzamiento y la atribución sigue viva)? Autoridad del mini-juego para puntuar.
+   */
+  isLiveByLocal(id: number): boolean {
+    return this.balls[id]?.liveBy === "local";
+  }
+
+  /**
+   * Atribuye la pelota `b` al jugador local y (re)arranca la ventana de atribución.
+   * Lo llaman throwBall (lanzamiento) y tryKick (patada al caminar) — ambos sólo
+   * corren para el jugador local, así que nunca se atribuyen patadas de REMOTOS.
+   */
+  private attributeLocal(b: Ball): void {
+    b.liveBy = "local";
+    b.liveTimer = LIVE_ATTRIB_TIME;
   }
 
   /** Copia la posición actual de la pelota `id` en `out`. */
@@ -390,7 +436,7 @@ export class Balls {
   /**
    * Teleporta la pelota `id` a su slot casa (respawn INSTANTÁNEO, sin lerp). Si la
    * llevabas agarrada, se te esfuma de las manos (force-drop). Limpia velocidad,
-   * reconciliación y la bandera `thrownLive`. Emite `onRespawn` (FX/sonido) y
+   * reconciliación y la atribución local (`liveBy`). Emite `onRespawn` (FX/sonido) y
    * reutiliza `onKick` para que la red difunda el nuevo estado a los remotos.
    */
   respawnToHome(id: number, reason: "out" | "hit"): void {
@@ -406,7 +452,8 @@ export class Balls {
     this.randomHomePos(b.pos);
     b.vel.set(0, 0, 0);
     b.grounded = true;
-    b.thrownLive = false;
+    b.liveBy = null;
+    b.liveTimer = 0;
     b.kickCd = 0;
     b.recPos = undefined;
     b.recVel = undefined;
@@ -464,7 +511,8 @@ export class Balls {
     this.heldId = id;
     b.vel.set(0, 0, 0);
     b.grounded = false;
-    b.thrownLive = false; // agarrarla cancela el estado de "lanzada viva"
+    b.liveBy = null; // agarrarla cancela la atribución local
+    b.liveTimer = 0;
     b.recPos = undefined;
     b.recVel = undefined;
     b.recTimer = 0;
@@ -507,7 +555,8 @@ export class Balls {
     if (b) {
       b.vel.set(0, 0, 0);
       b.grounded = false;
-      b.thrownLive = false;
+      b.liveBy = null;
+      b.liveTimer = 0;
       b.recPos = undefined;
       b.recVel = undefined;
       b.recTimer = 0;
@@ -536,9 +585,9 @@ export class Balls {
     );
     b.grounded = false;
     b.kickCd = KICK_COOLDOWN;
-    // Marca de LANZAMIENTO local: sólo este cliente sabe que él la lanzó. El
-    // mini-juego la usa como autoridad para detectar el golpe a Paqo.
-    b.thrownLive = true;
+    // Atribución LOCAL por lanzamiento: sólo este cliente sabe que él la puso en
+    // movimiento. El mini-juego la usa como autoridad para detectar el golpe a Paqo.
+    this.attributeLocal(b);
 
     const s = this.stateOf(id);
     for (const cb of this.kickCbs) cb(id, s);
@@ -557,7 +606,8 @@ export class Balls {
       this.homeSlot(id, b.pos);
       b.vel.set(0, 0, 0);
       b.grounded = true;
-      b.thrownLive = false;
+      b.liveBy = null;
+      b.liveTimer = 0;
       b.recPos = undefined;
       b.recVel = undefined;
       b.recTimer = 0;
@@ -654,6 +704,15 @@ export class Balls {
     for (let i = 0; i < this.balls.length; i++) {
       const b = this.balls[i];
       if (b.kickCd > 0) b.kickCd -= dt;
+      // Expiración de la atribución local: si nadie local la vuelve a tocar en la
+      // ventana, deja de contar como "movida por mí" (aunque siga rodando).
+      if (b.liveTimer > 0) {
+        b.liveTimer -= dt;
+        if (b.liveTimer <= 0) {
+          b.liveTimer = 0;
+          b.liveBy = null;
+        }
+      }
 
       // --- pelota agarrada: sigue el punto de agarre (frente/manos), sin física ---
       if (i === this.heldId) {
@@ -723,7 +782,8 @@ export class Balls {
         if (horiz < SLEEP_SPEED && Math.abs(b.vel.y) < BOUNCE_STOP) {
           b.vel.set(0, 0, 0);
           b.pos.y = groundY;
-          b.thrownLive = false; // durmió: ya no cuenta como lanzamiento vivo
+          b.liveBy = null; // durmió: en reposo ya no cuenta como movida por mí
+          b.liveTimer = 0;
         }
       } else {
         b.grounded = false;
@@ -752,6 +812,11 @@ export class Balls {
   private updateEHint(playerPos: THREE.Vector3): void {
     const sprite = this.eSprite;
     if (!sprite) return;
+    // Táctil (puntero grueso): el sprite "E" está desactivado permanentemente.
+    if (!this.keyHintEnabled) {
+      if (sprite.visible) sprite.visible = false;
+      return;
+    }
     const id = this.nearestGrabbable(playerPos.x, playerPos.z);
     this.hintId = id;
     if (id < 0) {
@@ -800,6 +865,12 @@ export class Balls {
     b.vel.x += nHoriz.x * impulse;
     b.vel.z += nHoriz.z * impulse;
     b.vel.y += KICK_LIFT;
+
+    // Atribución LOCAL por PATADA: cualquier pelota que el jugador local pone en
+    // movimiento al caminar queda a su nombre (renueva la ventana con cada contacto),
+    // igual que un lanzamiento. tryKick sólo corre para el jugador local (Balls.update
+    // recibe SU pos/vel), así que nunca se atribuyen patadas de remotos.
+    this.attributeLocal(b);
 
     // Saltar SOBRE la pelota (jugador bajando y por encima) → empuje extra afuera.
     if (playerVel.y < -0.5 && b.pos.y < playerPos.y) {

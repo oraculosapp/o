@@ -3,6 +3,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { BiosphereMessage } from "@/lib/realtime";
 import { MessageRow } from "./MessageRow";
+import { SendIcon } from "./SendIcon";
 import styles from "./chat.module.css";
 
 export interface OpenChannelProps {
@@ -150,8 +151,14 @@ export function OpenChannel({ messages, name, sessionId, onSetName, onSend, auto
             onChange={(e) => setDraft(e.target.value)}
             aria-label="Mensaje al chat abierto"
           />
-          <button className={styles.sendBtn} type="submit" disabled={!draft.trim()}>
-            Enviar
+          <button
+            className={styles.sendBtn}
+            type="submit"
+            disabled={!draft.trim()}
+            aria-label="Enviar"
+            title="Enviar"
+          >
+            <SendIcon />
           </button>
         </form>
       )}
