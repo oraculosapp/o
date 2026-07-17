@@ -100,7 +100,12 @@ export class Soundscape {
 
   /** Proximidad al agua 0..1 (mezcla la capa de agua y ablanda los pasos). */
   setWaterProximity(p: number): void {
-    this.waterProx = p < 0 ? 0 : p > 1 ? 1 : p;
+    const clamped = p < 0 ? 0 : p > 1 ? 1 : p;
+    // El mundo llama esto CADA frame: sin esta guarda se agendaba un
+    // setTargetAtTime por frame (~60/s de por vida) en la timeline del
+    // AudioParam del agua, aun sin cambio alguno de valor.
+    if (clamped === this.waterProx) return;
+    this.waterProx = clamped;
     this.bed.setWaterProximity(this.waterProx);
   }
 

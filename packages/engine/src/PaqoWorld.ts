@@ -15,6 +15,7 @@ import { Totem } from "./world/Totem";
 import { BloomComposer } from "./postfx/BloomComposer";
 import { WorldNet } from "./net/WorldNet";
 import { Soundscape } from "./audio/Soundscape";
+import { kickStrengthFromVel } from "./audio/kickSound";
 import { WeatherDirector, type WeatherId } from "./world/Weather";
 import { AmbientLife } from "./world/AmbientLife";
 import { MotionTrail } from "./world/MotionTrail";
@@ -283,8 +284,13 @@ export class PaqoWorld {
     this.soundscape = new Soundscape();
     this.net.onZoneSignal((signal) => this.soundscape.onZoneSignal(signal));
     this.net.onBallKick((ballId: number, s: BallState) => {
-      const strength = Math.min(1, Math.hypot(s.vel[0], s.vel[2]) / 8);
-      this.soundscape.onBallKick(ballId, strength);
+      // El canal de patadas está MULTIPLEXADO con datos de red (broadcast a
+      // ~10 Hz del balón AGARRADO y snap de respawn, ambos con velocidad ≈ 0):
+      // sólo las patadas REALES deben sonar. Sin este corte, el portador oía
+      // una ametralladora de pops que el delay del foley embarraba en una
+      // reverberación horrible (ver kickSound.ts).
+      const strength = kickStrengthFromVel(s.vel);
+      if (strength > 0) this.soundscape.onBallKick(ballId, strength);
     });
 
     this.bloom = new BloomComposer(

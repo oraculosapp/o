@@ -9,7 +9,21 @@ import type { NextConfig } from "next";
  *     hidratación) + 'wasm-unsafe-eval' (los decoders wasm de three/DRACO/meshopt
  *     lo necesitan). En desarrollo añadimos 'unsafe-eval' porque el Fast Refresh
  *     de React usa eval; en producción NO, para no debilitar la política.
+ *   · `script-src` incluye https://challenges.cloudflare.com — el script de
+ *     Cloudflare Turnstile (turnstile/v0/api.js). OJO — regresión ya vivida (S4d
+ *     endureció la CSP y rompió Turnstile EN SILENCIO): sin él, script-src-elem
+ *     bloquea el script, getCaptchaToken() agota sus 25s y resuelve null,
+ *     signInAnonymously va sin captchaToken y Supabase responde 400 "captcha
+ *     protection: request disallowed" → sin sesión anónima → SIN multijugador ni
+ *     voz para todo visitante nuevo. Los visitantes con sesión persistida no lo
+ *     notaban, por eso pasó desapercibido.
+ *   · `frame-src` explícita — el widget de Turnstile monta un IFRAME de
+ *     challenges.cloudflare.com; sin frame-src el navegador cae a child-src
+ *     ('self' blob:) y también lo bloquea. Según la doc oficial de Turnstile,
+ *     con script-src + frame-src basta (el style-src inline ya lo tenemos).
  *   · `worker-src`/`child-src` blob: — three carga workers de decodificación.
+ *     child-src se conserva tal cual para los workers; frame-src la puentea
+ *     para los iframes.
  *   · `img-src` data: blob: — texturas de canvas, miniaturas y thumbs de avatar.
  *   · `connect-src`: same-origin (la API de OpenAI se llama server-side vía /api)
  *     + Supabase (https REST/Storage y wss Realtime). Cubre el EventSource SSE de
@@ -38,7 +52,14 @@ const BUILD_ID =
   process.env.VERCEL_GIT_COMMIT_SHA?.slice(0, 12) ||
   `local-${Date.now()}`;
 
-const scriptSrc = ["'self'", "'unsafe-inline'", "'wasm-unsafe-eval'", isDev ? "'unsafe-eval'" : ""]
+const scriptSrc = [
+  "'self'",
+  "'unsafe-inline'",
+  "'wasm-unsafe-eval'",
+  // Turnstile: el script del captcha se sirve desde challenges.cloudflare.com.
+  "https://challenges.cloudflare.com",
+  isDev ? "'unsafe-eval'" : "",
+]
   .filter(Boolean)
   .join(" ");
 
@@ -50,6 +71,9 @@ const csp = [
   "font-src 'self' data:",
   "worker-src 'self' blob:",
   "child-src 'self' blob:",
+  // Turnstile: el widget monta un iframe de challenges.cloudflare.com; explícita
+  // para que los iframes no caigan a child-src (que queda como está, para workers).
+  "frame-src 'self' blob: https://challenges.cloudflare.com",
   "connect-src 'self' https://*.supabase.co wss://*.supabase.co",
   "media-src 'self' blob:",
   "frame-ancestors 'none'",

@@ -14,6 +14,7 @@ export { AmbientBed } from "./AmbientBed";
 export { Foley } from "./Foley";
 export { uiSound, type UiSoundKind, type UiBlips } from "./UiBlips";
 export { createNoiseBuffer, type NoiseColor } from "./noise";
+export { kickStrengthFromVel, MIN_AUDIBLE_KICK_SPEED } from "./kickSound";
 export {
   AUDIO_MUTE_KEY,
   getAudioMuted,
