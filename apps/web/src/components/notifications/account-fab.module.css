@@ -161,6 +161,39 @@
   }
 }
 
+/* En móvil el menú se centra en la PANTALLA, no en el borde del FAB. El <nav>
+   `.topMenu` (paqo.module.css) lleva en móvil `left:50% + transform:translateX(-50%)`;
+   ese `transform` lo convierte en el CONTAINING BLOCK de este hijo `position:fixed`
+   y su centro horizontal es siempre 50vw. Así el menú queda completo dentro del
+   viewport aunque el FAB esté en medio de la fila (antes, crecer desde left:0 podía
+   desbordar por la derecha). Misma condición que el `transform` del nav
+   (coarse | ≤640px). `top:100%` = alto del nav (sigue el wrap) y hereda su offset de
+   safe-area. Sigue siendo hijo del DOM de `.root`: rootRef.contains() (clic-fuera),
+   Escape y el foco al primer ítem no cambian. */
+@media (pointer: coarse), (max-width: 640px) {
+  .menu {
+    position: fixed;
+    top: calc(100% + 10px);
+    left: 50%;
+    right: auto;
+    transform: translateX(-50%);
+    width: min(240px, calc(100vw - 24px));
+    /* Pantallas bajas: nunca desbordar el alto. Fallback 80vh si no hay dvh. */
+    max-height: 80vh;
+    max-height: min(80vh, calc(100dvh - 96px));
+    overflow-y: auto;
+    /* Mantiene el centrado horizontal durante la animación de entrada. */
+    animation-name: menuInMobile;
+  }
+}
+/* Igual que menuIn pero preservando translateX(-50%) para no “resbalar” de lado. */
+@keyframes menuInMobile {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -6px);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .fab,
   .item,

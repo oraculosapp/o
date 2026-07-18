@@ -14,7 +14,7 @@
  * borra las cachés viejas y los assets se re-piden frescos.
  */
 
-const VERSION = "phy-v3"; // v3: iconos nuevos de Paqo (los /icons/ son cache-first)
+const VERSION = "phy-v4"; // v4: iconos regenerados desde paqo-juego.png (/icons/ precacheado es cache-first; el bump re-pide icon-192)
 const RUNTIME = `${VERSION}-assets`;
 const SHELL = `${VERSION}-shell`;
 const OFFLINE_URL = "/offline.html";

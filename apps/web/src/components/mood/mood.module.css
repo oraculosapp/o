@@ -180,12 +180,35 @@
     height: 44px;
     transform: translate(-50%, -50%);
   }
-  /* El panel no debe desbordar en pantallas estrechas: se ancla al borde
-     derecho de la píldora y limita su ancho al viewport disponible. */
+  /* El panel se centra en la PANTALLA, no en su botón. El <nav> `.topMenu`
+     (paqo.module.css) lleva en móvil `left:50% + transform:translateX(-50%)`; ese
+     `transform` lo hace el CONTAINING BLOCK de este hijo `position:fixed` y su
+     centro coincide siempre con 50vw. Así el panel queda completo dentro del
+     viewport aunque el botón esté en medio de la fila (antes, extenderse desde su
+     borde con right:0 seguía desbordando por un lado). `top:100%` = alto del nav
+     (sigue el wrap a 2 filas) y hereda su offset de safe-area. Sigue siendo hijo
+     del DOM de `.root`, así que rootRef.contains() (clic-fuera) / Escape / foco no
+     cambian. */
   .panel {
-    left: auto;
-    right: 0;
+    position: fixed;
+    top: calc(100% + 10px);
+    left: 50%;
+    right: auto;
+    transform: translateX(-50%);
     width: min(244px, calc(100vw - 24px));
+    /* Pantallas bajas: nunca desbordar el alto. Fallback 70vh si no hay dvh. */
+    max-height: 70vh;
+    max-height: min(70vh, calc(100dvh - 96px));
+    overflow-y: auto;
+    /* Mantiene el centrado horizontal durante la animación de entrada. */
+    animation-name: panelInMobile;
+  }
+}
+/* Igual que panelIn pero preservando translateX(-50%) para no “resbalar” de lado. */
+@keyframes panelInMobile {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -6px);
   }
 }
 

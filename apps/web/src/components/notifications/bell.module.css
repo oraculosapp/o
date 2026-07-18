@@ -206,15 +206,43 @@
   color: var(--text-faint);
 }
 
-/* En móvil el panel se ancla a la derecha sin desbordar. */
+/* En móvil el menú superior va CENTRADO en la pantalla: paqo.module.css le aplica
+   al <nav> `.topMenu` `left:50% + transform:translateX(-50%)`. Ese `transform`
+   convierte al nav en el CONTAINING BLOCK de cualquier hijo `position:fixed`, y su
+   centro horizontal coincide SIEMPRE con el del viewport (50vw). Por eso, en vez de
+   colgar el panel del borde de su botón (que está en medio de la fila y desbordaba
+   por un lado), lo anclamos con `position:fixed + left:50% + translateX(-50%)`:
+   queda centrado en la PANTALLA, completo, esté el botón donde esté. `top:100%` es
+   el alto del nav (sigue el wrap a 2 filas) y hereda su offset de safe-area. El
+   panel SIGUE siendo hijo del DOM de `.root`, así que rootRef.contains() (cierre por
+   clic-fuera) y el foco/Escape no se enteran del cambio de posición. */
 @media (pointer: coarse), (max-width: 640px) {
   .panel {
+    position: fixed;
+    top: calc(100% + 10px);
+    left: 50%;
+    right: auto;
+    transform: translateX(-50%);
     width: min(300px, calc(100vw - 24px));
+    /* Pantallas bajas: nunca desbordar el alto (la lista interna ya hace scroll).
+       calc con dvh afina restando el nav; si el navegador no soporta dvh, la
+       declaración se descarta y queda la base `min(420px, 70vh)`. */
+    max-height: min(420px, calc(100dvh - 96px));
+    /* Mantiene el centrado horizontal durante la animación de entrada. */
+    animation-name: panelInMobile;
   }
   /* Área táctil ≥44px (WCAG 2.5.5) — el glifo se mantiene en ~20px. */
   .bell {
     width: 44px;
     height: 44px;
+  }
+}
+/* Igual que panelIn pero preservando translateX(-50%) en todo el recorrido, para
+   que el panel no “resbale” de lado al aparecer centrado en pantalla. */
+@keyframes panelInMobile {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -8px) scale(0.98);
   }
 }
 

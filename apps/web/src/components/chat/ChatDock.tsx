@@ -40,8 +40,14 @@ export interface ChatDockProps {
 
 type Tab = "open" | "paqo";
 type Mode = "column" | "floating";
-/** Estado de anclaje de la hoja inferior móvil (bottom sheet). */
-type Snap = "peek" | "full";
+/**
+ * Estado de anclaje de la HOJA SUPERIOR móvil (top sheet).
+ *   · "peek" → asoma (~42dvh)   · "full" → expandida (~88dvh)
+ *   · "max"  → PANTALLA COMPLETA (100dvh): cubre el mundo y los mandos móviles.
+ * Cada estado casa con una clase CSS (.sheetPeek/.sheetFull/.sheetMax) — ver
+ * PEEK_FRACTION/FULL_FRACTION abajo y la nota de correspondencia en chat.module.css.
+ */
+type Snap = "peek" | "full" | "max";
 
 const MODE_KEY = "phy:chatMode";
 const POS_KEY = "phy:chatPos";
@@ -55,9 +61,22 @@ const COARSE_QUERY = "(pointer: coarse), (max-width: 640px)";
  * capturar un escritorio con ventana apaisada estrecha.
  */
 const LANDSCAPE_QUERY = "(orientation: landscape) and (pointer: coarse)";
-/** Fracciones de alto de la hoja (deben ir alineadas con .sheetPeek/.sheetFull en CSS). */
+/**
+ * Fracciones de alto de la hoja SUPERIOR (deben ir alineadas con las clases CSS):
+ *   · PEEK_FRACTION 0.42 ↔ .sheetPeek { height: 42dvh }
+ *   · FULL_FRACTION 0.88 ↔ .sheetFull { height: 88dvh }
+ *   · "max" NO lleva fracción JS: la hoja ocupa 100dvh (.sheetMax) y NO empuja el
+ *     mundo (inset 0), así que sólo vive como clase CSS + data-chat-sheet="max".
+ * Estas fracciones alimentan el empuje del viewport (setViewportInset) en applyChrome.
+ */
 const PEEK_FRACTION = 0.42;
 const FULL_FRACTION = 0.88;
+/**
+ * Velocidad vertical (px/ms) a partir de la cual un "flick" rápido hacia ABAJO lleva
+ * la hoja a PANTALLA COMPLETA ("max") aunque el alto no cruce el umbral. Se mide con
+ * los timestamps del pointer entre muestras del arrastre (endSheetDrag).
+ */
+const FLICK_VELOCITY = 0.8;
 
 interface Pos {
   x: number;
@@ -151,9 +170,10 @@ function clampPos(p: Pos, w: number, h: number): Pos {
  *     juego con `world.setViewportInset({right})`; al cerrar/flotar vuelve a 0.
  *   · ESCRITORIO — FLOTANTE: panel arrastrable por su cabecera; recuerda posición.
  *   · MÓVIL PORTRAIT — HOJA SUPERIOR (top sheet): cuelga desde arriba con el asa
- *     ABAJO, para jugar abajo mientras se lee arriba. Dos anclajes (asomar ~42% /
- *     expandir ~88%) + arrastre. Empuja el juego con {top} (avatar en la franja
- *     inferior). Los botones de acción quedan abajo → no chocan.
+ *     ABAJO, para jugar abajo mientras se lee arriba. Tres anclajes (asomar ~42% /
+ *     expandir ~88% / PANTALLA COMPLETA 100dvh) + arrastre y flick. Empuja el juego
+ *     con {top} (avatar en la franja inferior); en "max" cubre todo (los botones de
+ *     acción quedan tapados por z-index). El asa sigue agarrable abajo para volver.
  *   · MÓVIL LANDSCAPE — PANEL LATERAL izquierdo, angosto y full-height, colapsable.
  *     Empuja el juego con {left}. La hoja vertical no sirve en apaisado.
  *
@@ -197,8 +217,17 @@ export function ChatDock({ biosphereId, getWorldNet, getWorld, voiceSlot }: Chat
   // ir por detrás durante el arrastre) para persistirla con exactitud al soltar.
   const posRef = useRef<Pos | null>(null);
   // Arrastre vertical de la hoja móvil (se opera directo sobre el DOM por
-  // rendimiento; sólo se confirma el anclaje en el pointerup).
-  const sheetDragRef = useRef<{ startY: number; startH: number; moved: boolean } | null>(null);
+  // rendimiento; sólo se confirma el anclaje en el pointerup). Guarda además la última
+  // posición/instante y la velocidad vertical (px/ms) para detectar el "flick" rápido
+  // hacia abajo → "max" al soltar (decisión por VELOCIDAD, no sólo por alto).
+  const sheetDragRef = useRef<{
+    startY: number;
+    startH: number;
+    moved: boolean;
+    lastY: number;
+    lastT: number;
+    vy: number;
+  } | null>(null);
 
   // Restaura modo/posición del último uso y, en móvil, colapsa al arrancar (sólo
   // cliente). El colapso evita el teclado emergente al entrar (problema 3).
@@ -298,7 +327,17 @@ export function ChatDock({ biosphereId, getWorldNet, getWorld, voiceSlot }: Chat
     // de acción quedan visibles abajo, sin chocar con el chat.
     if (isTopSheet) {
       const vh = typeof window !== "undefined" ? window.innerHeight : 0;
-      if (open) {
+      if (open && snap === "max") {
+        // PANTALLA COMPLETA: la hoja (100dvh, z-index elevado en .sheetMax) cubre el
+        // mundo y los mandos móviles. data-chat-sheet="max" en <html> por si algún HUD
+        // quiere reaccionar; si no (MobileControls sólo atiende a "full"), lo tapa el
+        // z-index de la hoja. NO empujamos el viewport (el mundo queda cubierto): inset 0
+        // evita reflowar el 3D en balde y --chat-sheet-h=0 deja coherente el hook que
+        // leen los mandos (quedan detrás de la hoja, no estorban).
+        root?.style.setProperty("--chat-sheet-h", "0px");
+        if (root) root.dataset.chatSheet = "max";
+        setInset?.({ top: 0, right: 0, bottom: 0, left: 0 });
+      } else if (open) {
         const hPx = Math.round((snap === "full" ? FULL_FRACTION : PEEK_FRACTION) * vh);
         root?.style.setProperty("--chat-sheet-h", "0px");
         if (root) root.dataset.chatSheet = "top";
@@ -350,9 +389,10 @@ export function ChatDock({ biosphereId, getWorldNet, getWorld, voiceSlot }: Chat
   const onFocusIn = (e: React.FocusEvent) => {
     if (!isEditableTarget(e.target)) return;
     getWorld?.()?.setInputEnabled?.(false);
-    // Al escribir en la hoja superior, expándela: máximo sitio sobre el teclado.
+    // Al escribir en la hoja superior, expándela: máximo sitio sobre el teclado. Si ya
+    // está en PANTALLA COMPLETA la dejamos ahí (no la encojas a "full").
     // (El panel lateral apaisado no usa anclajes verticales.)
-    if (isTopSheet) setSnap("full");
+    if (isTopSheet) setSnap((s) => (s === "max" ? "max" : "full"));
   };
   const onFocusOut = (e: React.FocusEvent) => {
     if (isEditableTarget(e.target)) getWorld?.()?.setInputEnabled?.(true);
@@ -360,8 +400,19 @@ export function ChatDock({ biosphereId, getWorldNet, getWorld, voiceSlot }: Chat
 
   // --- Arrastre vertical de la HOJA SUPERIOR (top sheet) ----------------------
   // Se manipula el alto directo sobre el DOM durante el gesto (sin re-render por
-  // frame) y sólo se confirma el anclaje al soltar. Un toque limpio alterna
-  // asomar⇄expandir; arrastrar hacia arriba por debajo del umbral la colapsa.
+  // frame) y sólo se confirma el anclaje al soltar. Anclajes: asomar (~42dvh),
+  // expandir (~88dvh) y PANTALLA COMPLETA ("max", 100dvh). Se llega a "max":
+  //   (a) arrastrando el asa hasta abajo → al soltar con alto > ~92% del viewport;
+  //   (b) con un FLICK rápido hacia abajo (velocidad > FLICK_VELOCITY px/ms), aunque
+  //       el alto no cruce el umbral (se calcula con los timestamps del pointer).
+  // Arrastrar hacia arriba por debajo del umbral (~26%) la colapsa.
+  //
+  // TOQUE LIMPIO (sin arrastre): alterna peek⇄full; desde "max" baja un peldaño a
+  // "full". "max" queda reservado al gesto DELIBERADO (arrastrar hasta abajo o flick),
+  // así un toque nunca salta sin querer a pantalla completa. Lo comparte el teclado
+  // (Enter/Espacio sobre el asa) para que el ciclo sea idéntico con o sin puntero.
+  const toggleSnapByTap = () => setSnap((s) => (s === "full" ? "peek" : "full"));
+
   const startSheetDrag = (e: React.PointerEvent) => {
     const el = panelRef.current;
     if (!el) return;
@@ -370,6 +421,9 @@ export function ChatDock({ biosphereId, getWorldNet, getWorld, voiceSlot }: Chat
       startY: e.clientY,
       startH: el.getBoundingClientRect().height,
       moved: false,
+      lastY: e.clientY,
+      lastT: e.timeStamp,
+      vy: 0,
     };
     try {
       (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
@@ -385,8 +439,14 @@ export function ChatDock({ biosphereId, getWorldNet, getWorld, voiceSlot }: Chat
     // panel se extiende hacia el borde inferior). Anclada en top:0, basta con el alto.
     const dy = e.clientY - d.startY;
     if (Math.abs(dy) > 4) d.moved = true;
+    // Velocidad vertical instantánea (px/ms) entre muestras del pointer, para el flick.
+    const dt = e.timeStamp - d.lastT;
+    if (dt > 0) d.vy = (e.clientY - d.lastY) / dt;
+    d.lastY = e.clientY;
+    d.lastT = e.timeStamp;
     const vh = window.innerHeight;
-    const h = Math.min(vh * 0.92, Math.max(vh * 0.12, d.startH + dy));
+    // Permite crecer hasta el viewport COMPLETO (100%) para poder ARRASTRAR hasta "max".
+    const h = Math.min(vh, Math.max(vh * 0.12, d.startH + dy));
     el.style.height = `${h}px`;
     // El chat está arriba: el borde inferior sigue libre, no reservamos alto abajo.
     document.documentElement.style.setProperty("--chat-sheet-h", "0px");
@@ -406,14 +466,28 @@ export function ChatDock({ biosphereId, getWorldNet, getWorld, voiceSlot }: Chat
     el.style.height = ""; // vuelve al alto por clase (con transición)
     const vh = window.innerHeight;
     if (!d.moved) {
-      setSnap((s) => (s === "peek" ? "full" : "peek")); // toque: alterna
+      toggleSnapByTap(); // toque limpio: peek⇄full (desde "max" → full)
+      return;
+    }
+    // Velocidad AL SOLTAR: si el dedo se DETUVO antes de levantar (pausa entre la última
+    // muestra y el pointerup), ya no es un flick — la última velocidad medida es vieja.
+    // No la recalculamos con el pointerup porque éste suele caer sobre la última muestra
+    // (delta ~0 mataría flicks reales); en su lugar la descartamos si hubo pausa.
+    const vy = e.timeStamp - d.lastT > 120 ? 0 : d.vy;
+    // FLICK rápido hacia ABAJO (vy>0 = hacia abajo): pantalla completa, aunque el alto
+    // suelto no llegue al umbral. Un flick hacia ARRIBA (vy<0) NO dispara "max".
+    if (vy > FLICK_VELOCITY) {
+      setSnap("max");
       return;
     }
     if (h < vh * 0.26) {
       setOpen(false); // encogida por debajo del umbral: colapsa al launcher
       return;
     }
-    setSnap(h > vh * 0.6 ? "full" : "peek");
+    // Umbrales de alto coherentes en ambos sentidos (entrar y salir de "max"):
+    //   >92% → pantalla completa · >60% → expandida (cerca del 88%) · resto → asomar.
+    if (h > vh * 0.92) setSnap("max");
+    else setSnap(h > vh * 0.6 ? "full" : "peek");
   };
 
   // --- Arrastre del panel flotante --------------------------------------------
@@ -561,7 +635,9 @@ export function ChatDock({ biosphereId, getWorldNet, getWorld, voiceSlot }: Chat
   const layoutClass = isSidePanel
     ? styles.sidePanel
     : isTopSheet
-      ? `${styles.sheet} ${snap === "full" ? styles.sheetFull : styles.sheetPeek}`
+      ? `${styles.sheet} ${
+          snap === "max" ? styles.sheetMax : snap === "full" ? styles.sheetFull : styles.sheetPeek
+        }`
       : floating
         ? styles.dockFloating
         : styles.dockColumn;
@@ -708,14 +784,16 @@ export function ChatDock({ biosphereId, getWorldNet, getWorld, voiceSlot }: Chat
         </div>
 
         {/* Asa de arrastre de la HOJA SUPERIOR, ABAJO (cuelga desde arriba): tocar
-            alterna asomar⇄expandir; arrastrar hacia abajo agranda y hacia arriba, si
-            baja del umbral, la colapsa. Sólo en portrait; el panel lateral usa ◀. */}
+            alterna asomar⇄expandir (desde pantalla completa baja a expandir); arrastrar
+            hacia abajo agranda hasta PANTALLA COMPLETA (o con un flick rápido hacia
+            abajo) y hacia arriba, si baja del umbral, la colapsa. Sigue visible y
+            agarrable en "max" para volver. Sólo en portrait; el panel lateral usa ◀. */}
         {isTopSheet && (
           <div
             className={styles.grabberWrap}
             role="button"
             tabIndex={0}
-            aria-label={snap === "full" ? "Contraer el chat" : "Expandir el chat"}
+            aria-label={snap === "peek" ? "Expandir el chat" : "Contraer el chat"}
             onPointerDown={startSheetDrag}
             onPointerMove={onSheetDrag}
             onPointerUp={endSheetDrag}
@@ -723,7 +801,7 @@ export function ChatDock({ biosphereId, getWorldNet, getWorld, voiceSlot }: Chat
             onKeyDown={(e) => {
               if (e.key === "Enter" || e.key === " ") {
                 e.preventDefault();
-                setSnap((s) => (s === "peek" ? "full" : "peek"));
+                toggleSnapByTap();
               }
             }}
           >

@@ -123,11 +123,18 @@
 }
 
 /* --- MÓVIL PORTRAIT: HOJA SUPERIOR (top sheet) ------------------------------
-   Cuelga desde ARRIBA (top:0), full-width, con el asa ABAJO. Así se juega en la
-   mitad inferior mientras se lee arriba, y los botones de acción (abajo) no chocan
-   (problema 4). Alturas en dvh (crecen hacia abajo) y respeta env(safe-area-*):
-   el notch superior con padding-top; el borde inferior lo maneja el composer.
-   Se aplica por JS (isTopSheet) alineado con la media query CSS (problema 8). */
+   Cuelga desde ARRIBA (top:0), a TODO EL ANCHO (borde a borde), con el asa ABAJO.
+   Así se juega en la mitad inferior mientras se lee arriba, y los botones de acción
+   (abajo) no chocan (problema 4). Alturas en dvh (crecen hacia abajo) y respeta
+   env(safe-area-*): el notch superior con padding-top; el borde inferior lo maneja el
+   composer. Se aplica por JS (isTopSheet) alineado con la media query CSS (problema 8).
+
+   ANCHO COMPLETO (pedido del dueño): la hoja ocupa TODO el ancho de la pantalla, SIN
+   márgenes ni inset EXTERNOS (left:0 / right:0 / width:100% / margin:0; box-sizing
+   border-box global evita que el padding la desborde). Las áreas seguras LATERALES se
+   respetan con PADDING INTERNO (padding-left/right: env(safe-area-inset-*)), no con
+   márgenes: el vidrio llega al borde y sólo el CONTENIDO se aparta del notch lateral.
+   `.sheetMax` (pantalla completa) reutiliza este bloque, así que también es full-width. */
 .sheet {
   top: 0;
   left: 0;
@@ -135,6 +142,7 @@
   bottom: auto;
   width: 100%;
   max-width: 100%;
+  margin: 0;
   /* El notch queda arriba: reserva el área segura superior + la banda del MENÚ
      superior para que la cabecera de la hoja arranque JUSTO debajo del menú, con el
      MISMO aire que hay ARRIBA del menú (14px). Cadena de offsets del menú (nav.topMenu
@@ -158,11 +166,27 @@
   transition: height var(--dur-slow) var(--ease-brand);
   animation: sheetInTop var(--dur-slow) var(--ease-brand);
 }
+/* Correspondencia estado⇄clase (mantener alineada con Snap / PEEK_FRACTION /
+   FULL_FRACTION en ChatDock.tsx): "peek"→.sheetPeek (42dvh) · "full"→.sheetFull
+   (88dvh) · "max"→.sheetMax (100dvh). SIEMPRE en dvh, no vh: la barra dinámica del
+   navegador móvil y el teclado cambian el alto real del viewport. */
 .sheetPeek {
   height: 42dvh;
 }
 .sheetFull {
   height: 88dvh;
+}
+/* PANTALLA COMPLETA: la hoja cubre el viewport entero. z-index 32 la pone por ENCIMA
+   de los mandos móviles (.pad en mobile-controls.module.css va a z-index 28; el dock
+   base a 30) para TAPARLOS — MobileControls sólo se oculta con data-chat-sheet="full",
+   no con "max", así que aquí lo resuelve el z-index (no hay que tocar ese componente).
+   Queda por DEBAJO del menú superior (nav a z-index 35), que sigue asomando en la banda
+   que reserva el padding-top de .sheet, de modo que el botón CHAT del menú permanece
+   accesible para volver. El asa (.grabberWrap) es el último hijo flex: a 100dvh queda
+   pegada abajo (respetando el safe-area inferior), visible y agarrable para salir. */
+.sheetMax {
+  height: 100dvh;
+  z-index: 32;
 }
 /* ≤340px (teléfonos muy angostos): el menú superior SÍ reflowa a DOS filas (su
    contenido ~314px ya no cabe en 100vw−28). Dos filas de botones de 38px con gap 10px
