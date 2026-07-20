@@ -93,6 +93,26 @@ export class SoundscapeEngine {
     return firstTime;
   }
 
+  /**
+   * Suspende el AudioContext (pestaña oculta): la cama deja de sonar DE VERDAD,
+   * no sólo de evolucionar. Sin esto, con la pestaña oculta el rAF se pausa pero
+   * el contexto sigue sonando el último acorde CONGELADO (y con dos superficies
+   * —pestaña + PWA— sonaban dos contextos a la vez: el drone doble del dueño).
+   * No hace nada si aún no hubo gesto (sin contexto que suspender).
+   */
+  suspend(): void {
+    if (this.ctx && this.ctx.state === "running") void this.ctx.suspend().catch(() => undefined);
+  }
+
+  /**
+   * Reanuda el contexto al volver a ser visible. Sólo si YA existe: que el ctx
+   * exista implica que hubo gesto (autoplay ya desbloqueado), así que resume()
+   * está permitido. Idempotente.
+   */
+  resume(): void {
+    if (this.ctx && this.ctx.state !== "running") void this.ctx.resume().catch(() => undefined);
+  }
+
   /** Suscribe la construcción de una capa al momento en que el contexto nace. */
   onReady(cb: (engine: SoundscapeEngine) => void): void {
     this.readyCbs.add(cb);
@@ -130,7 +150,14 @@ export class SoundscapeEngine {
     g.setValueAtTime(g.value, t);
     // Rampa corta: sin clicks al silenciar/reactivar.
     g.linearRampToValueAtTime(muted ? 0 : this.ceiling, t + 0.12);
-    if (!muted && this.ctx.state !== "running") void this.ctx.resume().catch(() => undefined);
+    // Reanudar SOLO si la pestaña es visible: el mute se sincroniza entre
+    // superficies (muteStore vía "storage"), y desmutear desde la pestaña activa
+    // NO debe revivir el contexto de una superficie oculta (el "drone doble").
+    // Al volver a ser visible, el visibilitychange del Soundscape ya reanuda.
+    const visible = typeof document === "undefined" || !document.hidden;
+    if (!muted && visible && this.ctx.state !== "running") {
+      void this.ctx.resume().catch(() => undefined);
+    }
   }
 
   // ---- contabilidad para QA (las capas la alimentan) ----

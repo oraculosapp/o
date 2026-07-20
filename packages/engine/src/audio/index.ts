@@ -10,7 +10,7 @@
  */
 export { Soundscape } from "./Soundscape";
 export { SoundscapeEngine, type NoiseField } from "./SoundscapeEngine";
-export { AmbientBed } from "./AmbientBed";
+export { AmbientBed, pickPadChord, pickPadNote, PAD_SCALE } from "./AmbientBed";
 export { Foley } from "./Foley";
 export { uiSound, type UiSoundKind, type UiBlips } from "./UiBlips";
 export { createNoiseBuffer, type NoiseColor } from "./noise";

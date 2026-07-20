@@ -2,6 +2,7 @@ import { SoundscapeEngine } from "./SoundscapeEngine";
 import { AmbientBed } from "./AmbientBed";
 import { Foley } from "./Foley";
 import { uiSound } from "./UiBlips";
+import { subscribeAudioMuted } from "./muteStore";
 import type { ZoneSignal } from "../net/types";
 
 /**
@@ -43,12 +44,55 @@ export class Soundscape {
     this.detachGesture();
   };
 
+  /**
+   * Pestaña oculta → suspende el contexto (deja de sonar el acorde congelado y
+   * calla la superficie oculta cuando hay dos: adiós drone doble). Visible →
+   * reanuda (si ya hubo gesto) y RE-SIEMBRA la cama con un acorde fresco, para
+   * no volver nunca al estado batiente/degradado. Colgado aquí, en el
+   * orquestador, porque es el único que ve a la vez el motor (ctx) y la cama
+   * (reseed); el motor no conoce la cama.
+   */
+  private visibilityAttached = false;
+  private readonly onVisibility = (): void => {
+    if (typeof document === "undefined") return;
+    if (document.hidden) {
+      this.engine.suspend();
+    } else {
+      if (!this.engine.created) return; // sin gesto aún: nada que reanudar
+      this.engine.resume();
+      this.bed.reseed();
+    }
+  };
+
+  /** Desuscriptor del mute (para re-sembrar al DESMUTEAR). */
+  private unsubMute: (() => void) | null = null;
+
   constructor() {
     // La UI comparte motor (mismo AudioContext y mismo mute).
     uiSound.bind(this.engine);
     // Si el contexto ya existiera (p.ej. re-bind), construye la cama.
     this.engine.onReady(() => this.bed.build());
     this.attachGesture();
+    this.attachVisibility();
+    // H4: al DESMUTEAR, además del resume del motor, re-siembra la cama (acorde
+    // fresco + gains calibrados) para que el estado degradado no reaparezca.
+    this.unsubMute = subscribeAudioMuted((muted) => {
+      if (!muted) this.bed.reseed();
+    });
+  }
+
+  // ---- pestaña oculta/visible ----
+
+  private attachVisibility(): void {
+    if (this.visibilityAttached || typeof document === "undefined") return;
+    document.addEventListener("visibilitychange", this.onVisibility);
+    this.visibilityAttached = true;
+  }
+
+  private detachVisibility(): void {
+    if (!this.visibilityAttached || typeof document === "undefined") return;
+    document.removeEventListener("visibilitychange", this.onVisibility);
+    this.visibilityAttached = false;
   }
 
   // ---- autoplay: primer gesto del usuario ----
@@ -157,6 +201,9 @@ export class Soundscape {
 
   dispose(): void {
     this.detachGesture();
+    this.detachVisibility();
+    this.unsubMute?.();
+    this.unsubMute = null;
     uiSound.unbind(this.engine);
     this.bed.dispose();
     this.foley.dispose();

@@ -54,7 +54,7 @@ export type { IAvatarRig, AvatarDriveState, TintZone, PropSocket, AvatarConfig }
 // --- Audio procedural (equipo Audio S4): WebAudio 100% sintético, cero archivos ---
 export { Soundscape } from "./audio/Soundscape";
 export { SoundscapeEngine } from "./audio/SoundscapeEngine";
-export { AmbientBed } from "./audio/AmbientBed";
+export { AmbientBed, pickPadChord, pickPadNote, PAD_SCALE } from "./audio/AmbientBed";
 export { Foley } from "./audio/Foley";
 export { kickStrengthFromVel, MIN_AUDIBLE_KICK_SPEED } from "./audio/kickSound";
 export { uiSound, type UiSoundKind } from "./audio/UiBlips";

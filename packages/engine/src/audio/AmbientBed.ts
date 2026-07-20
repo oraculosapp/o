@@ -22,11 +22,51 @@ import type { SoundscapeEngine } from "./SoundscapeEngine";
 
 // --- material musical (Hz) ---
 /** Registro grave para el pad (La menor pentatónica, oct. 2-3). */
-const PAD_SCALE = [110.0, 130.81, 146.83, 164.81, 196.0, 220.0];
+export const PAD_SCALE = [110.0, 130.81, 146.83, 164.81, 196.0, 220.0];
 /** Registro agudo para las campanillas (oct. 5-6). */
 const BELL_SCALE = [523.25, 587.33, 659.25, 783.99, 880.0, 1046.5];
-/** Acorde inicial abierto del pad (raíz A2 · quinta E3 · add9 B3-ish→ usamos D3). */
-const PAD_START = [110.0, 164.81, 146.83];
+
+/**
+ * ¿CHOCAN dos notas del pad? Con los detunes fijos (−6/+5/+9 cents) un unísono
+ * (misma frecuencia) BATE a ~1 Hz — la "reverberación rota" del dueño — y una
+ * segunda adyacente (~2 semitonos, p.ej. C3-D3, D3-E3, G3-A3 de la pentatónica)
+ * batiría casi igual. Tratamos ambos como choque: cualquier intervalo por
+ * DEBAJO de una tercera menor (2.5 semitonos) se descarta.
+ */
+function padNotesClash(a: number, b: number): boolean {
+  return Math.abs(12 * Math.log2(a / b)) < 2.5;
+}
+
+/** Índice seguro para un pool: evita `pool[pool.length]` si `random()` diera 1. */
+function pickIndex(len: number, random: () => number): number {
+  return Math.min(len - 1, Math.max(0, (random() * len) | 0));
+}
+
+/**
+ * Elige UNA nota de {@link PAD_SCALE} que no choque (ni unísono ni segunda
+ * adyacente) con ninguna de `avoid`. FUNCIÓN PURA con `random` inyectable para
+ * poder testearla desde apps/web. Si por saturación no quedara hueco perfecto
+ * (no ocurre con 3 voces sobre 6 grados), al menos evita el unísono exacto.
+ */
+export function pickPadNote(avoid: number[], random: () => number = Math.random): number {
+  const clear = PAD_SCALE.filter((f) => !avoid.some((a) => padNotesClash(a, f)));
+  if (clear.length > 0) return clear[pickIndex(clear.length, random)];
+  const noUnison = PAD_SCALE.filter((f) => !avoid.includes(f));
+  const pool = noUnison.length > 0 ? noUnison : PAD_SCALE;
+  return pool[pickIndex(pool.length, random)];
+}
+
+/**
+ * Acorde de pad de 3 notas DISTINTAS de la pentatónica, SIN unísonos y sin
+ * segundas adyacentes entre voces (el bug H1: el pad quedaba clavado en un
+ * acorde batiente, y con la pestaña oculta —sin rAF— para siempre). Construido
+ * por rechazo con {@link pickPadNote}, así queda garantizado pairwise. Pura.
+ */
+export function pickPadChord(random: () => number = Math.random): number[] {
+  const chord: number[] = [];
+  for (let i = 0; i < 3; i++) chord.push(pickPadNote(chord, random));
+  return chord;
+}
 
 interface PadVoice {
   osc: OscillatorNode;
@@ -34,6 +74,11 @@ interface PadVoice {
   /** Segundos restantes hasta el próximo cambio de nota. */
   timer: number;
   base: number;
+  /**
+   * Volumen CALIBRADO de esta voz (0.9/0.75/0.6). H3: cada cambio de nota debe
+   * re-apuntar a SU nivel, no a una constante compartida, o la mezcla se aplana.
+   */
+  level: number;
 }
 
 export class AmbientBed {
@@ -128,20 +173,23 @@ export class AmbientBed {
     padGain.connect(this.bus);
 
     const detune = [-6, +5, +9]; // cents: coro suave
+    // Acorde inicial SIN unísonos ni segundas (H1): antes era fijo A2·E3·D3, que
+    // ya arrancaba con E3-D3 en segunda (batido). Ahora fresco y limpio.
+    const chord = pickPadChord();
     for (let i = 0; i < 3; i++) {
       const osc = ctx.createOscillator();
       osc.type = i === 2 ? "sine" : "triangle";
-      osc.frequency.value = PAD_START[i];
+      osc.frequency.value = chord[i];
       osc.detune.value = detune[i];
       const gain = ctx.createGain();
       gain.gain.value = 0.0;
       osc.connect(gain);
       gain.connect(this.padFilter);
       osc.start();
-      // Ataque larguísimo de entrada (8-12 s) hasta su volumen de voz.
-      const vol = 0.9 - i * 0.15;
-      gain.gain.setTargetAtTime(vol, this.ctx.currentTime, 4.5);
-      this.padVoices.push({ osc, gain, timer: 12 + Math.random() * 12, base: PAD_START[i] });
+      // Ataque larguísimo de entrada (8-12 s) hasta su volumen de voz calibrado.
+      const level = 0.9 - i * 0.15;
+      gain.gain.setTargetAtTime(level, this.ctx.currentTime, 4.5);
+      this.padVoices.push({ osc, gain, timer: 12 + Math.random() * 12, base: chord[i], level });
     }
     this.engine.countPersistent(3 + 3 + 1); // 3 osc + 3 gain + padGain
   }
@@ -275,6 +323,36 @@ export class AmbientBed {
     }
   }
 
+  /**
+   * RE-SIEMBRA la cama a un estado FRESCO (H4/H2): re-elige un acorde limpio con
+   * {@link pickPadChord}, re-apunta cada voz a su nivel calibrado (H3) y reinicia
+   * los timers de deriva del pad y de campanillas. Lo dispara el orquestador al
+   * DESMUTEAR y al volver de pestaña oculta — así el usuario nunca vuelve a un
+   * acorde batiente/congelado. No-op si el grafo aún no está construido.
+   *
+   * No drena las colas del delay ni desmonta nada: con acorde limpio + gains
+   * correctos basta (el feedback del shimmer, 0.38, es estable y decae solo).
+   */
+  reseed(): void {
+    if (!this.built) return;
+    const now = this.ctx.currentTime;
+    const chord = pickPadChord();
+    for (let i = 0; i < this.padVoices.length; i++) {
+      const v = this.padVoices[i];
+      const next = chord[i];
+      v.osc.frequency.cancelScheduledValues(now);
+      v.osc.frequency.setTargetAtTime(next, now, 2.5);
+      v.base = next;
+      v.timer = 12 + Math.random() * 14;
+      // Vuelve a SU nivel calibrado desde el valor actual (sin click).
+      v.gain.gain.cancelScheduledValues(now);
+      v.gain.gain.setValueAtTime(v.gain.gain.value, now);
+      v.gain.gain.setTargetAtTime(v.level, now, 1.5);
+    }
+    // Reinicia la deriva de campanillas (una chispa pronto, luego cadencia normal).
+    this.bellTimer = 4 + Math.random() * 6;
+  }
+
   /** Avanza los procesos estocásticos (agendado por el rAF del mundo). */
   update(dt: number): void {
     if (!this.built) return;
@@ -284,13 +362,17 @@ export class AmbientBed {
       v.timer -= dt;
       if (v.timer <= 0) {
         v.timer = 12 + Math.random() * 14;
-        const next = PAD_SCALE[(Math.random() * PAD_SCALE.length) | 0];
+        // H1: la nota nueva NO puede unísono/segunda con las OTRAS voces vivas, o
+        // el acorde bate. Antes se elegía al azar de la escala (≈44% de choque).
+        const others = this.padVoices.filter((o) => o !== v).map((o) => o.base);
+        const next = pickPadNote(others);
         const now = this.ctx.currentTime;
         // Glissando larguísimo (portamento) + leve "respiración" de volumen.
         v.osc.frequency.setTargetAtTime(next, now, 3.5);
         v.base = next;
-        v.gain.gain.setTargetAtTime(0.5, now, 1.2);
-        v.gain.gain.setTargetAtTime(0.85, now + 4, 3);
+        // H3: re-apunta a SU nivel calibrado (antes 0.85 fijo aplanaba la mezcla).
+        v.gain.gain.setTargetAtTime(v.level * 0.6, now, 1.2);
+        v.gain.gain.setTargetAtTime(v.level, now + 4, 3);
       }
     }
 
