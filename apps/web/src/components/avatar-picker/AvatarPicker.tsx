@@ -29,6 +29,7 @@ export interface AvatarPickerProps {
 export function AvatarPicker({ open, initial, onClose, onApply }: AvatarPickerProps) {
   const [color, setColor] = useState<string>((initial ?? defaultSelection()).color);
   const panelRef = useRef<HTMLElement>(null);
+  const chipRefs = useRef<Array<HTMLButtonElement | null>>([]);
 
   // Re-sincroniza con `initial` cada vez que se abre (p.ej. desde el HUD).
   useEffect(() => {
@@ -51,6 +52,52 @@ export function AvatarPicker({ open, initial, onClose, onApply }: AvatarPickerPr
 
   if (!open) return null;
 
+  // Índice del chip seleccionado (−1 si el color viene del picker libre y no coincide
+  // con ninguno de la paleta). Es el ancla del roving tabindex de abajo.
+  const activeChip = PASTEL_COLORS.findIndex((c) => c.toLowerCase() === color.toLowerCase());
+
+  /**
+   * A11Y (WAI-ARIA, patrón Radio Group): un `role="radiogroup"` se recorre con las
+   * FLECHAS, no con Tab —los 16 chips eran todos tabulables y las flechas no hacían
+   * nada, que es justo lo contrario de lo que anuncia el rol—. Ahora:
+   *   · roving tabindex: sólo el chip seleccionado entra en el orden de tabulación,
+   *     así que Tab cruza la paleta de una vez (antes costaba 16 pulsaciones llegar
+   *     al "Color libre"); si el color es del picker libre, el ancla es el primero.
+   *   · ←↑ / →↓ mueven el foco Y seleccionan (con vuelta al principio), Home/End a
+   *     los extremos. Mismo patrón de teclado que ya usan EmoteMenu y los tabs del
+   *     chat, para que todo el mundo se navegue igual.
+   */
+  const focusChip = (i: number) => {
+    const n = PASTEL_COLORS.length;
+    const next = ((i % n) + n) % n;
+    setColor(PASTEL_COLORS[next]);
+    chipRefs.current[next]?.focus();
+  };
+
+  const onChipsKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    const from = activeChip < 0 ? 0 : activeChip;
+    switch (e.key) {
+      case "ArrowRight":
+      case "ArrowDown":
+        e.preventDefault();
+        focusChip(from + 1);
+        break;
+      case "ArrowLeft":
+      case "ArrowUp":
+        e.preventDefault();
+        focusChip(from - 1);
+        break;
+      case "Home":
+        e.preventDefault();
+        focusChip(0);
+        break;
+      case "End":
+        e.preventDefault();
+        focusChip(PASTEL_COLORS.length - 1);
+        break;
+    }
+  };
+
   return (
     <div className={styles.overlay} role="dialog" aria-modal="true" aria-label="Elige tu color">
       <section className={styles.panel} ref={panelRef}>
@@ -70,15 +117,26 @@ export function AvatarPicker({ open, initial, onClose, onApply }: AvatarPickerPr
         {/* Paleta pastel-plastilina (chips) + picker libre */}
         <div className={styles.controlGroup}>
           <span className={styles.controlLabel}>Color</span>
-          <div className={styles.chips} role="radiogroup" aria-label="Paleta de colores">
-            {PASTEL_COLORS.map((c) => {
-              const active = c.toLowerCase() === color.toLowerCase();
+          <div
+            className={styles.chips}
+            role="radiogroup"
+            aria-label="Paleta de colores"
+            onKeyDown={onChipsKeyDown}
+          >
+            {PASTEL_COLORS.map((c, i) => {
+              const active = i === activeChip;
               return (
                 <button
                   key={c}
+                  ref={(el) => {
+                    chipRefs.current[i] = el;
+                  }}
                   type="button"
                   role="radio"
                   aria-checked={active}
+                  // Roving tabindex: sólo el seleccionado es tabulable (si el color
+                  // salió del picker libre no hay ninguno activo → ancla el primero).
+                  tabIndex={active || (activeChip < 0 && i === 0) ? 0 : -1}
                   aria-label={`Color ${c}`}
                   className={`${styles.chip} ${active ? styles.chipActive : ""}`}
                   style={{ backgroundColor: c }}

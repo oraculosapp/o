@@ -184,6 +184,13 @@ export class Balls {
   /** Sprite billboard con el glifo "E" que aparece sobre la pelota agarrable. */
   private eSprite?: THREE.Sprite;
   private eTex?: THREE.Texture;
+  /**
+   * Rampa toon del material de las pelotas. Se guarda porque `Material.dispose()`
+   * NO libera las texturas: `makeToonRamp()` crea una DataTexture NUEVA por
+   * llamada que, sin referencia, quedaría viva en la GPU por partida (mismo
+   * patrón ya corregido en Island/Totem/CharacterController).
+   */
+  private toonRamp?: THREE.DataTexture;
   private time = 0;
 
   private _m = new THREE.Matrix4();
@@ -332,7 +339,8 @@ export class Balls {
    * capta el atardecer) la integra a la estética. No toca cielo/fog/paleta del mundo.
    */
   private buildMaterial(): THREE.MeshToonMaterial {
-    const mat = new THREE.MeshToonMaterial({ gradientMap: makeToonRamp() });
+    this.toonRamp = makeToonRamp();
+    const mat = new THREE.MeshToonMaterial({ gradientMap: this.toonRamp });
     mat.onBeforeCompile = (shader) => {
       shader.vertexShader = shader.vertexShader
         .replace(
@@ -987,6 +995,8 @@ export class Balls {
     this.mesh.geometry.dispose();
     (this.mesh.material as THREE.Material).dispose();
     this.mesh.dispose();
+    this.toonRamp?.dispose();
+    this.toonRamp = undefined;
     if (this.eSprite) {
       this.eSprite.removeFromParent();
       (this.eSprite.material as THREE.SpriteMaterial).dispose();

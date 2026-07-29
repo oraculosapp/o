@@ -209,13 +209,19 @@ export function HintToasts({ oracleId = "paqo", getWorldNet }: HintToastsProps) 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [oracleId]);
 
-  if (!toast && !celebrating) return null;
-
   return (
     <>
       {celebrating && <div className={styles.veil} aria-hidden />}
-      {toast && (
-        <div className={styles.layer} aria-live="polite" role="status">
+      {/* A11Y (WCAG 4.1.3): la región viva es PERSISTENTE — el `<div role="status">`
+          vive SIEMPRE en el DOM aunque no haya pista, y sólo entra y sale el toast de
+          dentro. Antes el componente devolvía null sin pista y la región nacía CON su
+          contenido ya puesto: varios lectores de pantalla no anuncian una live-region
+          que aparece al mismo tiempo que su texto (necesitan observarla vacía antes
+          para detectar el cambio), así que las pistas de Paqo podían no llegar nunca.
+          Es el mismo patrón ya documentado en pwa/UpdateSentinel.
+          El contenedor no estorba: `pointer-events: none` y, vacío, no pinta nada. */}
+      <div className={styles.layer} aria-live="polite" role="status">
+        {toast && (
           <div
             key={toast.id}
             className={`${styles.toast} ${toast.special ? styles.toastFound : ""} ${
@@ -227,8 +233,8 @@ export function HintToasts({ oracleId = "paqo", getWorldNet }: HintToastsProps) 
             </span>
             <span className={styles.text}>{toast.text}</span>
           </div>
-        </div>
-      )}
+        )}
+      </div>
     </>
   );
 }

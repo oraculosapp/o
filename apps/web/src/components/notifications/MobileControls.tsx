@@ -17,6 +17,28 @@ const DEFAULT_STATE: WorldActionState = {
   flying: false,
 };
 
+/**
+ * A11Y (WCAG 2.1.1, Teclado): los cuatro mandos disparan en `onPointerDown` (para
+ * que el juego responda al INSTANTE, sin esperar al click) y hacen `preventDefault`,
+ * lo que además cancela los eventos de compatibilidad del táctil. Eso deja fuera al
+ * teclado: son `<button>` enfocables (tienen su `:focus-visible` dorado) pero
+ * Enter/Espacio no llegaban a ejecutar NADA. Muchos dispositivos de puntero grueso
+ * llevan teclado (tablet con funda, TV, conmutadores de accesibilidad), así que un
+ * control enfocable e inoperable es un fallo real, no teórico.
+ *
+ * Se resuelve con un `onKeyDown` propio en vez de añadir `onClick`: el click
+ * sintético que genera el navegador tras Enter/Espacio dispararía la acción DOS
+ * veces en los punteros donde `preventDefault` no lo cancela (ratón). Atendiendo
+ * sólo al keydown, cada origen (dedo o tecla) dispara exactamente una vez.
+ */
+function keyActivate(run: () => void) {
+  return (e: React.KeyboardEvent) => {
+    if (e.key !== "Enter" && e.key !== " " && e.key !== "Spacebar") return;
+    e.preventDefault(); // Espacio no debe hacer scroll ni saltar en el mundo
+    run();
+  };
+}
+
 /** ¿El dispositivo es táctil? (por capacidad del puntero, nunca por user-agent). */
 function useIsTouch(): boolean {
   const [touch, setTouch] = useState(false);
@@ -134,6 +156,7 @@ export function MobileControls({ getWorld }: MobileControlsProps) {
             e.preventDefault();
             onAction();
           }}
+          onKeyDown={keyActivate(onAction)}
           aria-label={actionLabel}
           aria-pressed={drawingOn || undefined}
         >
@@ -147,6 +170,7 @@ export function MobileControls({ getWorld }: MobileControlsProps) {
             e.preventDefault();
             pressFly();
           }}
+          onKeyDown={keyActivate(pressFly)}
           aria-label="Volar"
           aria-pressed={state.flying}
         >
@@ -160,6 +184,7 @@ export function MobileControls({ getWorld }: MobileControlsProps) {
             e.preventDefault();
             toggleRun();
           }}
+          onKeyDown={keyActivate(toggleRun)}
           aria-label="Correr"
           aria-pressed={running}
         >
@@ -173,6 +198,7 @@ export function MobileControls({ getWorld }: MobileControlsProps) {
             e.preventDefault();
             pressJump();
           }}
+          onKeyDown={keyActivate(pressJump)}
           aria-label={jumpLabel}
         >
           {jumpLabel}

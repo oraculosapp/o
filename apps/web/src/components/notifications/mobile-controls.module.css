@@ -83,17 +83,38 @@
   outline-offset: 2px;
 }
 
+/* --- A11Y · CONTRASTE DE LOS ESTADOS DEL MANDO (WCAG 1.4.3) -------------------
+   `.btn` apoya su texto sobre `--panel-hud` (rgba .92), el token pensado justo para
+   "panel del HUD que lleva texto y flota SOBRE el mundo". Los estados de abajo
+   REDEFINÍAN `background` con un tinte translúcido y, al hacerlo, BORRABAN ese
+   respaldo casi opaco: el botón quedaba teñido sobre el mundo desnudo. Medido sobre
+   una biósfera clara (~#f0f0f0) el texto se caía a ratios de 1:1:
+     · .jump    (Brincar, SIEMPRE visible) --gold-bright sobre oro .28→.12 → 1.01:1
+     · .flying  (Caer)                      #cfe0ff sobre azul .14         → 1.06:1
+     · .holding (Lanzar)                    --terra sobre terracota .14    → 2.23:1
+   Y los "encendidos" (texto oscuro sobre oro translúcido) fallaban al revés, sobre
+   mundo OSCURO: 1.72:1.
+   Arreglo quirúrgico, sin tocar el color ni la geometría: el tinte se APILA sobre
+   `var(--panel-hud)` en la misma declaración (`gradiente, var(--panel-hud)`) en vez
+   de sustituirlo, y los estados "on" pasan a oro OPACO — exactamente el mismo
+   lenguaje que `.segmentActive` del chat para "activo". Resultado ≥5.6:1 en todos
+   los estados sobre cualquier biósfera. */
+
 /* Brincar: ancla del anillo, esquina inferior-derecha del clúster. Acento dorado. */
 .jump {
   position: absolute;
   right: 0;
   bottom: 0;
-  background: linear-gradient(180deg, rgba(227, 176, 99, 0.28), rgba(227, 176, 99, 0.12));
+  background:
+    linear-gradient(180deg, rgba(227, 176, 99, 0.28), rgba(227, 176, 99, 0.12)),
+    var(--panel-hud);
   border-color: var(--gold-dim);
 }
 /* En vuelo el salto pasa a "Caer": vira a un azul-lila frío para leerse distinto. */
 .flying {
-  background: linear-gradient(180deg, rgba(122, 162, 247, 0.32), rgba(122, 162, 247, 0.14));
+  background:
+    linear-gradient(180deg, rgba(122, 162, 247, 0.32), rgba(122, 162, 247, 0.14)),
+    var(--panel-hud);
   border-color: rgba(122, 162, 247, 0.7);
   color: #cfe0ff;
 }
@@ -110,15 +131,21 @@
   height: 56px;
   font-size: 0.6rem;
 }
-/* Con pelota en mano → acento terracota (Lanzar). */
+/* Con pelota en mano → acento terracota (Lanzar). La etiqueta usa --sand (token de
+   cerámica) en vez de --terra: terracota sobre terracota se quedaba en 3.4:1 sobre
+   mundo claro; --sand da 5.7:1 conservando el mismo carácter cálido del estado. */
 .holding {
-  background: linear-gradient(180deg, rgba(222, 121, 78, 0.3), rgba(222, 121, 78, 0.14));
+  background:
+    linear-gradient(180deg, rgba(222, 121, 78, 0.3), rgba(222, 121, 78, 0.14)),
+    var(--panel-hud);
   border-color: var(--terra);
-  color: var(--terra);
+  color: var(--sand);
 }
-/* Modo DIBUJAR activo: encendido dorado con halo (estado "on" persistente). */
+/* Modo DIBUJAR activo: encendido dorado con halo (estado "on" persistente). Oro
+   OPACO (mismo gradiente que .segmentActive del chat) para que el texto oscuro se
+   lea igual sobre cualquier biósfera: 9.3–13.7:1. */
 .drawingOn {
-  background: linear-gradient(180deg, rgba(227, 176, 99, 0.55), rgba(227, 176, 99, 0.3));
+  background: linear-gradient(180deg, var(--gold-bright), var(--gold));
   border-color: var(--gold-bright);
   color: #1a130a;
   box-shadow: var(--shadow), 0 0 24px var(--glow);
@@ -148,7 +175,7 @@
    .drawingOn, para que "activo" se lea igual en todo el mando. */
 .runOn,
 .flyOn {
-  background: linear-gradient(180deg, rgba(227, 176, 99, 0.55), rgba(227, 176, 99, 0.3));
+  background: linear-gradient(180deg, var(--gold-bright), var(--gold));
   border-color: var(--gold-bright);
   color: #1a130a;
   box-shadow: var(--shadow), 0 0 24px var(--glow);

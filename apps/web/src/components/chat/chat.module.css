@@ -263,6 +263,23 @@
 .grabberWrap:active {
   cursor: grabbing;
 }
+/* A11Y (WCAG 2.4.7): el asa es un div[role=button] con tabIndex 0 y Enter/Espacio,
+   así que HAY que verle el foco. El anillo global (`:focus-visible` en tokens.css)
+   usa `outline-offset: 2px`, y el asa es el ÚLTIMO hijo pegado al borde inferior de
+   un `.dock` con `overflow: hidden`: ese offset positivo caía fuera y se recortaba,
+   quedando el foco medio invisible justo en el control que menos se adivina. Se
+   redibuja hacia DENTRO (offset negativo) para que el anillo entero quede visible. */
+.grabberWrap:focus-visible {
+  outline: 2px solid var(--gold-bright);
+  outline-offset: -3px;
+  border-radius: var(--radius-sm);
+}
+/* Y el asa visible se enciende con el foco, para que el destino del anillo se lea
+   sin ambigüedad (el pseudo-botón no tiene más señal que la píldora). */
+.grabberWrap:focus-visible .grabber {
+  background: var(--gold-bright);
+  opacity: 1;
+}
 .grabber {
   width: 42px;
   height: 5px;

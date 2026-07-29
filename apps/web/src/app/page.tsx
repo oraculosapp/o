@@ -306,11 +306,15 @@ export default function Home() {
         onPick={onPickEmote}
       />
 
-      {toast && (
-        <div className={styles.avatarToast} role="status" aria-live="polite">
-          {toast}
-        </div>
-      )}
+      {/* Región viva PERSISTENTE del toast del selector (WCAG 4.1.3): el nodo
+          `role="status"` no se monta y desmonta con el mensaje —varios lectores de
+          pantalla no anuncian una live-region que nace ya con su texto dentro—, sino
+          que vive siempre y sólo cambia su contenido. Mismo patrón que HintToasts y
+          pwa/UpdateSentinel. Vacío no pinta nada: `.avatarToast` sólo se aplica
+          cuando hay mensaje. */}
+      <div role="status" aria-live="polite">
+        {toast && <div className={styles.avatarToast}>{toast}</div>}
+      </div>
 
       {!ready && (
         <div className={styles.loader} role="status" aria-live="polite">

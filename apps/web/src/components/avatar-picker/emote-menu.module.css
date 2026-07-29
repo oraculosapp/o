@@ -16,7 +16,12 @@
   padding: 0.55rem 0.7rem;
   border: 1px solid var(--line);
   border-radius: var(--radius-pill);
-  background: rgba(8, 10, 18, 0.72);
+  /* A11Y (WCAG 1.4.3): antes rgba(8,10,18,.72). Sobre una biósfera clara ese 0.72
+     dejaba pasar tanto mundo que la etiqueta del emote (--text-dim, 0.6rem) caía a
+     3.1:1. `--panel-hud` es el token de la casa para exactamente este caso ("panel
+     del HUD que lleva texto y flota SOBRE el mundo"): casi el mismo tono, alpha .92
+     → 7.6:1. El glass no se pierde, vive del blur, que se conserva intacto. */
+  background: var(--panel-hud);
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
   box-shadow: var(--shadow);

@@ -1,6 +1,26 @@
 @import "@phygitalia/ui/fonts.css";
 @import "@phygitalia/ui/tokens.css";
 
+/* --- A11Y · CONTRASTE DEL TEXTO SECUNDARIO (WCAG 1.4.3, AA) ------------------
+   Los tokens de marca (@phygitalia/ui/tokens.css) se calibraron contra fondos
+   OPACOS (--bg-0, --panel-solid), donde --text-dim y --text-faint pasan de sobra
+   (6.5:1 y 5.9:1). Pero en la RAÍZ el HUD flota sobre el MUNDO 3D, que puede ser
+   claro (biósfera "brillante", clima "cenit"), y varios paneles son translúcidos.
+   Compuesto sobre un mundo blanco (~#f0f0f0) el peor caso real es el chat, cuyo
+   vidrio elevado es rgba(13,15,24,.80) + highlight blanco .03 → fondo efectivo
+   ~rgb(64,66,73). Ahí los tokens ORIGINALES FALLAN AA en texto normal:
+     · --text-dim   #9d97a9 → 3.55:1  (tabs .segment, .author del mensaje)
+     · --text-faint #948fa4 → 3.21:1  (.time, .paqoWho, .emptyHint)
+   Se sube UN PASO su luminancia conservando tono y saturación exactos (HSL 260/9%
+   y 254/10%, sólo L: 63%→73% y 60%→71%), el mínimo para cruzar 4.5:1 en ese peor
+   caso. Sobre fondos oscuros sólo mejora (dim 6.5→9.7:1 sobre --bg-0), así que no
+   hay regresión en ningún sitio, y el gris malva de la casa se mantiene.
+   El override vive AQUÍ (no en packages/ui) porque el peor caso es de esta app. */
+:root {
+  --text-dim: #b8b4c0;
+  --text-faint: #b1aebc;
+}
+
 * {
   box-sizing: border-box;
 }

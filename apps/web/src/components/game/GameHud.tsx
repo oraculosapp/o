@@ -128,7 +128,14 @@ export function GameHud({ getWorld }: GameHudProps) {
   return (
     <section className={styles.card} aria-label="Marcador ¡Dale a Paqo!">
       <div className={styles.clock}>{clock}</div>
-      <ul className={styles.players} aria-live="polite" aria-label="Puntuaciones">
+      {/* A11Y (WCAG 4.1.3): la lista ya NO es `aria-live`. Se re-renderiza en CADA
+          acierto de CUALQUIER jugador, así que el lector recitaba el marcador entero
+          una y otra vez —encima solapándose con el reloj de la cuenta atrás y, al
+          acabar, con el banner de resultados, que sí es `role="status"`—. Anunciar
+          todo equivale a no anunciar nada. La tabla se sigue leyendo a demanda (es
+          una lista etiquetada dentro de una `section` con nombre) y el único anuncio
+          automático queda donde importa: el resultado de la ronda. */}
+      <ul className={styles.players} aria-label="Puntuaciones">
         {players.map((p) => {
           const lead = p.points > 0 && p.points === topScore;
           return (

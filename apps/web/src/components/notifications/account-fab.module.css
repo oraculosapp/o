@@ -151,7 +151,11 @@
   }
 }
 
-@media (max-width: 640px) {
+/* A11Y (WCAG 2.5.5): el área táctil de 44px iba SÓLO bajo `max-width: 640px`, así
+   que en una tablet táctil ancha (puntero grueso, >640px) el FAB se quedaba en 40px
+   —y sin el pseudo de rescate que sí tienen los demás botones del menú—. Se alinea
+   la condición con la del resto del HUD: `(pointer: coarse), (max-width: 640px)`. */
+@media (pointer: coarse), (max-width: 640px) {
   .fab {
     width: 44px;
     height: 44px;

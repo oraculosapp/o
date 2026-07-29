@@ -42,9 +42,14 @@
    retrato absoluto. NOTA: el retrato ya NO se centra por grid — se ancla con
    `inset: 3px` (ver más abajo el porqué), así que el `place-content:center`
    heredado de .profileLink queda inerte aquí. */
+/* A11Y (WCAG 2.5.5, área táctil): este botón NO lleva `overflow: hidden`. Lo tenía,
+   y era redundante —el retrato ya se recorta solo con su propio `border-radius:50%
+   + overflow:hidden` en .avatarPortraitWrap, y el fallback .avatarDummy es un disco
+   con border-radius— pero además RECORTABA el pseudo `::before` de 44px que le da a
+   este botón (38px visibles en móvil) su área táctil mínima: el toque efectivo se
+   quedaba en los 38px del círculo. Sin el clip, el pseudo vuelve a sobresalir. */
 .avatarButton {
   padding: 0;
-  overflow: hidden;
   position: relative;
 }
 /* Retrato anclado con `inset: 3px` (3px de aire por lado) en vez de

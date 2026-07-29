@@ -162,4 +162,23 @@
   .avatarToast {
     animation: none;
   }
+  /* A11Y (WCAG 2.3.3): la runa del loader giraba SIN FIN (`runaspin` infinite) y era
+     la única animación de la raíz que se escapaba de la preferencia de movimiento
+     reducido — justo la peor clase, rotación continua a pantalla completa mientras
+     compila la escena. Se sustituye por un latido de OPACIDAD: sigue comunicando
+     "esto está vivo, espera" sin desplazar ni rotar nada (los cambios de opacidad no
+     disparan mareo vestibular). El texto "CARGANDO" y el `role="status"` del loader
+     siguen contando lo mismo a quien no ve la runa. */
+  .rune {
+    animation: runapulse 2.4s var(--ease-brand) infinite;
+  }
+}
+@keyframes runapulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.55;
+  }
 }
