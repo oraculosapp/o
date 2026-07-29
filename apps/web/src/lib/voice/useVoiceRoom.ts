@@ -42,6 +42,14 @@
  * nada — anónimo sin sesión no dispara conexiones. La identidad la inyecta el
  * padre (misma semántica que el chat: sessionId de Supabase).
  *
+ * Ciclo de vida del CANAL vs. el NOMBRE visible: el canal (join/teardown) sólo se
+ * desmonta por cambios en `biosphereId`, `identity` o `enabled` — nunca por
+ * `displayName`. El nombre es editable en caliente (el chat lo deja renombrarse) y
+ * viaja por un efecto SEPARADO que llama a `VoiceSignaling.setName()` (sólo
+ * `channel.track`, sin reabrir el canal ni recrear peer connections). Un
+ * `displayNameRef` guarda el nombre vigente para que `join()` y cualquier
+ * reconexión posterior usen SIEMPRE el nombre actual, no una clausura vieja.
+ *
  * No requiere credenciales nuevas: reutiliza el cliente Supabase del chat.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -110,6 +118,10 @@ export interface UseVoiceRoomParams {
   biosphereId: string;
   /** Identidad estable (sessionId de Supabase; misma que usa el chat). */
   identity: string;
+  /**
+   * Nombre visible; puede cambiar en caliente (renombrarse en el chat) SIN
+   * desmontar el canal — ver "Ciclo de vida del CANAL vs. el NOMBRE visible" arriba.
+   */
   displayName: string;
   /** Gating: sólo con sesión (enabled=true) se abre el canal. */
   enabled?: boolean;
@@ -164,6 +176,13 @@ export function useVoiceRoom(params: UseVoiceRoomParams): UseVoiceRoom {
   const [errorReason, setErrorReason] = useState<VoiceErrorReason>(null);
 
   const mountedRef = useRef(true);
+  /**
+   * Nombre vigente, en ref (no en clausura). Lo lee `refreshParticipants` (para el
+   * hueco "aún no reflejado en presencia") y `join()` (para el `track()` inicial y
+   * cualquier rejoin posterior) — así ninguno arrastra un `displayName` viejo aunque
+   * su callback memoizado sea anterior al último renombrado.
+   */
+  const displayNameRef = useRef(displayName);
   const signalingRef = useRef<VoiceSignaling | null>(null);
   const localStreamRef = useRef<MediaStream | null>(null);
   const peersRef = useRef<Map<string, PeerEntry>>(new Map());
@@ -180,6 +199,10 @@ export function useVoiceRoom(params: UseVoiceRoomParams): UseVoiceRoom {
   const acquiringRef = useRef(false);
 
   // --- Recalcular la lista de participantes (roster + hablando) --------------
+  // OJO displayName: lee `displayNameRef` (no la prop cerrada) para que esta función
+  // NO cambie de identidad al renombrarse — si dependiera de `displayName`, arrastraría
+  // ese cambio hasta `closePeer`/`teardown` y el efecto de desmontaje (dep. `teardown`)
+  // se re-ejecutaría, tirando el canal entero en cada tecla del nombre.
   const refreshParticipants = useCallback(() => {
     if (!mountedRef.current) return;
     const now = Date.now();
@@ -188,7 +211,7 @@ export function useVoiceRoom(params: UseVoiceRoomParams): UseVoiceRoom {
     const roster = rosterRef.current;
     // Garantiza que YO figuro aunque el sync de presence aún no me refleje.
     const hasSelf = roster.some((m) => m.identity === identity);
-    const base = hasSelf ? roster : [{ identity, name: displayName }, ...roster];
+    const base = hasSelf ? roster : [{ identity, name: displayNameRef.current }, ...roster];
     setParticipants(
       base.map((m) => ({
         identity: m.identity,
@@ -197,7 +220,7 @@ export function useVoiceRoom(params: UseVoiceRoomParams): UseVoiceRoom {
         speaking: isSpeaking(m.identity),
       }))
     );
-  }, [identity, displayName]);
+  }, [identity]);
 
   // --- Estado agregado de conexión de la malla -------------------------------
   // OJO: un par WebRTC en `failed` (sin TURN / red restrictiva) NO es un problema de
@@ -579,11 +602,13 @@ export function useVoiceRoom(params: UseVoiceRoomParams): UseVoiceRoom {
         window.AudioContext ?? (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
       if (AC) audioCtxRef.current = new AC();
 
-      // 3) Señalización Supabase + malla.
+      // 3) Señalización Supabase + malla. Nombre vigente vía ref (no la clausura de
+      // `displayName`): si join() corre desde un callback memoizado antes del último
+      // renombrado, igual entra con el nombre correcto.
       const signaling = new VoiceSignaling(
         getSupabaseBrowserClient(),
         biosphereId,
-        { identity, name: displayName },
+        { identity, name: displayNameRef.current },
         {
           onReady: (initialPeers) => {
             // Anti-glare: yo llegué, ofrezco a quienes YA estaban.
@@ -638,7 +663,6 @@ export function useVoiceRoom(params: UseVoiceRoomParams): UseVoiceRoom {
     enabled,
     biosphereId,
     identity,
-    displayName,
     makeOffer,
     handleSignal,
     closePeer,
@@ -738,7 +762,24 @@ export function useVoiceRoom(params: UseVoiceRoomParams): UseVoiceRoom {
     void unmute();
   }, [identity, refreshParticipants, scheduleMicRelease, unmute]);
 
-  // Limpieza al desmontar.
+  /**
+   * RENOMBRARSE EN CALIENTE: efecto separado del ciclo de vida del canal. Sólo
+   * actualiza el ref (para join()/refreshParticipants) y, si ya estoy conectado,
+   * empuja el nombre nuevo por `VoiceSignaling.setName()` (un `channel.track`, sin
+   * reabrir el canal ni recrear peer connections). El roster lo refleja cuando
+   * llegue el siguiente sync de presencia — el mismo camino que ya usan los demás
+   * pares al entrar/salir — así que no hace falta tocar `rosterRef` a mano aquí.
+   */
+  useEffect(() => {
+    displayNameRef.current = displayName;
+    if (signalingRef.current) void signalingRef.current.setName(displayName);
+  }, [displayName]);
+
+  // Limpieza al desmontar. OJO: depende SÓLO de `teardown`, que a su vez cuelga de
+  // `closePeer`/`releaseLocalMic` — ninguno de los dos depende ya de `displayName`
+  // (ver nota en `refreshParticipants`). El canal, por tanto, sólo se desmonta por
+  // cambios reales de ciclo de vida (identity/enabled o desmontaje del componente),
+  // nunca por un renombrado.
   useEffect(() => {
     mountedRef.current = true;
     return () => {

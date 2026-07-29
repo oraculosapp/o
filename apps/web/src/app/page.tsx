@@ -1,17 +1,15 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import dynamic from "next/dynamic";
 import { PaqoWorld, type BiospherePreset, type AvatarConfig } from "@phygitalia/engine";
 import paqo from "@phygitalia/content/biospheres/paqo.json";
-import { PerfOverlay } from "@/components/dev/PerfOverlay";
 import { ChatDock } from "@/components/chat/ChatDock";
 import { ChatMenuButton } from "@/components/chat/ChatMenuButton";
 import { HintToasts } from "@/components/hints/HintToasts";
 import { HudControls } from "@/components/notifications/HudControls";
-import { MobileControls } from "@/components/notifications/MobileControls";
 import { MuteButton } from "@/components/audio/MuteButton";
 import { InstallButton } from "@/components/pwa/InstallButton";
-import { AvatarPicker } from "@/components/avatar-picker/AvatarPicker";
 import { EmoteMenu } from "@/components/avatar-picker/EmoteMenu";
 import { MoodPanel } from "@/components/mood/MoodPanel";
 import { GameHud } from "@/components/game/GameHud";
@@ -32,6 +30,41 @@ import type { WorldUiHooks } from "@/lib/world-ui";
 import styles from "./paqo.module.css";
 
 const BIOSPHERE_ID = "paqo";
+
+/**
+ * CARGA BAJO DEMANDA (ciclo 3, presupuesto de bundle de la RAÍZ).
+ *
+ * Estos tres NO son necesarios para el primer render del mundo y, además, cada uno
+ * tiene una CONDICIÓN DE APARICIÓN clara, así que su chunk sólo viaja cuando toca
+ * (no es un `dynamic` decorativo: el gate está aquí, en el montaje):
+ *
+ *   · AvatarPicker  — apertura EXPLÍCITA (botón "Cambiar avatar"). Se monta la
+ *     primera vez que `pickerOpen` pasa a true (ver `pickerEverOpened`) y ya se
+ *     queda montado, así que la segunda apertura es instantánea. Arrastra consigo
+ *     el visor 3D del preview (AvatarLivePreview → nube-live-scene), que era el
+ *     sospechoso gordo: three/engine los comparte con el mundo, pero el visor y su
+ *     CSS salen del primer load. Sin `loading`: mientras llega el chunk no se pinta
+ *     NADA (micro-retardo), nunca un overlay a medias que parpadee.
+ *   · PerfOverlay   — sólo existe en desarrollo o con `?dev=1`; el mismo gate que
+ *     ya aplicaba internamente, ahora también decide si se DESCARGA.
+ *   · MobileControls— sólo en punteros gruesos; en escritorio jamás se pide.
+ *
+ * `ssr:false` en los tres: ninguno aporta markup al HTML del servidor (el picker
+ * nace cerrado, el overlay oculto y los mandos vacíos en escritorio), así que no
+ * hay contenido que se pierda ni riesgo de mismatch de hidratación.
+ */
+const AvatarPicker = dynamic(
+  () => import("@/components/avatar-picker/AvatarPicker").then((m) => m.AvatarPicker),
+  { ssr: false },
+);
+const PerfOverlay = dynamic(
+  () => import("@/components/dev/PerfOverlay").then((m) => m.PerfOverlay),
+  { ssr: false },
+);
+const MobileControls = dynamic(
+  () => import("@/components/notifications/MobileControls").then((m) => m.MobileControls),
+  { ssr: false },
+);
 
 /**
  * Siembra de identidad (S8, entrada sin fricción): al PRIMER ingreso asigna
@@ -61,8 +94,24 @@ export default function Home() {
 
   const [avatarSel, setAvatarSel] = useState<AvatarSelection | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
+  /**
+   * ¿Se abrió YA el selector alguna vez? Es el disparador de la carga bajo demanda:
+   * hasta la primera apertura el chunk del picker (con su visor 3D) no se pide.
+   * Una vez montado se queda, para que abrir/cerrar de nuevo no cueste nada.
+   */
+  const [pickerEverOpened, setPickerEverOpened] = useState(false);
   const [emoteOpen, setEmoteOpen] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
+  /** Puntero grueso → mandos táctiles (mismo criterio que usa MobileControls dentro). */
+  const [isTouch, setIsTouch] = useState(false);
+  /** Desarrollo o `?dev=1` → overlay de rendimiento (mismo criterio que PerfOverlay). */
+  const [devOverlay, setDevOverlay] = useState(false);
+
+  /** Abre el selector Y, la primera vez, dispara la descarga de su chunk. */
+  const openPicker = useCallback(() => {
+    setPickerEverOpened(true);
+    setPickerOpen(true);
+  }, []);
 
   /** AvatarConfig para el mundo: el GLB "nube" + el color del viajero. */
   const buildAvatarConfig = useCallback((sel: AvatarSelection): AvatarConfig => ({
@@ -106,6 +155,28 @@ export default function Home() {
     if (!world) return;
     world.controller?.getRig()?.playEmote(id);
     world.net?.emitLocalEmote(id);
+  }, []);
+
+  // Gate de los MANDOS TÁCTILES: replica el `(pointer: coarse)` que MobileControls
+  // ya evaluaba por dentro, pero un nivel más arriba, para que en escritorio su
+  // chunk ni se descargue. Reacciona al "change" igual que el componente (híbridos).
+  useEffect(() => {
+    if (typeof matchMedia === "undefined") return;
+    const mq = matchMedia("(pointer: coarse)");
+    const apply = () => setIsTouch(mq.matches);
+    apply();
+    mq.addEventListener("change", apply);
+    return () => mq.removeEventListener("change", apply);
+  }, []);
+
+  // Gate del OVERLAY DE RENDIMIENTO: mismo criterio que PerfOverlay usa por dentro
+  // (desarrollo o `?dev=1`). En producción, sin la query, no se pide su chunk.
+  useEffect(() => {
+    if (process.env.NODE_ENV === "development") {
+      setDevOverlay(true);
+      return;
+    }
+    setDevOverlay(new URLSearchParams(window.location.search).get("dev") === "1");
   }, []);
 
   // Auto-oculta el toast.
@@ -164,7 +235,7 @@ export default function Home() {
   return (
     <main className={styles.stage}>
       <div ref={mountRef} className={styles.canvas} />
-      <PerfOverlay />
+      {devOverlay && <PerfOverlay />}
 
       {/* HUD social. Se monta siempre: el chat funciona sin world.net (sólo
           pierde presencia) y sin Supabase se oculta con aviso. */}
@@ -174,8 +245,9 @@ export default function Home() {
           engine aún no publicó world.net (reintenta y se calla). */}
       <HintToasts oracleId={BIOSPHERE_ID} getWorldNet={getWorldNet} />
 
-      {/* Botones táctiles de saltar/agarrar (sólo en dispositivos touch). */}
-      <MobileControls getWorld={getWorld} />
+      {/* Botones táctiles de saltar/agarrar (sólo en dispositivos touch). El gate
+          vive arriba (isTouch) para que en escritorio ni siquiera se descarguen. */}
+      {isTouch && <MobileControls getWorld={getWorld} />}
 
       {/* MENÚ superior-IZQUIERDA: UN SOLO contenedor flex con los 7 controles como
           HERMANOS, en este ORDEN exacto izq→der (la alineación y el wrap a 2 filas
@@ -192,7 +264,7 @@ export default function Home() {
           siguen anclados a SU botón (position:absolute sobre su wrapper relativo). */}
       <nav className={styles.topMenu} aria-label="Menú">
         <HudControls
-          onChangeAvatar={() => setPickerOpen(true)}
+          onChangeAvatar={openPicker}
           avatarThumbUrl={avatarSel ? thumbUrl() : null}
           avatarTint={avatarSel?.color ?? null}
         />
@@ -212,12 +284,18 @@ export default function Home() {
           descartable, recordando el descarte 7 días. Se autooculta si no aplica. */}
       <InstallButton placement="hud" />
 
-      <AvatarPicker
-        open={pickerOpen}
-        initial={avatarSel}
-        onClose={() => setPickerOpen(false)}
-        onApply={onApplyAvatar}
-      />
+      {/* Sólo existe en el árbol desde la PRIMERA apertura (carga bajo demanda). El
+          foco no se pierde: el picker monta ya con open=true, así que su useFocusTrap
+          corre en el montaje, recuerda el botón "Cambiar avatar" como elemento previo
+          y se lo devuelve al cerrar, exactamente igual que antes. */}
+      {pickerEverOpened && (
+        <AvatarPicker
+          open={pickerOpen}
+          initial={avatarSel}
+          onClose={() => setPickerOpen(false)}
+          onApply={onApplyAvatar}
+        />
+      )}
 
       {/* Menú de emotes: se abre al clicar/tocar TU avatar (onAvatarClick) o con la
           tecla global "B" (bailar). */}
