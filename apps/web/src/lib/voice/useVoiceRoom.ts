@@ -175,6 +175,26 @@ export function useVoiceRoom(params: UseVoiceRoomParams): UseVoiceRoom {
   const [connectionState, setConnectionState] = useState<VoiceConnectionState>("idle");
   const [errorReason, setErrorReason] = useState<VoiceErrorReason>(null);
 
+  // Señal PÚBLICA de "estoy en la voz" para consumidores desacoplados (contrato
+  // del guardarraíl de recarga en components/pwa/reload-coordinator.ts, que no
+  // debe recargar la página en plena llamada): evento "phy:voice-state" con
+  // detail {active} en cada transición + <html data-voice="on"> mientras dure.
+  // El literal se repite en el consumidor a propósito (lib no importa de
+  // components); si cambia, cambiar AMBOS.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    window.dispatchEvent(new CustomEvent("phy:voice-state", { detail: { active: joined } }));
+    if (joined) document.documentElement.setAttribute("data-voice", "on");
+    else document.documentElement.removeAttribute("data-voice");
+    return () => {
+      // Desmontar con la voz activa = ya no hay llamada: apaga la señal.
+      if (joined) {
+        document.documentElement.removeAttribute("data-voice");
+        window.dispatchEvent(new CustomEvent("phy:voice-state", { detail: { active: false } }));
+      }
+    };
+  }, [joined]);
+
   const mountedRef = useRef(true);
   /**
    * Nombre vigente, en ref (no en clausura). Lo lee `refreshParticipants` (para el

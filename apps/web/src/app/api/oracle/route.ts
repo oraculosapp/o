@@ -42,6 +42,14 @@ import { createOracleRoute, type OracleRouteDeps } from "../../../lib/oracle/han
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+/**
+ * Presupuesto de la invocación (s). El ChatModel corta a los 30 s, pero la
+ * plataforma aplica SU propio límite: con el default (10 s en el plan Hobby)
+ * mataba la función a media generación y el cliente veía el stream cortado sin
+ * `done` — y en público, la respuesta se perdía con el cooldown ya quemado.
+ * 60 > 30 deja margen para el timeout del modelo + persistir/publicar el turno.
+ */
+export const maxDuration = 60;
 
 // Rate-limit PRIMARIO por IP fiable, singleton por instancia (ver limitación
 // serverless en rate-limit.ts).

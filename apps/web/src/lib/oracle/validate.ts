@@ -68,21 +68,37 @@ const ORACLE_ID_RE = /^[a-z0-9-]{1,64}$/;
 /**
  * Sanea el nickname del hablante para inyectarlo con seguridad en el prompt
  * público. Es DATO de usuario, así que:
- *  · elimina saltos de línea y caracteres de control (evita romper el prompt o
- *    colar líneas tipo "system:"),
- *  · colapsa espacios,
- *  · recorta y capa a `MAX_SPEAKER_NAME_LEN`.
+ *  · aplana a espacio los saltos de línea, tabs, controles C0/C1/DEL y los
+ *    separadores de línea/párrafo Unicode (evita colar líneas tipo "system:"),
+ *  · BORRA invisibles y control BIDI (zero-width, LRM/RLM, embeddings,
+ *    overrides, isolates, BOM): con ellos se reordena visualmente el marco del
+ *    prompt o se esconde carga útil dentro de un nombre de aspecto inocente,
+ *  · NEUTRALIZA comillas y barra invertida (" ' ` \) cambiándolas por sus
+ *    equivalentes tipográficos: 40 chars bastaban para CERRAR la comilla del
+ *    marco y escribir una instrucción a continuación,
+ *  · colapsa espacios, recorta y capa a `MAX_SPEAKER_NAME_LEN` contando PUNTOS
+ *    DE CÓDIGO (`slice` partía pares surrogate por la mitad).
  * Devuelve "" si no queda nada legible (el llamador lo trata como ausente).
+ *
+ * Es la PRIMERA barrera. La SEGUNDA es el marco con nonce aleatorio del handler:
+ * aunque algo se colara, el atacante no puede adivinar el delimitador.
  */
 export function sanitizeSpeakerName(raw: string): string {
-  return raw
-    // Control chars (incl. saltos de linea y tabs) y DEL -> espacio.
+  const cleaned = raw
+    // Controles C0, DEL, C1 y separadores de línea/párrafo Unicode -> espacio.
     // eslint-disable-next-line no-control-regex
-    .replace(/[\u0000-\u001F\u007F]+/g, " ")
+    .replace(/[\u0000-\u001F\u007F-\u009F\u2028\u2029]+/g, " ")
+    // Invisibles y control BIDI: fuera del todo (nada de eso es un "nombre").
+    .replace(/[\u200B-\u200F\u202A-\u202E\u2066-\u2069\uFEFF]+/g, "")
+    // Comillas y barra: no pueden cerrar el delimitador del marco. Se sustituyen
+    // (no se borran) para que O'Brien o «Ana "la roja"» sigan leyéndose bien.
+    .replace(/"/g, "\u201D")
+    .replace(/['`\u2018]/g, "\u2019")
+    .replace(/\\/g, "/")
     .replace(/\s+/g, " ")
-    .trim()
-    .slice(0, MAX_SPEAKER_NAME_LEN)
     .trim();
+  // Recorte por puntos de código: nunca parte un par surrogate (emoji, etc.).
+  return Array.from(cleaned).slice(0, MAX_SPEAKER_NAME_LEN).join("").trim();
 }
 
 /**

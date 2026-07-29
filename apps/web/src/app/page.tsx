@@ -210,17 +210,25 @@ export default function Home() {
 
   // Getter perezoso del contrato multijugador que el engine adjunta a world.net
   // tras start(). Puede no existir aún: el chat y las pistas degradan con gracia.
-  const getWorldNet = (): WorldNetHooks | null => {
+  //
+  // MEMOIZADOS (deps vacías): ambos getters sólo leen `worldRef`, así que su
+  // identidad puede ser estable de por vida. Sin `useCallback` nacían nuevos en
+  // CADA render de Home y bajaban como props a ChatDock, donde son dependencia de
+  // efectos (`applyChrome` y el de limpieza del chrome): cada render reejecutaba
+  // sus cleanups → dos `setViewportInset` (reflow del viewport 3D) por render.
+  const getWorldNet = useCallback((): WorldNetHooks | null => {
     const w = worldRef.current as unknown as { net?: WorldNetHooks } | null;
     return w?.net ?? null;
-  };
+  }, []);
 
   // Getter perezoso del MUNDO para los hooks de UI (setViewportInset /
   // setInputEnabled / input.*). El engine (equipo paralelo) los adjunta a
   // PaqoWorld; el HUD los consume con optional-chaining, así que degradan con
   // gracia mientras aún no existan.
-  const getWorld = (): WorldUiHooks | null =>
-    (worldRef.current as unknown as WorldUiHooks | null) ?? null;
+  const getWorld = useCallback(
+    (): WorldUiHooks | null => (worldRef.current as unknown as WorldUiHooks | null) ?? null,
+    []
+  );
 
   const onApplyAvatar = useCallback((sel: AvatarSelection) => {
     storeAvatar(sel);

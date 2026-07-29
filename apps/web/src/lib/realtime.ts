@@ -445,6 +445,15 @@ export class BiosphereRealtime {
   private disposed = false;
   /** Timer del backoff de reintentos de sesión (se limpia al disponer). */
   private sessionRetryTimer: ReturnType<typeof setTimeout> | null = null;
+  /** `resolve` de la espera en vuelo, para poder CANCELARLA (ver {@link delay}). */
+  private delayResolve: (() => void) | null = null;
+  /**
+   * Generación del intento de conexión en curso. Cada `connect()` la incrementa;
+   * un bucle de reintentos VIEJO (p.ej. el que dormía un backoff cuando el viajero
+   * pulsó "Reintentar") se retira en silencio al ver que ya no es el vigente, en
+   * lugar de seguir en paralelo y montar un segundo canal.
+   */
+  private connectEpoch = 0;
   /** Listener del reintento móvil (visibilitychange); null si no está armado. */
   private onVisibility: (() => void) | null = null;
   /** Sólo se permite UN reintento extra por visibilitychange (no reencolar). */
@@ -466,6 +475,10 @@ export class BiosphereRealtime {
   /** Arranca sesión + canal. Idempotente: reconectar tras dispose crea uno nuevo. */
   async connect(): Promise<void> {
     if (this.disposed || this.identity) return;
+    // Generación de ESTE intento: si entra otro `connect()` mientras dormimos un
+    // backoff (botón "Reintentar" o el reintento por visibilitychange), el intento
+    // viejo se retira sin pisar estado ni emitir errores ajenos.
+    const epoch = ++this.connectEpoch;
     this.opts.onStatus?.("connecting");
     // Atajo directo: si el navegador bloquea almacenamiento/cookies (típico de
     // incógnito), la sesión persistente de Supabase (persistSession → localStorage)
@@ -475,8 +488,8 @@ export class BiosphereRealtime {
       this.failSession(STORAGE_SESSION_ERROR);
       return;
     }
-    const session = await this.acquireSessionWithRetry();
-    if (this.disposed || this.identity) return;
+    const session = await this.acquireSessionWithRetry(epoch);
+    if (this.disposed || this.identity || epoch !== this.connectEpoch) return;
     if (!session) {
       // Agotados los reintentos con backoff: deja armado un ÚLTIMO intento para
       // cuando la pestaña vuelva a primer plano (móvil: arrancó en 2º plano).
@@ -503,10 +516,7 @@ export class BiosphereRealtime {
     if (this.disposed || this.identity) return;
     // Corta timers de reintento en vuelo (backoff de sesión + visibility) para
     // arrancar limpio; permite de nuevo el reintento por visibilitychange.
-    if (this.sessionRetryTimer) {
-      clearTimeout(this.sessionRetryTimer);
-      this.sessionRetryTimer = null;
-    }
+    this.cancelDelay();
     this.teardownVisibilityRetry();
     this.visibilityRetryUsed = false;
     // Si un intento anterior dejó un canal a medias, límpialo antes de reconectar
@@ -524,14 +534,17 @@ export class BiosphereRealtime {
    * (2 s / 8 s / 20 s). Loggea cada fallo con el warn accionable. Devuelve la
    * sesión, o null si se agotan los intentos (o si nos disponen por el camino).
    */
-  private async acquireSessionWithRetry(): Promise<Session | null> {
+  private async acquireSessionWithRetry(epoch: number): Promise<Session | null> {
     const backoffs = SESSION_RETRY_BACKOFFS_MS;
     const total = backoffs.length + 1;
     for (let attempt = 0; attempt < total; attempt++) {
-      if (this.disposed) return null;
+      if (this.disposed || epoch !== this.connectEpoch) return null;
       try {
         return await ensureAnonSession();
       } catch (err) {
+        // Intento ABANDONADO (nos dispusieron o entró un connect() más nuevo): ni
+        // loguea ni pisa el `lastSessionError` del intento vigente.
+        if (this.disposed || epoch !== this.connectEpoch) return null;
         const isLast = attempt === total - 1;
         // Guarda la causa AMABLE del último error para exponerla si se agotan
         // los intentos (captcha / red / otro con código corto).
@@ -543,26 +556,46 @@ export class BiosphereRealtime {
         );
         if (isLast) return null;
         await this.delay(backoffs[attempt]);
-        if (this.disposed) return null;
+        if (this.disposed || epoch !== this.connectEpoch) return null;
       }
     }
     return null;
   }
 
-  /** Espera `ms` de forma cancelable (el timer se limpia en `disconnect`). */
+  /**
+   * Espera `ms` de forma REALMENTE cancelable. Guardamos el `resolve` además del
+   * timer porque cancelar es resolver, no sólo limpiar: antes, `disconnect()` /
+   * `retryConnect()` / `establish()` hacían `clearTimeout` a secas y el `await` de
+   * {@link acquireSessionWithRetry} quedaba suspendido PARA SIEMPRE, reteniendo
+   * esta instancia (canal, callbacks y getters del mundo) en memoria. Al resolver,
+   * el bucle despierta, ve que ya no es la generación vigente y se retira.
+   */
   private delay(ms: number): Promise<void> {
     return new Promise((resolve) => {
-      this.sessionRetryTimer = setTimeout(resolve, ms);
+      this.delayResolve = resolve;
+      this.sessionRetryTimer = setTimeout(() => {
+        this.sessionRetryTimer = null;
+        this.delayResolve = null;
+        resolve();
+      }, ms);
     });
+  }
+
+  /** Corta la espera en vuelo: limpia el timer Y resuelve la promesa (ver {@link delay}). */
+  private cancelDelay(): void {
+    if (this.sessionRetryTimer) {
+      clearTimeout(this.sessionRetryTimer);
+      this.sessionRetryTimer = null;
+    }
+    const resolve = this.delayResolve;
+    this.delayResolve = null;
+    resolve?.();
   }
 
   /** Con sesión ya obtenida: fija identidad y suscribe el canal. */
   private establish(session: Session): void {
     this.teardownVisibilityRetry();
-    if (this.sessionRetryTimer) {
-      clearTimeout(this.sessionRetryTimer);
-      this.sessionRetryTimer = null;
-    }
+    this.cancelDelay();
     try {
       this.lastSessionError = null; // sesión obtenida: el fallo previo (si hubo) ya no aplica
       this.supabase = getSupabaseBrowserClient();
@@ -777,11 +810,33 @@ export class BiosphereRealtime {
         this.wireGame();
         this.startSweep();
       } else if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
+        // El canal se cayó: el roster de presence que teníamos ya NO es de fiar.
+        // Sin esto, la insignia "General N" del chat se quedaba con el conteo VIEJO
+        // para siempre (mientras los avatares 3D sí se retiraban por el barrido de
+        // 5 s: dos verdades distintas en pantalla) y el guard anti-griefing seguía
+        // aceptando broadcasts de gente que ya no figura en ningún sitio.
+        // Reconexión en caliente: al re-SUBSCRIBED volvemos a `track()` y Supabase
+        // reenvía el estado de presence → el "sync" siguiente repuebla `presentIds`
+        // y vuelve a emitir el roster. La limpieza es TRANSITORIA, no deja el chat
+        // vacío si el canal se recupera.
+        this.clearPresence();
         this.opts.onStatus?.("error");
       }
     });
 
     this.channel = channel;
+  }
+
+  /**
+   * Vacía el roster de presence (los ids del guard anti-griefing + la lista que
+   * pinta la UI). Se usa cuando el canal deja de ser fiable: caída del canal
+   * (CHANNEL_ERROR / TIMED_OUT) y `disconnect()`. Sólo emite si había alguien,
+   * para no provocar un render en balde cuando ya estaba vacío.
+   */
+  private clearPresence(): void {
+    if (this.presentIds.size === 0) return;
+    this.presentIds.clear();
+    this.opts.onRoster?.([]);
   }
 
   private net(): WorldNetHooks | null {
@@ -1012,7 +1067,9 @@ export class BiosphereRealtime {
     this.disposed = true;
     if (this.netRetryTimer) clearTimeout(this.netRetryTimer);
     if (this.gameRetryTimer) clearTimeout(this.gameRetryTimer);
-    if (this.sessionRetryTimer) clearTimeout(this.sessionRetryTimer);
+    // Cancela (resolviendo) la espera del backoff de sesión: si sólo se limpiara
+    // el timer, el `connect()` en vuelo quedaría colgado reteniendo esta instancia.
+    this.cancelDelay();
     this.teardownVisibilityRetry();
     if (this.sweepTimer) clearInterval(this.sweepTimer);
     for (const off of this.netUnsubs) {
@@ -1027,6 +1084,8 @@ export class BiosphereRealtime {
     const net = this.net();
     for (const id of this.lastSeen.keys()) net?.removeRemote(id);
     this.lastSeen.clear();
+    // …y el roster de presence con ellos (ids del guard + insignia del chat).
+    this.clearPresence();
     if (this.channel && this.supabase) {
       void this.supabase.removeChannel(this.channel);
     }

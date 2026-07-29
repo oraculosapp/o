@@ -8,7 +8,7 @@ import type { GetWorld } from "@/lib/world-ui";
 import { RegisterModal } from "@/components/auth/RegisterModal";
 import { useBiosphere } from "./useBiosphere";
 import { OpenChannel } from "./OpenChannel";
-import { PaqoChannel } from "./PaqoChannel";
+import { PaqoChannel, usePaqoConversation } from "./PaqoChannel";
 import styles from "./chat.module.css";
 
 /**
@@ -594,6 +594,18 @@ export function ChatDock({ biosphereId, getWorldNet, getWorld, voiceSlot }: Chat
     getWorldGame: () => getWorld?.()?.game,
   });
 
+  // La conversación con Paqo vive AQUÍ, no dentro de PaqoChannel: ese canal se
+  // desmonta al cambiar de pestaña (General ⇄ Privado) y al colapsar el chat, y
+  // con el estado dentro se perdía el hilo entero (y el SSE quedaba huérfano).
+  // Subiéndolo, el hilo sobrevive a las dos cosas y el stream se corta sólo
+  // cuando muere el dock.
+  const paqo = usePaqoConversation({
+    biosphereId,
+    registered: bio.registered,
+    sessionId: bio.sessionId,
+    accessToken: bio.accessToken,
+  });
+
   if (!configured) {
     return (
       <div className={styles.disabledNote} role="note">
@@ -773,10 +785,8 @@ export function ChatDock({ biosphereId, getWorldNet, getWorld, voiceSlot }: Chat
             />
           ) : (
             <PaqoChannel
-              biosphereId={biosphereId}
+              conversation={paqo}
               registered={bio.registered}
-              sessionId={bio.sessionId}
-              accessToken={bio.accessToken}
               onRegisterClick={() => setShowRegister(true)}
               autoFocusInput={autoFocusInput}
             />

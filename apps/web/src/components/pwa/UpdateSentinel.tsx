@@ -25,11 +25,13 @@ import styles from "./update-sentinel.module.css";
  *     "✨ Nueva versión disponible — Actualizar"; al tocarla, recarga.
  *
  * Ambas recargas pasan por el COORDINADOR común (`reload-coordinator`), que
- * comparte el guardarraíl de partida y un flag anti-bucle con el flujo del SW:
- * si el SW ya va a recargar, el centinela no duplica; si el centinela ya recargó,
- * el SW no vuelve a hacerlo. La recarga silenciosa se pospone mientras haya una
- * partida de ¡Dale a Paqo! en curso; la píldora manual, en cambio, siempre
- * respeta la decisión del usuario (recarga aunque haya partida).
+ * comparte el guardarraíl y un flag anti-bucle con el flujo del SW: si el SW ya
+ * va a recargar, el centinela no duplica; si el centinela ya recargó, el SW no
+ * vuelve a hacerlo. La recarga silenciosa se pospone mientras haya una partida
+ * de ¡Dale a Paqo! en curso, mientras se escribe en el chat o mientras haya una
+ * sesión de VOZ activa (recargar colgaría la llamada), y se reintenta con
+ * backoff hasta que sea seguro. La píldora manual, en cambio, siempre respeta la
+ * decisión del usuario (recarga aunque haya partida, chat o voz).
  *
  * Se monta una vez en el layout raíz. No pinta nada salvo la píldora.
  */
