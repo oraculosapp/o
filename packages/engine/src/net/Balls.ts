@@ -164,11 +164,22 @@ export class Balls {
   /** Índice de la pelota agarrada, o -1 si no llevas ninguna (solo una a la vez). */
   private heldId = -1;
   /**
-   * Marca de tiempo (Date.now, ms) del AGARRE local del balón que llevo (heldId).
+   * Marca de tiempo (epoch-ms) del AGARRE local del balón que llevo (heldId).
    * Es la autoridad del desempate de robos: al llegar un "ball_grab" ajeno gana el
    * `t` más nuevo; si empatan, gana el id lexicográfico menor.
+   *
+   * La lee {@link now}, NO `Date.now()` directamente: con el reloj del servidor
+   * inyectado, dos clientes con dispositivos desfasados comparan contra la misma
+   * referencia. Antes, un reloj adelantado 40 s robaba SIEMPRE y era imposible
+   * robarle (su `t` ganaba todos los desempates).
    */
   private heldGrabT = 0;
+  /**
+   * Reloj de los timestamps que viajan por red. Default `Date.now` (sin red, tests
+   * y QA se comportan como siempre); la capa de red inyecta su `serverNow` con
+   * {@link setNow} en cuanto deriva el offset del servidor.
+   */
+  private now: () => number = Date.now;
   /** Id del jugador local (lo fija la red); sólo para desempatar robos por id. */
   private localId = "";
   /** Acumulador para difundir el balón agarrado a HELD_BROADCAST_HZ (flujo "ball"). */
@@ -200,7 +211,21 @@ export class Balls {
   private _delta = new THREE.Vector3();
   private _tmp = new THREE.Vector3();
 
-  constructor(private field: FieldLike) {}
+  constructor(
+    private field: FieldLike,
+    now?: () => number,
+  ) {
+    if (typeof now === "function") this.now = now;
+  }
+
+  /**
+   * Inyecta el reloj de los timestamps de red (`serverNow` de la capa de red). Si
+   * llega algo que no es función, se queda con el que tenía (degradación: offset 0
+   * = `Date.now`, exactamente el comportamiento anterior al fix).
+   */
+  setNow(now: () => number): void {
+    if (typeof now === "function") this.now = now;
+  }
 
   /** Construye la malla instanciada y esparce las pelotas por el claro. */
   build(): void {
@@ -397,7 +422,8 @@ export class Balls {
 
   /**
    * Suscribe AGARRES locales de balón (para que la red difunda "ball_grab"). Se
-   * emite en TODO agarre (primero o robo) con `(id, t=Date.now())`. Los receptores
+   * emite en TODO agarre (primero o robo) con `(id, t)` en el reloj inyectado
+   * ({@link setNow}: tiempo de servidor con red, `Date.now()` sin ella). Los receptores
    * que llevaban ese balón lo sueltan en silencio si el `t` ajeno es más nuevo.
    */
   onGrab(cb: (id: number, t: number) => void): () => void {
@@ -567,7 +593,7 @@ export class Balls {
     // Autoridad del agarre para el desempate de robos + difusión inmediata: al
     // arrancar el acumulador en un periodo completo, el PRIMER frame ya emite el
     // estado del balón en la mano (evita que los demás lo vean un instante en el piso).
-    this.heldGrabT = Date.now();
+    this.heldGrabT = this.now();
     this.heldBroadcastAcc = 1 / HELD_BROADCAST_HZ;
     if (this.eSprite) this.eSprite.visible = false;
     for (const cb of this.grabCbs) cb(id, this.heldGrabT);

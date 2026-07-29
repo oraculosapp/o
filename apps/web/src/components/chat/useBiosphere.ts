@@ -17,6 +17,7 @@ import {
   mentionsPaqo,
   pickTint,
   storeName,
+  type MentionPaqoOutcome,
 } from "@/lib/oracle-client";
 
 const DEFAULT_NAME = "Viajero";
@@ -36,8 +37,14 @@ export interface UseBiosphere {
    */
   sessionError: SessionErrorInfo | null;
   setName(name: string): void;
-  /** Publica en el chat abierto; si menciona a Paqo, dispara su respuesta pública. */
-  sendPublic(text: string): Promise<void>;
+  /**
+   * Publica en el chat abierto; si menciona a Paqo, dispara su respuesta pública
+   * y ESPERA el desenlace. Resuelve con el `MentionPaqoOutcome` sólo cuando Paqo
+   * se saltó el turno (`ok:false`: cooldown/límite/red) para que la UI pueda
+   * avisar; en cualquier otro caso (sin mención, o mención con `ok:true`)
+   * resuelve `void`.
+   */
+  sendPublic(text: string): Promise<MentionPaqoOutcome | void>;
   /** Reintenta la conexión (botón "Reintentar" del estado de sesión fallida). */
   retryConnect(): void;
 }
@@ -151,7 +158,7 @@ export function useBiosphere(params: {
   }, [afterConnect]);
 
   const sendPublic = useCallback(
-    async (text: string) => {
+    async (text: string): Promise<MentionPaqoOutcome | void> => {
       const rt = rtRef.current;
       if (!rt) return;
       const trimmed = text.trim();
@@ -161,7 +168,12 @@ export function useBiosphere(params: {
 
       if (mentionsPaqo(trimmed)) {
         const id = rt.getIdentity();
-        void mentionPaqoPublic({
+        // Antes esto era `void mentionPaqoPublic(...)`: el desenlace (cooldown/
+        // 429/red) se tragaba en silencio y, si tocaba el cooldown de 10 s, la
+        // mención del viajero simplemente nunca tenía respuesta — parecía que
+        // Paqo lo ignoraba. Ahora ESPERAMOS el desenlace y lo devolvemos cuando
+        // NO es "ok" para que OpenChannel pueda avisar (aviso local, efímero).
+        const outcome = await mentionPaqoPublic({
           biosphereId,
           messages: [{ role: "user", content: trimmed }],
           sessionId: id?.sessionId,
@@ -170,6 +182,7 @@ export function useBiosphere(params: {
           // persona por su nickname en el chat general.
           speakerName: id?.displayName ?? DEFAULT_NAME,
         });
+        if (!outcome.ok) return outcome;
       }
     },
     [biosphereId, pushMessage]

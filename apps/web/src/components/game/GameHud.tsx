@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { serverNow } from "@/lib/realtime";
 import type { GameSnapshotUi, WorldUiHooks } from "@/lib/world-ui";
 import styles from "./game.module.css";
 
@@ -40,7 +41,12 @@ function nameOf(snap: GameSnapshotUi, id: string): string {
  */
 export function GameHud({ getWorld }: GameHudProps) {
   const [snap, setSnap] = useState<GameSnapshotUi>(IDLE_SNAP);
-  const [nowMs, setNowMs] = useState(() => Date.now());
+  // [RELOJES S20] La cuenta atrás se deriva de `endsAt`, que viaja por la red en
+  // TIEMPO DE SERVIDOR: hay que restarlo de la MISMA referencia, no del reloj del
+  // dispositivo. Sin esto, un viajero con el reloj adelantado 40 s vería 0:00
+  // durante los últimos 40 s de una ronda que sigue viva (y al revés si va atrasado).
+  // Sin offset derivado, `serverNow()` es `Date.now()`: misma pantalla de siempre.
+  const [nowMs, setNowMs] = useState(() => serverNow());
 
   // Engancha world.game.onChange en cuanto exista (reintento acotado, como
   // MobileControls: el engine monta world.game tras start()).
@@ -72,8 +78,8 @@ export function GameHud({ getWorld }: GameHudProps) {
   // Ticker de la cuenta atrás sólo mientras corre (deriva de endsAt).
   useEffect(() => {
     if (snap.phase !== "running") return;
-    setNowMs(Date.now());
-    const id = setInterval(() => setNowMs(Date.now()), 250);
+    setNowMs(serverNow());
+    const id = setInterval(() => setNowMs(serverNow()), 250);
     return () => clearInterval(id);
   }, [snap.phase]);
 

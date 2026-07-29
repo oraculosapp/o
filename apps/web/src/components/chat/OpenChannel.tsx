@@ -2,16 +2,27 @@
 
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { BiosphereMessage } from "@/lib/realtime";
+import type { MentionPaqoOutcome } from "@/lib/oracle-client";
 import { MessageRow } from "./MessageRow";
 import { SendIcon } from "./SendIcon";
+import { paqoNoticeCopy, type PaqoNoticeReason } from "./paqo-notice";
 import styles from "./chat.module.css";
+
+/** El aviso local se autooculta solo: no queremos que se quede pegado. */
+const NOTICE_TIMEOUT_MS = 6_000;
 
 export interface OpenChannelProps {
   messages: BiosphereMessage[];
   name: string | null;
   sessionId: string | null;
   onSetName(name: string): void;
-  onSend(text: string): void | Promise<void>;
+  /**
+   * Publica el mensaje. Si menciona a Paqo y él se salta el turno (cooldown/
+   * límite/red), resuelve con el `MentionPaqoOutcome` (`ok:false`) para que
+   * podamos avisar LOCALMENTE (sólo quien envió lo ve); en cualquier otro caso
+   * resuelve `void`.
+   */
+  onSend(text: string): void | Promise<MentionPaqoOutcome | void>;
   /** Al montar (chat abierto con Enter), enfoca el campo de mensaje. */
   autoFocusInput?: boolean;
 }
@@ -21,9 +32,27 @@ export function OpenChannel({ messages, name, sessionId, onSetName, onSend, auto
   const [draft, setDraft] = useState("");
   const [nameDraft, setNameDraft] = useState("");
   const [editingName, setEditingName] = useState(false);
+  // Aviso LOCAL y efímero ("Paqo se saltó el turno…"): sólo lo ve quien
+  // mencionó a Paqo, nunca se difunde. Vive fuera de `messages` a propósito —
+  // no es un eco del canal, así que no debe entrar en la lista ni en el dedupe.
+  const [notice, setNotice] = useState<string | null>(null);
+  const noticeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const listRef = useRef<HTMLUListElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const nearBottom = useRef(true);
+
+  // Limpia el temporizador del aviso al desmontar (cambio de pestaña/dock).
+  useEffect(() => {
+    return () => {
+      if (noticeTimer.current) clearTimeout(noticeTimer.current);
+    };
+  }, []);
+
+  const showNotice = (reason: PaqoNoticeReason) => {
+    if (noticeTimer.current) clearTimeout(noticeTimer.current);
+    setNotice(paqoNoticeCopy(reason));
+    noticeTimer.current = setTimeout(() => setNotice(null), NOTICE_TIMEOUT_MS);
+  };
 
   // Enfoca el campo de mensaje al abrir el chat con Enter (si ya hay nombre).
   useEffect(() => {
@@ -65,7 +94,13 @@ export function OpenChannel({ messages, name, sessionId, onSetName, onSend, auto
       setEditingName(true);
       return;
     }
-    void onSend(text);
+    // `onSend` resuelve con el MentionPaqoOutcome SÓLO cuando Paqo se saltó el
+    // turno (cooldown/límite/red); en cualquier otro caso resuelve `void`, y
+    // `Promise.resolve` cubre igual el caso síncrono (onSend puede no devolver
+    // promesa alguna).
+    void Promise.resolve(onSend(text)).then((outcome) => {
+      if (outcome && !outcome.ok) showNotice(outcome.reason);
+    });
     setDraft("");
     nearBottom.current = true;
   };
@@ -100,6 +135,16 @@ export function OpenChannel({ messages, name, sessionId, onSetName, onSend, auto
             />
           ))}
         </ul>
+      )}
+
+      {/* Aviso LOCAL y efímero: NO es un mensaje difundido (no entra en `messages`
+          ni en la lista/dedupe de arriba), sólo lo ve quien mencionó a Paqo.
+          `role="status"` + auto-ocultado (~6 s) — mismo tono discreto que el
+          estado vacío ("Aún no hay ecos en este claro"). */}
+      {notice && (
+        <p className={styles.notice} role="status">
+          {notice}
+        </p>
       )}
 
       {needsName ? (

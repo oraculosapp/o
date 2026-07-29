@@ -520,6 +520,24 @@
   font-size: 0.8rem;
 }
 
+/* Aviso LOCAL y efímero ("Paqo se saltó el turno…", cooldown/límite/red): sólo
+   lo ve quien mencionó a Paqo, nunca se difunde al canal. Vive FUERA de `.list`
+   (entre la lista y el composer), así que aparecer/ocultarse no reordena ni
+   toca los mensajes reales — mismo tono discreto que `.emptyHint`, en ámbar
+   suave (no es un error, Paqo sólo se tomó un respiro). */
+.notice {
+  flex: 0 0 auto;
+  margin: 0 0.75rem 0.5rem;
+  padding: 0.4rem 0.65rem;
+  border-radius: var(--radius-sm);
+  background: rgba(227, 176, 99, 0.12);
+  border: 1px solid var(--gold-dim);
+  color: var(--text-dim);
+  font-size: 0.8rem;
+  text-align: center;
+  text-shadow: var(--chat-text-shadow);
+}
+
 .row {
   display: flex;
   gap: 0.55rem;

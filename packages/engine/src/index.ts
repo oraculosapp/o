@@ -51,6 +51,13 @@ export { ProceduralLocomotion, type LocomotionQA } from "./avatar/ProceduralLoco
 export { TintController, toToonMaterial, avatarToonRamp, type HueBand } from "./avatar/tint";
 export type { IAvatarRig, AvatarDriveState, TintZone, PropSocket, AvatarConfig } from "./avatar/types";
 
+// ⚠️ CONTRATO DEL PAQUETE: package.json declara `"sideEffects": false` — el
+// bundler puede TIRAR cualquier módulo cuyos exports no se usen. Regla para todo
+// el engine: NADA de código con efectos al importarse (registros globales,
+// side-effects de module scope de los que alguien dependa "importando por
+// importar"). Todo efecto vive dentro de funciones/clases. Esto es lo que
+// permite que la app difiera el motor 3D fuera del primer load (S19f, −193 kB).
+
 // --- Audio procedural (equipo Audio S4): WebAudio 100% sintético, cero archivos ---
 export { Soundscape } from "./audio/Soundscape";
 export { SoundscapeEngine } from "./audio/SoundscapeEngine";

@@ -76,6 +76,12 @@ export type GameEventUi =
 /** Sub-API del mini-juego ¡Dale a Paqo! que consume el HUD (equipo Juego). */
 export interface WorldGameHooks {
   setLocalPlayer?(id: string): void;
+  /**
+   * [RELOJES S20] Inyecta el reloj de la ronda (`serverNow` de la capa de red): el
+   * `endsAt` del mini-juego se compara entre clientes, así que no puede salir del
+   * reloj del DISPOSITIVO. Opcional como el resto: sin él, el engine usa `Date.now`.
+   */
+  setNow?(now: () => number): void;
   /** Fusiona nombres visibles (roster de presencia + eventos) en el marcador. */
   mergeNames?(names: Record<string, string>): void;
   start?(): void;

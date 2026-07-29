@@ -29,7 +29,13 @@ vi.mock("../supabase", () => ({
   getSupabaseBrowserClient: () => getSupabaseBrowserClient(),
 }));
 
-import { BiosphereRealtime, type RosterMember, type WorldNetHooks } from "../realtime";
+import {
+  BiosphereRealtime,
+  serverNow,
+  type RosterMember,
+  type WorldNetHooks,
+} from "../realtime";
+import type { WorldGameHooks } from "../world-ui";
 
 type PresenceMeta = { id: string; display_name: string; tint?: string; archetype?: string };
 
@@ -199,6 +205,65 @@ describe("BiosphereRealtime — roster de presence", () => {
 
     rt.disconnect();
     expect(rosters.at(-1)).toEqual([]);
+  });
+});
+
+/**
+ * RELOJES (S20) — los timestamps que se comparan entre clientes (agarres de balón y
+ * el `endsAt` de la ronda) no pueden salir del reloj del DISPOSITIVO. Al enganchar
+ * el mundo, la red inyecta su `serverNow` en AMBOS subsistemas. Se inyecta la
+ * FUNCIÓN (no un número) para que un offset derivado más tarde se aplique solo.
+ */
+describe("BiosphereRealtime — inyección del reloj de servidor", () => {
+  it("pasa serverNow al world.net y al mini-juego al enganchar", async () => {
+    ensureAnonSession.mockResolvedValue(fakeSession());
+    const { net } = fakeNet();
+    const setNow = vi.fn();
+    const gameSetNow = vi.fn();
+    const netWithClock: WorldNetHooks = { ...net, setNow };
+    const game: WorldGameHooks = {
+      setLocalPlayer: vi.fn(),
+      mergeNames: vi.fn(),
+      setNow: gameSetNow,
+      onLocalEvent: () => () => {},
+    };
+
+    const rt = new BiosphereRealtime({
+      biosphereId: "paqo",
+      displayName: "Julio",
+      tint: "#fff",
+      getWorldNet: () => netWithClock,
+      getWorldGame: () => game,
+    });
+
+    await rt.connect();
+    channels[0].statusCb?.("SUBSCRIBED");
+
+    expect(setNow).toHaveBeenCalledTimes(1);
+    expect(gameSetNow).toHaveBeenCalledTimes(1);
+    // Es la MISMA función que expone el módulo (lee el offset vigente en cada tick).
+    expect(setNow.mock.calls[0][0]).toBe(serverNow);
+    expect(gameSetNow.mock.calls[0][0]).toBe(serverNow);
+    // Y sin offset derivado (tests: sin Supabase configurado) es Date.now() puro.
+    expect(Math.abs((setNow.mock.calls[0][0] as () => number)() - Date.now())).toBeLessThan(50);
+
+    rt.disconnect();
+  });
+
+  it("degrada con gracia si el engine no expone setNow (contrato opcional)", async () => {
+    ensureAnonSession.mockResolvedValue(fakeSession());
+    const { net } = fakeNet(); // sin setNow
+
+    const rt = new BiosphereRealtime({
+      biosphereId: "paqo",
+      displayName: "Julio",
+      tint: "#fff",
+      getWorldNet: () => net,
+    });
+
+    await rt.connect();
+    expect(() => channels[0].statusCb?.("SUBSCRIBED")).not.toThrow();
+    rt.disconnect();
   });
 });
 

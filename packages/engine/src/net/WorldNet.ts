@@ -64,7 +64,7 @@ export class WorldNet implements WorldNetHooks {
   constructor(private deps: WorldNetDeps) {
     // [VUELO/ESTELA] La estela compartida (si la hay) llega a los remotos vía pool.
     this.remotes = new RemotePlayers(deps.scene, deps.motionTrail);
-    this.balls = new Balls(deps.field);
+    this.balls = new Balls(deps.field, deps.now);
     this.zones = new ZoneSignals(0, 0);
   }
 
@@ -128,6 +128,17 @@ export class WorldNet implements WorldNetHooks {
 
   setLocalId(id: string): void {
     this.balls.setLocalId(id);
+  }
+
+  /**
+   * [RELOJES S20] Inyecta el reloj de red (`serverNow`) en los subsistemas que
+   * emiten/comparan timestamps difundidos — hoy, el desempate de robos de balón.
+   * La red lo llama al enganchar el mundo, tras derivar el offset del servidor;
+   * como recibe una FUNCIÓN (no un número), un offset que se resuelva más tarde
+   * se aplica solo, sin re-inyectar nada.
+   */
+  setNow(now: () => number): void {
+    this.balls.setNow(now);
   }
 
   /**

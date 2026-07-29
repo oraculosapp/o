@@ -2,8 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import dynamic from "next/dynamic";
-import { PaqoWorld, type BiospherePreset, type AvatarConfig } from "@phygitalia/engine";
-import paqo from "@phygitalia/content/biospheres/paqo.json";
+import type { PaqoWorld, BiospherePreset, AvatarConfig } from "@phygitalia/engine";
 import { ChatDock } from "@/components/chat/ChatDock";
 import { ChatMenuButton } from "@/components/chat/ChatMenuButton";
 import { HintToasts } from "@/components/hints/HintToasts";
@@ -30,6 +29,23 @@ import type { WorldUiHooks } from "@/lib/world-ui";
 import styles from "./paqo.module.css";
 
 const BIOSPHERE_ID = "paqo";
+
+/**
+ * EL MOTOR VIAJA APARTE (ciclo 6, presupuesto de bundle de la RAÍZ).
+ *
+ * three + el engine + sus loaders + postprocessing eran el 92% del First Load JS
+ * de "/" (~266 kB gz). Lo ÚNICO que ataba ese chunk al primer load era el `import`
+ * de valor de `PaqoWorld` y el del preset: los `import type` se borran al compilar,
+ * así que arriba sólo quedan tipos y el motor entra por `await import()` DENTRO del
+ * efecto de montaje (ver más abajo). Resultado: el HTML, el CSS y el HUD (chat,
+ * menú, loader) llegan y pintan sin esperar al megabyte del mundo, que se pide en
+ * paralelo justo después de hidratar.
+ *
+ * Regla para quien toque este archivo: cualquier símbolo de `@phygitalia/engine`
+ * que se necesite en tiempo de EJECUCIÓN debe pedirse dentro de ese `await import`.
+ * Si vuelve a aparecer arriba un `import` de valor (sin `type`), el chunk entero
+ * regresa al primer load y el ahorro se pierde en silencio.
+ */
 
 /**
  * CARGA BAJO DEMANDA (ciclo 3, presupuesto de bundle de la RAÍZ).
@@ -118,6 +134,28 @@ export default function Home() {
     ...worldConfigFromSelection(sel),
   }), []);
 
+  /**
+   * MONTAJE DEL MUNDO. El efecto es SÍNCRONO por fuera (React nunca recibe una
+   * promesa) pero el motor entra por `await import()`, así que entre el montaje y
+   * el `new PaqoWorld` hay una ventana en la que el componente puede morir
+   * (navegación rápida, doble montaje de StrictMode, recarga en caliente).
+   * De ahí el patrón `cancelled`:
+   *
+   *   · lo primero tras el `await` es comprobarlo: si el componente ya murió NO se
+   *     instancia nada — no hay WebGL huérfano, ni bucle rAF, ni el global
+   *     `__PAQO__` apuntando a un mundo fantasma;
+   *   · si SÍ llegó a instanciarse, el cleanup lo encuentra por `worldRef` y hace
+   *     el dispose de siempre (por eso el cleanup lee la ref, no una variable
+   *     local: cuando se ejecuta puede que el `world` aún no exista);
+   *   · el callback de `ready` también lo mira, para no llamar a `setReady` sobre
+   *     un componente desmontado.
+   *
+   * Lo que NO cambia: el loader "CARGANDO" depende sólo de `ready`, así que ahora
+   * cubre además la descarga del chunk (que es justo lo que quieres que cubra), y
+   * `getWorld`/`getWorldNet` siguen leyendo `worldRef` con optional chaining, así
+   * que el HUD degrada con gracia durante esos milisegundos igual que degradaba
+   * antes mientras el engine aún no publicaba `world.net`.
+   */
   useEffect(() => {
     const el = mountRef.current;
     if (!el) return;
@@ -129,20 +167,43 @@ export default function Home() {
 
     const avatarConfig: AvatarConfig = buildAvatarConfig(sel);
 
-    // El JSON completo del preset satisface el subconjunto BiospherePreset.
-    const world = new PaqoWorld(
-      el,
-      paqo as unknown as BiospherePreset,
-      () => setReady(true),
-      avatarConfig,
-    );
-    worldRef.current = world;
-    world.start();
+    let cancelled = false;
 
-    // Click/tap sobre TU PROPIO avatar → menú de emotes (FASE 2).
-    world.onAvatarClick(() => setEmoteOpen(true));
+    void (async () => {
+      // Motor y preset viajan juntos y EN PARALELO: el preset es diminuto (~2 kB)
+      // pero es el par natural del motor, y pedirlos a la vez evita encadenar dos
+      // esperas de red.
+      const [{ PaqoWorld }, preset] = await Promise.all([
+        import("@phygitalia/engine"),
+        import("@phygitalia/content/biospheres/paqo.json"),
+      ]);
+      if (cancelled) return;
+
+      // El JSON completo del preset satisface el subconjunto BiospherePreset.
+      const world = new PaqoWorld(
+        el,
+        preset.default as unknown as BiospherePreset,
+        () => {
+          if (!cancelled) setReady(true);
+        },
+        avatarConfig,
+      );
+      worldRef.current = world;
+      world.start();
+
+      // Click/tap sobre TU PROPIO avatar → menú de emotes (FASE 2).
+      world.onAvatarClick(() => setEmoteOpen(true));
+    })().catch((err) => {
+      // Chunk que no llega (red caída, despliegue nuevo con hashes rotados): el
+      // mundo no arranca y el loader se queda puesto, que es la degradación
+      // honesta. Se registra para no tragarse el fallo en silencio.
+      console.error("[paqo] no se pudo cargar el motor", err);
+    });
 
     return () => {
+      cancelled = true;
+      const world = worldRef.current;
+      if (!world) return; // el chunk aún no había llegado: no hay nada que soltar
       world.onAvatarClick(null);
       worldRef.current = null;
       world.dispose();

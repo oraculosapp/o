@@ -45,6 +45,13 @@ export interface BallGameHooks {
   getTotem: () => THREE.Group | null;
   /** Reproduce un sonido del juego (impacto/inicio/fin) → Soundscape. */
   onSound: (kind: "hit" | "start" | "end") => void;
+  /**
+   * Reloj del RELOJ DE RONDA (`endsAt`, adopción por beacon, fin de ronda y ventana
+   * de resultados). Default `Date.now`. La capa de red inyecta su `serverNow` con
+   * {@link BallGame.setNow} en cuanto deriva el offset del servidor; este campo
+   * existe para quien pueda darlo ya construido (tests, QA).
+   */
+  now?: () => number;
 }
 
 /** Duración de una ronda (ms): 3 minutos. */
@@ -121,6 +128,19 @@ export class BallGame {
   private localId = "local";
   private resultsUntil = 0;
 
+  /**
+   * [RELOJES S20] Reloj de la ronda. Default `Date.now`; la red inyecta `serverNow`
+   * (Date.now + offset del servidor) con {@link setNow}.
+   *
+   * EL BUG QUE ARREGLA: `endsAt` viajaba por el canal como epoch-ms del reloj del
+   * EMISOR y cada receptor lo comparaba con SU `Date.now()`. Un dispositivo con el
+   * reloj adelantado >3 min descartaba el beacon de estado en `mergeState`
+   * (`endsAt` ya "pasado" para él): nunca adoptaba la ronda, se quedaba en idle
+   * perpetuo mientras iba fusionando puntuaciones de una partida que para él no
+   * existía. Con el reloj atrasado, al revés: cerraba tarde y seguía puntuando.
+   */
+  private now: () => number = Date.now;
+
   private beaconAcc = 0;
   private nextBeacon = this.pickBeacon();
 
@@ -146,6 +166,7 @@ export class BallGame {
   private _size = new THREE.Vector3();
 
   constructor(private hooks: BallGameHooks) {
+    if (typeof hooks.now === "function") this.now = hooks.now;
     // Poof de "materialización" cuando una pelota respawnea por salir de la zona.
     // Los golpes ("hit") ya disparan su FX en la ruta de impacto, así que aquí sólo
     // reaccionamos a "out" (y damos a onRespawn un consumidor de FX real).
@@ -155,6 +176,17 @@ export class BallGame {
   }
 
   // ---- API pública ----------------------------------------------------------
+
+  /**
+   * [RELOJES S20] Inyecta el reloj de la ronda (el `serverNow` de la capa de red).
+   * Recibe una FUNCIÓN, así que un offset que se derive más tarde (el HEAD a
+   * Supabase resuelve unos ms después de conectar) se aplica solo. Si llega algo que
+   * no es función se conserva el actual: degradación = `Date.now` (comportamiento
+   * anterior al fix, nunca peor).
+   */
+  setNow(now: () => number): void {
+    if (typeof now === "function") this.now = now;
+  }
 
   /** Fija el id del jugador local (se usa para puntuar y emitir eventos). */
   setLocalPlayer(id: string): void {
@@ -182,7 +214,7 @@ export class BallGame {
   /** Inicia la partida local y emite el evento "start". Cualquiera puede (sin permisos). */
   start(): void {
     if (this.phase !== "idle" && this.phase !== "results") return;
-    const endsAt = Date.now() + ROUND_MS;
+    const endsAt = this.now() + ROUND_MS;
     this.enterRunning(endsAt, this.localId);
     this.emit({ type: "start", by: this.localId, endsAt });
     this.hooks.onSound("start");
@@ -279,7 +311,7 @@ export class BallGame {
       }
     }
 
-    const now = Date.now();
+    const now = this.now();
     if (this.phase === "running") {
       this.beaconAcc += dt;
       if (this.beaconAcc >= this.nextBeacon) {
@@ -314,7 +346,7 @@ export class BallGame {
   private enterResults(): void {
     this.phase = "results";
     this.winnerIds = this.computeWinners();
-    this.resultsUntil = Date.now() + RESULTS_MS;
+    this.resultsUntil = this.now() + RESULTS_MS;
     this.hooks.onSound("end");
     this.notifyChange();
   }
@@ -332,7 +364,9 @@ export class BallGame {
   private mergeState(e: Extract<GameEvent, { type: "state" }>): void {
     if (this.phase !== "running") {
       // Late-join: adopta la partida en curso SIN borrar puntuaciones (se fusionan).
-      if (e.endsAt > Date.now()) {
+      // Contra el reloj INYECTADO (server-now): con `Date.now()` a secas, un
+      // dispositivo adelantado minutos no adoptaba NUNCA la ronda en curso.
+      if (e.endsAt > this.now()) {
         this.phase = "running";
         this.endsAt = e.endsAt;
         this.startedBy = e.startedBy;

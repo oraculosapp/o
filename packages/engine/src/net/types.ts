@@ -40,6 +40,14 @@ export interface WorldNetHooks {
   applyBallGrab(ballId: number, by: string, t: number): void;
   /** Fija el id del jugador local (para desempatar robos por id lexicográfico). */
   setLocalId(id: string): void;
+  /**
+   * Inyecta el RELOJ que el motor usa para los timestamps que viajan por red
+   * (agarres de balón, y de rebote el desempate de robos). La capa de red pasa su
+   * `serverNow()` (Date.now + offset derivado del servidor) para que dos clientes
+   * con relojes de dispositivo desfasados comparen contra la MISMA referencia.
+   * Sin llamada, el motor usa `Date.now` (comportamiento local de siempre).
+   */
+  setNow(now: () => number): void;
   /** Suscribe cambios de zona respecto al tótem. Unsub fn. */
   onZoneSignal(cb: (signal: ZoneSignal) => void): () => void;
   // ---- DIBUJAR (equipo Vuelo/Mandos): difusión de trazos por la red ----
@@ -112,13 +120,30 @@ export interface RemoteState {
  * el "doble portador" si se pierde el evento único `ball_grab` (fire-and-forget).
  * Los clientes viejos los ignoran al emitir y al recibir; los nuevos toleran su
  * ausencia (sin ellos el flujo "ball" se comporta exactamente como antes).
+ *
+ * ---- RELOJ DEL PROTOCOLO (S20, equipo Relojes) ----
+ * `grabT` (y `GameEvent.endsAt`) son epoch-ms de TIEMPO DE SERVIDOR APROXIMADO
+ * cuando la capa de red inyectó su reloj con {@link WorldNetHooks.setNow}; si no lo
+ * hizo (motor sin red, tests, QA) son el `Date.now()` del dispositivo, como siempre.
+ *
+ * COMPATIBILIDAD con clientes viejos (que no corrigen su reloj): un cliente nuevo
+ * emite tiempo de servidor y compara contra tiempo de servidor; un cliente viejo
+ * emite y compara contra su `Date.now()` local. El SESGO de un intercambio mixto
+ * queda ACOTADO por el desfase del reloj del cliente VIEJO — exactamente el mismo
+ * error que ya existía hoy entre dos clientes viejos, nunca mayor. Es decir: el
+ * cambio no empeora ninguna combinación y arregla del todo la de dos clientes
+ * nuevos. Por eso no hace falta versionar el sobre ni añadir campos: el formato en
+ * el cable es idéntico (números epoch-ms), sólo mejora su procedencia.
  */
 export interface BallState {
   pos: Vec3;
   vel: Vec3;
   /** Id del jugador que la lleva en la mano al emitir (ausente si nadie la lleva). */
   heldBy?: string;
-  /** `Date.now()` del agarre de `heldBy` (autoridad del desempate de robos). */
+  /**
+   * Epoch-ms del agarre de `heldBy` (autoridad del desempate de robos). En tiempo
+   * de SERVIDOR aproximado si la red inyectó su reloj (ver nota de arriba).
+   */
   grabT?: number;
 }
 
@@ -151,6 +176,13 @@ export interface WorldNetDeps {
    * call). Opcional: sin ella, los remotos simplemente no dejan estela.
    */
   motionTrail?: MotionEmitter;
+  /**
+   * Reloj para los timestamps que viajan por red. Default `Date.now`. La red lo
+   * suele inyectar DESPUÉS (ver {@link WorldNetHooks.setNow}), porque el offset de
+   * servidor se deriva al conectar; este campo existe para quien pueda darlo ya
+   * construido (tests, QA, integraciones sin `setNow`).
+   */
+  now?: () => number;
 }
 
 /** Emisor de estela de partículas (subconjunto de MotionTrail que usa la red). */
@@ -168,7 +200,13 @@ export interface FieldLike {
   readonly clearLevel: number;
 }
 
-/** Eventos del mini-juego ¡Dale a Paqo! difundidos por el canal de la biósfera. */
+/**
+ * Eventos del mini-juego ¡Dale a Paqo! difundidos por el canal de la biósfera.
+ * `endsAt` es epoch-ms en TIEMPO DE SERVIDOR aproximado cuando la red inyectó su
+ * reloj en el juego (`BallGame.setNow`); si no, el `Date.now()` del dispositivo.
+ * Ver la nota de compatibilidad en {@link BallState}: el formato del sobre no
+ * cambia, sólo la procedencia del número.
+ */
 export type GameEvent =
   | { type: "start"; by: string; endsAt: number }
   | { type: "stop"; by: string }

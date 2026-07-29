@@ -73,6 +73,12 @@ export interface WorldNetHooks {
   applyBallGrab?(ballId: number, by: string, t: number): void;
   /** Fija el id del jugador local (desempate de robos por id). */
   setLocalId?(id: string): void;
+  /**
+   * [RELOJES S20] Inyecta el reloj de red del engine (`serverNow`): los timestamps
+   * que viajan por el canal (agarres de balón) dejan de salir del reloj del
+   * DISPOSITIVO. Opcional: si el engine no lo expone, sigue usando `Date.now`.
+   */
+  setNow?(now: () => number): void;
   onZoneSignal(cb: (signal: "far" | "mid" | "near" | "found") => void): () => void;
   /**
    * EMOTES (equipo Avatar). Opcionales (`?`) para degradar con gracia si el engine
@@ -214,6 +220,133 @@ function safeArchetype(id: string | undefined): string | undefined {
 /** ¿Están las env vars públicas de Supabase presentes? (decide si hay chat). */
 export function isSupabaseConfigured(): boolean {
   return Boolean(process.env.NEXT_PUBLIC_SUPABASE_URL && process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY);
+}
+
+// --- RELOJ DE SERVIDOR (S20 — equipo Relojes) --------------------------------
+/**
+ * OFFSET DE SERVIDOR compartido por toda la app.
+ *
+ * EL PROBLEMA: varios acuerdos del multijugador se dirimen comparando epoch-ms que
+ * viajan por el canal contra el reloj LOCAL: el desempate de robos de balón
+ * (`Balls.heldGrabT` vs el `t` del "ball_grab" ajeno) y el reloj de ronda del
+ * mini-juego (`endsAt`, la adopción de ronda por beacon y el fin de ronda). Con el
+ * reloj del dispositivo, un viajero adelantado 40 s ROBA SIEMPRE y es imposible
+ * robarle; adelantado más de la ronda (3 min) no adopta nunca la partida en curso
+ * (idle perpetuo con puntuaciones que igual va fusionando). Nada de esto es culpa
+ * del jugador: los relojes de móvil/PC se van solos.
+ *
+ * LA CORRECCIÓN: al conectar derivamos UNA vez el desfase contra el servidor de
+ * Supabase y exponemos {@link serverNow} (= `Date.now() + offset`), que la capa de
+ * red inyecta en el engine. No buscamos precisión de milisegundos —corregimos
+ * DESFASES DE DECENAS DE SEGUNDOS—, así que medio RTT de error sobra y nos basta la
+ * cabecera `Date` de una respuesta HTTP (PostgREST la expone por CORS en
+ * `Access-Control-Expose-Headers`).
+ *
+ * DEGRADACIÓN: si la derivación falla (red, cabecera no legible, RTT absurdo), el
+ * offset se queda en 0 → `serverNow() === Date.now()`, exactamente el
+ * comportamiento de siempre, y se REINTENTA de forma perezosa en la próxima
+ * conexión (`establish`). Nunca bloquea la conexión: se lanza en paralelo y, como
+ * lo que se inyecta es una FUNCIÓN, el offset que llegue tarde se aplica solo.
+ */
+let serverOffsetMs = 0;
+/** ¿Ya tenemos una muestra buena? (si no, la próxima conexión reintenta). */
+let clockSynced = false;
+/** Derivación en vuelo (dedup: dos `connect()` seguidos no hacen dos fetch). */
+let clockSyncInFlight: Promise<void> | null = null;
+
+/**
+ * La cabecera `Date` tiene resolución de SEGUNDO (truncada), así que el instante
+ * real está en [D, D+1000): sumamos medio segundo para centrar la estimación.
+ */
+const DATE_HEADER_BIAS_MS = 500;
+/** Muestra descartada por encima de este RTT (red pésima → estimación mala). */
+const MAX_CLOCK_RTT_MS = 8_000;
+/** Offset por encima de esto = disparate (cabecera rara): se descarta. */
+const MAX_CLOCK_OFFSET_MS = 12 * 60 * 60 * 1_000; // 12 h
+
+/**
+ * "Ahora" en TIEMPO DE SERVIDOR aproximado (epoch ms). Es lo que la app inyecta en
+ * el engine para todo lo que se compare entre clientes. Sin offset derivado
+ * devuelve `Date.now()` tal cual (degradación silenciosa).
+ */
+export function serverNow(): number {
+  return Date.now() + serverOffsetMs;
+}
+
+/** Desfase estimado (ms) del reloj del dispositivo respecto al servidor. QA/tests. */
+export function getServerOffsetMs(): number {
+  return serverOffsetMs;
+}
+
+/** ¿La derivación del offset tuvo éxito? (false ⇒ estamos en `Date.now()` puro). */
+export function isServerClockSynced(): boolean {
+  return clockSynced;
+}
+
+/** Olvida el offset derivado (tests, y por si alguna vez hay que forzar re-sync). */
+export function resetServerClock(): void {
+  serverOffsetMs = 0;
+  clockSynced = false;
+  clockSyncInFlight = null;
+}
+
+/**
+ * Deriva el offset si aún no lo tenemos. Idempotente y deduplicada: llamarla en
+ * cada `establish()` sólo dispara UN fetch mientras no haya éxito.
+ */
+export function ensureServerClock(): Promise<void> {
+  if (clockSynced) return Promise.resolve();
+  if (clockSyncInFlight) return clockSyncInFlight;
+  const p = syncServerClock().finally(() => {
+    if (clockSyncInFlight === p) clockSyncInFlight = null;
+  });
+  clockSyncInFlight = p;
+  return p;
+}
+
+/**
+ * Un HEAD al endpoint REST de Supabase con la anon key: de la respuesta sólo nos
+ * interesa la cabecera `Date`. `offset = servidor − punto medio del RTT`.
+ */
+async function syncServerClock(): Promise<void> {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  // Sin Supabase configurado (o sin fetch: SSR raro/entorno de test) no hay reloj
+  // que derivar; nos quedamos en Date.now() sin ruido en consola.
+  if (!url || !anonKey || typeof fetch !== "function") return;
+  try {
+    const t0 = Date.now();
+    const res = await fetch(`${url.replace(/\/+$/, "")}/rest/v1/`, {
+      method: "HEAD",
+      cache: "no-store",
+      headers: { apikey: anonKey },
+    });
+    const t1 = Date.now();
+    // Aunque el status no sea 2xx, la cabecera `Date` de esa respuesta sirve igual:
+    // la puso el servidor al responder, que es justo lo que queremos medir.
+    const header = res?.headers?.get?.("date");
+    if (!header) {
+      console.warn("[realtime] sin cabecera Date en la respuesta: reloj sin corregir (offset 0)");
+      return;
+    }
+    const serverMs = Date.parse(header);
+    if (!Number.isFinite(serverMs)) return;
+    const rtt = t1 - t0;
+    if (rtt > MAX_CLOCK_RTT_MS) return; // muestra mala: reintento en la próxima conexión
+    const offset = serverMs + DATE_HEADER_BIAS_MS - (t0 + t1) / 2;
+    if (!Number.isFinite(offset) || Math.abs(offset) > MAX_CLOCK_OFFSET_MS) return;
+    serverOffsetMs = offset;
+    clockSynced = true;
+    // Sólo hacemos ruido si el desfase es de los que rompen el juego (>5 s).
+    if (Math.abs(offset) > 5_000) {
+      console.warn(
+        `[realtime] reloj del dispositivo desfasado ${Math.round(offset / 1000)} s ` +
+          "respecto al servidor: corregido para robos de balón y ronda del mini-juego."
+      );
+    }
+  } catch (err) {
+    console.warn("[realtime] no se pudo derivar el reloj del servidor (offset 0):", err);
+  }
 }
 
 // --- Diagnóstico de la causa del fallo de sesión -----------------------------
@@ -599,6 +732,9 @@ export class BiosphereRealtime {
     try {
       this.lastSessionError = null; // sesión obtenida: el fallo previo (si hubo) ya no aplica
       this.supabase = getSupabaseBrowserClient();
+      // [RELOJES S20] Deriva el offset de servidor EN PARALELO (no bloquea el canal).
+      // Si falló en un intento anterior, esta reconexión lo reintenta (perezoso).
+      void ensureServerClock();
       const user = session.user;
       this.identity = {
         sessionId: user.id,
@@ -861,6 +997,10 @@ export class BiosphereRealtime {
 
     // Identidad local para el desempate de robos (id lexicográfico menor gana empate).
     if (this.identity) net.setLocalId?.(this.identity.sessionId);
+    // [RELOJES S20] …y el RELOJ con el que se sellan esos agarres: `serverNow` en vez
+    // del `Date.now()` del dispositivo. Va la función, no el número: si el offset se
+    // deriva unos ms más tarde, el engine lo recoge sin re-inyectar nada.
+    net.setNow?.(serverNow);
 
     // Emite mi estado a 10 Hz por broadcast.
     const stopTick = net.onLocalTick((s) => {
@@ -968,6 +1108,10 @@ export class BiosphereRealtime {
     this.gameWired = true;
 
     game.setLocalPlayer?.(me.sessionId);
+    // [RELOJES S20] El reloj de la RONDA también en tiempo de servidor: `endsAt`, la
+    // adopción de la partida por beacon y el cierre de ronda dejan de depender del
+    // reloj del dispositivo (antes: adelantado >3 min = idle perpetuo).
+    game.setNow?.(serverNow);
     // Siembra mi propio nombre para que el marcador me muestre bien desde el primer
     // frame (el resto del roster llega por presence sync → mergeNames).
     game.mergeNames?.({ [me.sessionId]: me.displayName });

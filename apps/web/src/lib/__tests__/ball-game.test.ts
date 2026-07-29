@@ -315,6 +315,80 @@ describe("BallGame — el marcador se congela con los ganadores", () => {
 });
 
 /**
+ * RELOJES (S20) — el reloj de ronda (`endsAt`, adopción por beacon, fin de ronda y
+ * ventana de resultados) usaba `Date.now()`: el reloj del DISPOSITIVO, que cada
+ * cliente tiene un poco (o un mucho) desfasado. Ahora es inyectable y la capa de red
+ * le pasa su `serverNow`. Aquí, la inyección; los escenarios de desfase entre dos
+ * clientes viven en clock-skew.test.ts.
+ */
+describe("BallGame — reloj de ronda inyectable", () => {
+  /** Juego con reloj propio (sin tótem: aquí sólo nos importa la máquina de fases). */
+  function gameWithClock(now: () => number): BallGame {
+    return new BallGame({
+      scene: new THREE.Scene(),
+      balls: new MockBalls() as unknown as never,
+      field: {} as never,
+      getTotem: () => null,
+      onSound: () => {},
+      now,
+    });
+  }
+
+  it("el reloj del constructor gobierna endsAt, el fin de ronda y los resultados", () => {
+    let t = 10_000;
+    const game = gameWithClock(() => t);
+    game.setLocalPlayer("me");
+    game.start();
+    expect(game.snapshot().endsAt).toBe(10_000 + 180_000);
+
+    t = 10_000 + 179_000;
+    game.update(0.016);
+    expect(game.snapshot().phase).toBe("running"); // aún queda 1 s
+
+    t = 10_000 + 180_001;
+    game.update(0.016);
+    expect(game.snapshot().phase).toBe("results");
+
+    t += 8_001;
+    game.update(0.016);
+    expect(game.snapshot().phase).toBe("idle");
+  });
+
+  it("setNow() lo cambia en caliente (la red lo llama al enganchar el mundo)", () => {
+    const { game } = makeGame();
+    let t = 50_000;
+    game.setNow(() => t);
+    game.start();
+    expect(game.snapshot().endsAt).toBe(50_000 + 180_000);
+  });
+
+  it("DEGRADACIÓN: un reloj inválido deja el anterior (Date.now por defecto)", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(3_000);
+    const { game } = makeGame();
+    game.setNow(undefined as never);
+    game.start();
+    expect(game.snapshot().endsAt).toBe(3_000 + 180_000);
+  });
+
+  it("la adopción por beacon compara contra el reloj INYECTADO, no contra Date.now()", () => {
+    vi.useFakeTimers();
+    // El dispositivo va 10 min adelantado respecto al servidor…
+    vi.setSystemTime(1_000_000 + 600_000);
+    // …pero el reloj inyectado (serverNow) marca la hora buena.
+    const game = gameWithClock(() => 1_000_000);
+    game.applyRemote({
+      type: "state",
+      endsAt: 1_000_000 + 60_000, // queda 1 min de ronda en hora de servidor
+      scores: { anfitrion: 2 },
+      startedBy: "anfitrion",
+    });
+    expect(game.snapshot().phase).toBe("running"); // antes: idle perpetuo
+    expect(game.snapshot().scores).toEqual({ anfitrion: 2 });
+  });
+});
+
+/**
  * FIX-RED #6 — sin ronda activa, una pelota atribuida al local y tangente a la base
  * de Paqo re-entraba en el cilindro cada frame: chispas + deflect + vel.y+=0.4 a
  * 60 Hz durante los 4 s de la ventana de atribución. El epsilon de `Balls.deflect`

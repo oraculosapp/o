@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import * as THREE from "three";
 import { Balls, WorldNet } from "@phygitalia/engine";
 
@@ -308,6 +308,63 @@ describe("Balls — auto-cura del doble portador por el flujo 'ball'", () => {
 });
 
 /**
+ * RELOJES (S20) — `heldGrabT` (la autoridad del desempate de robos) salía de
+ * `Date.now()`: el reloj del DISPOSITIVO. Ahora sale de un reloj INYECTABLE que la
+ * capa de red rellena con su `serverNow` (Date.now + offset del servidor). Aquí, la
+ * inyección en sí; los escenarios de dos clientes desfasados, en clock-skew.test.ts.
+ */
+describe("Balls — reloj inyectable de los timestamps de red", () => {
+  it("por defecto (sin inyectar) sella los agarres con Date.now()", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(1_234_000);
+    const balls = new Balls(flatField as never);
+    balls.build();
+    balls.setLocalId("me");
+    balls.grab(0);
+    expect(balls.stateOf(0).grabT).toBe(1_234_000);
+    vi.useRealTimers();
+  });
+
+  it("el reloj del CONSTRUCTOR gobierna grabT y el `t` de onGrab", () => {
+    const balls = new Balls(flatField as never, () => 777_000);
+    balls.build();
+    balls.setLocalId("me");
+    const ts: number[] = [];
+    balls.onGrab((_id, t) => ts.push(t));
+    balls.grab(0);
+    expect(ts).toEqual([777_000]);
+    expect(balls.stateOf(0).grabT).toBe(777_000);
+  });
+
+  it("setNow() (lo llama la red al derivar el offset) reemplaza el reloj en caliente", () => {
+    const balls = new Balls(flatField as never);
+    balls.build();
+    balls.setLocalId("me");
+    let serverNow = 500_000;
+    balls.setNow(() => serverNow);
+    balls.grab(0);
+    expect(balls.stateOf(0).grabT).toBe(500_000);
+    // Se inyecta una FUNCIÓN: un offset que se derive más tarde se aplica solo.
+    serverNow = 900_000;
+    balls.throwBall(new THREE.Vector3(0, 0, -1), new THREE.Vector3());
+    balls.grab(1);
+    expect(balls.stateOf(1).grabT).toBe(900_000);
+  });
+
+  it("DEGRADACIÓN: un reloj inválido no rompe nada (se queda con el anterior)", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(4_242_000);
+    const balls = new Balls(flatField as never);
+    balls.build();
+    balls.setLocalId("me");
+    balls.setNow(undefined as never);
+    balls.grab(0);
+    expect(balls.stateOf(0).grabT).toBe(4_242_000); // Date.now, como siempre
+    vi.useRealTimers();
+  });
+});
+
+/**
  * FIX-RED #6 (lado Balls) — `deflect` dejaba la pelota EXACTAMENTE en `radius`, y el
  * test de impacto del mini-juego es inclusivo (<=): tangente a la base de Paqo,
  * volvía a "golpear" cada frame. Ahora sale con epsilon, estrictamente fuera.
@@ -352,6 +409,40 @@ describe("Balls / WorldNet — limpieza e idempotencia", () => {
     net.start(); // doble montaje (StrictMode / remonte del mundo)
     expect(net.ballsSystem.count).toBe(9);
     expect(scene.children.length).toBe(children);
+    net.dispose();
+  });
+
+  it("WorldNet.setNow() llega hasta las pelotas (es el camino que usa la red)", () => {
+    const net = new WorldNet({
+      scene: new THREE.Scene(),
+      camera: new THREE.PerspectiveCamera(),
+      playerPosition: new THREE.Vector3(),
+      playerForward: (out?: THREE.Vector3) => (out ?? new THREE.Vector3()).set(0, 0, -1),
+      playerGrounded: () => true,
+      field: flatField as never,
+    });
+    net.start();
+    net.setLocalId("me");
+    net.setNow(() => 321_000);
+    net.ballsSystem.grab(0);
+    expect(net.ballsSystem.stateOf(0).grabT).toBe(321_000);
+    net.dispose();
+  });
+
+  it("WorldNet acepta el reloj también por deps (construcción directa)", () => {
+    const net = new WorldNet({
+      scene: new THREE.Scene(),
+      camera: new THREE.PerspectiveCamera(),
+      playerPosition: new THREE.Vector3(),
+      playerForward: (out?: THREE.Vector3) => (out ?? new THREE.Vector3()).set(0, 0, -1),
+      playerGrounded: () => true,
+      field: flatField as never,
+      now: () => 654_000,
+    });
+    net.start();
+    net.setLocalId("me");
+    net.ballsSystem.grab(0);
+    expect(net.ballsSystem.stateOf(0).grabT).toBe(654_000);
     net.dispose();
   });
 });
