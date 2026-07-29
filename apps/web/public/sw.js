@@ -14,13 +14,13 @@
  * borra las cachés viejas y los assets se re-piden frescos.
  */
 
-const VERSION = "phy-v4"; // v4: iconos regenerados desde paqo-juego.png (/icons/ precacheado es cache-first; el bump re-pide icon-192)
+const VERSION = "phy-v5"; // v5: runa.png y oraculos-logotipo.png -> .webp (1.9MB -> 169KB la runa); bump re-pide los nuevos archivos
 const RUNTIME = `${VERSION}-assets`;
 const SHELL = `${VERSION}-shell`;
 const OFFLINE_URL = "/offline.html";
 
 // Precache mínimo: la página offline y la marca que la viste.
-const PRECACHE = [OFFLINE_URL, "/runa.png", "/oraculos-logotipo.png", "/icons/icon-192.png"];
+const PRECACHE = [OFFLINE_URL, "/runa.webp", "/oraculos-logotipo.webp", "/icons/icon-192.png"];
 
 // Rutas de assets cacheables (cache-first). Mismo origen únicamente.
 function isCacheableAsset(url) {
@@ -29,8 +29,8 @@ function isCacheableAsset(url) {
     url.pathname.startsWith("/draco/") ||
     url.pathname.startsWith("/fonts/") ||
     url.pathname.startsWith("/icons/") ||
-    url.pathname === "/runa.png" ||
-    url.pathname === "/oraculos-logotipo.png" ||
+    url.pathname === "/runa.webp" ||
+    url.pathname === "/oraculos-logotipo.webp" ||
     url.pathname === "/og.png"
   );
 }

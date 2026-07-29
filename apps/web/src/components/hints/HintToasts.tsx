@@ -3,6 +3,12 @@
 import { useEffect, useRef, useState } from "react";
 import type { WorldNetHooks } from "@/lib/realtime";
 import { markOracleFound } from "@/lib/oracle-client";
+import {
+  FOUND_STORAGE_KEY,
+  parseLastFoundAt,
+  pickFoundMessage,
+  shouldCelebrateFound,
+} from "@/lib/paqo-found";
 import { getOracle } from "@phygitalia/content";
 import styles from "./hints.module.css";
 
@@ -23,16 +29,45 @@ const MIN_GAP_MS = 45_000; // máx. 1 pista cada 45 s
 const NET_RETRY_MS = 600;
 const NET_RETRY_MAX = 20;
 const TOAST_MS = 7_000;
+/** El toast de ENCONTRAR se queda un poco más: es el premio, hay que leerlo. */
+const FOUND_TOAST_MS = 9_500;
+/** Duración del velo dorado de celebración (susurro, no fuegos artificiales). */
+const VEIL_MS = 2_600;
+
+/** Lee localStorage sin reventar en modo privado / SSR. */
+function readLS(key: string): string | null {
+  try {
+    if (typeof window === "undefined") return null;
+    return window.localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+function writeLS(key: string, value: string): void {
+  try {
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem(key, value);
+  } catch {
+    /* modo privado: la celebración vivirá sólo en memoria */
+  }
+}
 
 /**
  * Pistas susurradas estilo "selbar": píldora glass flotante superior que entra y
  * sale con el easing de marca. Se conectan a `world.net.onZoneSignal`:
  *   far/mid/near → pistas de getOracle(id).hints, escalonadas y sin repetir.
- *   found        → toast especial + progreso (si registrado) + celebración sutil.
+ *   found        → CEREMONIA: toast especial en voz de Paqo + velo dorado +
+ *                  progreso (si hay cuenta). Lo sonoro (acorde-campana + chispas)
+ *                  ya lo pone el engine; aquí sólo la parte visual, discreta.
+ *
+ * La ceremonia se celebra UNA VEZ por sesión y con COOLDOWN por visita (ver
+ * lib/paqo-found): entrar y salir del claro —o recargar— dentro de 2 min no la
+ * repite. La lógica pura vive en lib/paqo-found.ts (y está testeada).
  */
 export function HintToasts({ oracleId = "paqo", getWorldNet }: HintToastsProps) {
   const [toast, setToast] = useState<Toast | null>(null);
   const [leaving, setLeaving] = useState(false);
+  const [celebrating, setCelebrating] = useState(false);
   const getNetRef = useRef(getWorldNet);
   getNetRef.current = getWorldNet;
 
@@ -43,6 +78,11 @@ export function HintToasts({ oracleId = "paqo", getWorldNet }: HintToastsProps) 
   const seqRef = useRef(0);
   const hideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const leaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const veilTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** Última celebración de ESTA sesión (gana a localStorage si es más reciente). */
+  const celebratedAtRef = useRef<number | null>(null);
+  /** Último mensaje de Paqo mostrado al encontrarlo (para no repetirlo). */
+  const lastFoundMsgRef = useRef<string | null>(null);
 
   useEffect(() => {
     try {
@@ -62,7 +102,7 @@ export function HintToasts({ oracleId = "paqo", getWorldNet }: HintToastsProps) 
       return; // sin localStorage: no insistimos.
     }
     const t = setTimeout(() => {
-      show("Muévete con WASD o toca el suelo · arrastra para mirar · busca el tótem.");
+      show("Muévete con WASD o el joystick · arrastra para mirar · busca el tótem.");
       try {
         localStorage.setItem(KEY, "1");
       } catch {
@@ -78,10 +118,13 @@ export function HintToasts({ oracleId = "paqo", getWorldNet }: HintToastsProps) 
     if (leaveTimer.current) clearTimeout(leaveTimer.current);
     setLeaving(false);
     setToast({ id: ++seqRef.current, text, special });
-    hideTimer.current = setTimeout(() => {
-      setLeaving(true);
-      leaveTimer.current = setTimeout(() => setToast(null), 320);
-    }, TOAST_MS);
+    hideTimer.current = setTimeout(
+      () => {
+        setLeaving(true);
+        leaveTimer.current = setTimeout(() => setToast(null), 320);
+      },
+      special ? FOUND_TOAST_MS : TOAST_MS
+    );
   };
 
   const nextHint = (): string | null => {
@@ -104,10 +147,33 @@ export function HintToasts({ oracleId = "paqo", getWorldNet }: HintToastsProps) 
     let retryTimer: ReturnType<typeof setTimeout> | null = null;
     let cancelled = false;
 
+    /** Ceremonia de ENCONTRAR (parte visual). Ver lib/paqo-found. */
+    const celebrateFound = () => {
+      const now = Date.now();
+      // El instante de esta sesión manda sobre el persistido (puede ir por delante).
+      const stored = parseLastFoundAt(readLS(FOUND_STORAGE_KEY));
+      const last = Math.max(celebratedAtRef.current ?? 0, stored ?? 0) || null;
+      if (!shouldCelebrateFound(last, now)) return;
+
+      celebratedAtRef.current = now;
+      writeLS(FOUND_STORAGE_KEY, String(now));
+
+      const msg = pickFoundMessage(now, lastFoundMsgRef.current);
+      lastFoundMsgRef.current = msg;
+      show(msg, true);
+
+      // Velo dorado: un respiro de luz cálida sobre el mundo, sin bloquear nada.
+      if (veilTimer.current) clearTimeout(veilTimer.current);
+      setCelebrating(true);
+      veilTimer.current = setTimeout(() => setCelebrating(false), VEIL_MS);
+    };
+
     const onSignal = (signal: "far" | "mid" | "near" | "found") => {
       if (signal === "found") {
-        show("Lo encontraste. El tercer ojo te vio llegar.", true);
+        // El progreso se registra SIEMPRE (es idempotente y puede haber iniciado
+        // sesión entre visitas); la ceremonia visual sí respeta el cooldown.
         void markOracleFound(oracleId);
+        celebrateFound();
         return;
       }
       const now = Date.now();
@@ -137,26 +203,32 @@ export function HintToasts({ oracleId = "paqo", getWorldNet }: HintToastsProps) 
       if (retryTimer) clearTimeout(retryTimer);
       if (hideTimer.current) clearTimeout(hideTimer.current);
       if (leaveTimer.current) clearTimeout(leaveTimer.current);
+      if (veilTimer.current) clearTimeout(veilTimer.current);
       unsub?.();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [oracleId]);
 
-  if (!toast) return null;
+  if (!toast && !celebrating) return null;
 
   return (
-    <div className={styles.layer} aria-live="polite" role="status">
-      <div
-        key={toast.id}
-        className={`${styles.toast} ${toast.special ? styles.toastFound : ""} ${
-          leaving ? styles.leaving : styles.entering
-        }`}
-      >
-        <span className={styles.glyph} aria-hidden>
-          {toast.special ? "✧" : "◈"}
-        </span>
-        <span className={styles.text}>{toast.text}</span>
-      </div>
-    </div>
+    <>
+      {celebrating && <div className={styles.veil} aria-hidden />}
+      {toast && (
+        <div className={styles.layer} aria-live="polite" role="status">
+          <div
+            key={toast.id}
+            className={`${styles.toast} ${toast.special ? styles.toastFound : ""} ${
+              leaving ? styles.leaving : styles.entering
+            }`}
+          >
+            <span className={styles.glyph} aria-hidden>
+              {toast.special ? "✧" : "◈"}
+            </span>
+            <span className={styles.text}>{toast.text}</span>
+          </div>
+        </div>
+      )}
+    </>
   );
 }

@@ -6,8 +6,7 @@ import paqo from "@phygitalia/content/biospheres/paqo.json";
 import { PerfOverlay } from "@/components/dev/PerfOverlay";
 import { ChatDock } from "@/components/chat/ChatDock";
 import { ChatMenuButton } from "@/components/chat/ChatMenuButton";
-// HintToasts (los llamados de Paqo) OCULTOS por ahora — se reactivará más adelante.
-// import { HintToasts } from "@/components/hints/HintToasts";
+import { HintToasts } from "@/components/hints/HintToasts";
 import { HudControls } from "@/components/notifications/HudControls";
 import { MobileControls } from "@/components/notifications/MobileControls";
 import { MuteButton } from "@/components/audio/MuteButton";
@@ -170,8 +169,10 @@ export default function Home() {
       {/* HUD social. Se monta siempre: el chat funciona sin world.net (sólo
           pierde presencia) y sin Supabase se oculta con aviso. */}
       <ChatDock biosphereId={BIOSPHERE_ID} getWorldNet={getWorldNet} getWorld={getWorld} />
-      {/* HintToasts (llamados de Paqo) DESMONTADOS — se reactivará más adelante.
-          <HintToasts oracleId={BIOSPHERE_ID} getWorldNet={getWorldNet} /> */}
+      {/* Los LLAMADOS DE PAQO: pistas susurradas por señal de zona (far/mid/near)
+          y ceremonia visual al ENCONTRARLO (found). Degrada con gracia si el
+          engine aún no publicó world.net (reintenta y se calla). */}
+      <HintToasts oracleId={BIOSPHERE_ID} getWorldNet={getWorldNet} />
 
       {/* Botones táctiles de saltar/agarrar (sólo en dispositivos touch). */}
       <MobileControls getWorld={getWorld} />

@@ -9,13 +9,34 @@
  * `voz:<biosphereId>`). ICE por STUN de Google; SIN TURN (limitación v1: en redes
  * muy restrictivas —CGNAT/simétricas— un par podría no oír a otro).
  *
- * Ciclo de vida:
- *   · join()  → getUserMedia({audio}) MUTEADO, entra al canal de señalización,
- *               ofrece a quienes ya estaban (anti-glare), contesta a los nuevos.
+ * Ciclo de vida del CANAL:
+ *   · join()  → verifica contexto seguro y permiso (Permissions API, SIN abrir el
+ *               micro), entra al canal de señalización, ofrece a quienes ya estaban
+ *               (anti-glare) y contesta a los nuevos. Se entra MUTEADO.
  *   · tracks remotos → <audio> ocultos en el DOM.
  *   · hablando → AnalyserNode por RMS (micro propio + remotos) sobre un umbral.
- *   · leave()/desmontar → cierra TODAS las peer connections, para el micro,
+ *   · leave()/desmontar → cierra TODAS las peer connections, suelta el micro,
  *               sale del canal.
+ *
+ * Ciclo de vida del MICRÓFONO (invariante: el micro está ABIERTO si y sólo si estás
+ * DESMUTEADO). Antes se abría en join() y se quedaba abierto hasta "Salir",
+ * silenciando sólo con `track.enabled=false`: el indicador de captura del navegador
+ * seguía encendido todo el rato y, en Bluetooth, el SO mantenía el auricular en
+ * ruta de llamada (HFP), degradando TODO el audio del juego. Ahora:
+ *   · join()          → NO llama a getUserMedia (entras muteado: no hay nada que
+ *                       capturar). El permiso se pre-chequea con la Permissions API.
+ *   · 1er desmuteo    → getUserMedia(MIC_CONSTRAINTS) — es un gesto del usuario, así
+ *                       que el prompt del navegador sale aquí, cuando de verdad hace
+ *                       falta. La pista se inyecta en cada par con
+ *                       `RTCRtpSender.replaceTrack` → SIN renegociación (cada par
+ *                       nace con un transceptor de audio "carril" ya negociado).
+ *   · mutear          → silencio INMEDIATO (`enabled=false`) y, tras
+ *                       MIC_RELEASE_GRACE_MS, `track.stop()` + `replaceTrack(null)`:
+ *                       el micro se cierra de verdad. Si te desmuteas dentro de la
+ *                       gracia, se reactiva sin re-adquirir (ver lib/voice/mic.ts).
+ *   · fallo al re-adquirir (p. ej. permiso revocado entre medias) → vuelves a
+ *                       MUTEADO y `errorReason` toma la categoría de errors.ts. No
+ *                       te echa del canal: sigues OYENDO a los demás.
  *
  * Gating: sólo abre el canal si `enabled` (hay sesión). Sin sesión, join() no hace
  * nada — anónimo sin sesión no dispara conexiones. La identidad la inyecta el
@@ -27,6 +48,13 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { getSupabaseBrowserClient } from "@/lib/supabase";
 import { isSupabaseConfigured } from "@/lib/realtime";
 import { classifyGetUserMediaError, type VoiceErrorReason } from "./errors";
+import {
+  MIC_CONSTRAINTS,
+  MIC_RELEASE_GRACE_MS,
+  isMicErrorReason,
+  replaceTrackOnSenders,
+  stopMicStream,
+} from "./mic";
 import {
   VoiceSignaling,
   answerMessage,
@@ -56,8 +84,16 @@ export interface UseVoiceRoom {
   joined: boolean;
   join(): Promise<void>;
   leave(): void;
-  /** ¿Tu micrófono está silenciado? (entras MUTEADO por defecto). */
+  /**
+   * ¿Tu micrófono está silenciado? Entras MUTEADO por defecto y, mientras lo estés,
+   * el micro ni siquiera está abierto (ver "Ciclo de vida del MICRÓFONO" arriba).
+   */
   muted: boolean;
+  /**
+   * Alterna el mute. Muteado→hablando ADQUIERE el micro (la primera vez dispara el
+   * prompt del navegador); es asíncrono por dentro pero no hace falta esperarlo: si
+   * la adquisición falla, el hook vuelve a `muted=true` y publica el `errorReason`.
+   */
   toggleMute(): void;
   /** Roster de la voz con indicador de quién habla. */
   participants: VoiceParticipant[];
@@ -90,6 +126,12 @@ const SPEAKING_HANG_MS = 350; // histéresis: mantiene "hablando" un instante tr
 
 interface PeerEntry {
   pc: RTCPeerConnection;
+  /**
+   * Sender del transceptor de audio "carril" hacia este par. Existe desde que se
+   * crea la conexión (aunque el micro esté cerrado por estar muteado) para poder
+   * meter/sacar la pista con `replaceTrack` SIN renegociar.
+   */
+  sender: RTCRtpSender | null;
   audioEl: HTMLAudioElement | null;
   analyser: AnalyserNode | null;
   /** Candidatos ICE llegados antes de fijar la remoteDescription. */
@@ -97,7 +139,9 @@ interface PeerEntry {
   remoteSet: boolean;
 }
 
+/** Medidor del micro propio. Vive sólo mientras el micro está abierto. */
 interface LocalMeter {
+  source: MediaStreamAudioSourceNode;
   analyser: AnalyserNode;
 }
 
@@ -128,7 +172,12 @@ export function useVoiceRoom(params: UseVoiceRoomParams): UseVoiceRoom {
   const localMeterRef = useRef<LocalMeter | null>(null);
   const speakingRef = useRef<Map<string, number>>(new Map()); // identity → last-loud ts
   const meterTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  /** Intención del usuario (fuente de verdad; el estado `muted` es su espejo). */
   const mutedRef = useRef(true);
+  /** Temporizador de gracia mute→soltar el micro (ver MIC_RELEASE_GRACE_MS). */
+  const micReleaseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** ¿Hay un getUserMedia en vuelo? Evita adquisiciones solapadas por doble clic. */
+  const acquiringRef = useRef(false);
 
   // --- Recalcular la lista de participantes (roster + hablando) --------------
   const refreshParticipants = useCallback(() => {
@@ -222,12 +271,29 @@ export function useVoiceRoom(params: UseVoiceRoomParams): UseVoiceRoom {
     if (existing) return existing;
 
     const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
-    const entry: PeerEntry = { pc, audioEl: null, analyser: null, pendingIce: [], remoteSet: false };
+    const entry: PeerEntry = {
+      pc,
+      sender: null,
+      audioEl: null,
+      analyser: null,
+      pendingIce: [],
+      remoteSet: false,
+    };
     peersRef.current.set(peerId, entry);
 
-    // Publica mi audio hacia este par.
-    const stream = localStreamRef.current;
-    if (stream) for (const track of stream.getTracks()) pc.addTrack(track, stream);
+    // CARRIL de audio hacia este par. Creamos SIEMPRE el transceptor sendrecv,
+    // tengamos micro abierto o no (lo normal al entrar: muteado y sin micro). Así el
+    // m-line de audio existe desde la PRIMERA oferta y luego basta `replaceTrack`
+    // para hablar o callar, SIN renegociar. Con `addTrack` al desmutear habría que
+    // renegociar (offer/answer nuevos) en cada mute/unmute.
+    try {
+      const { sender } = pc.addTransceiver("audio", { direction: "sendrecv" });
+      entry.sender = sender;
+      const track = localStreamRef.current?.getAudioTracks()[0] ?? null;
+      if (track) void sender.replaceTrack(track).catch(() => {});
+    } catch {
+      /* sin transceptor no podré enviar, pero seguiré OYENDO (best-effort) */
+    }
 
     pc.onicecandidate = (ev) => {
       if (ev.candidate) {
@@ -235,8 +301,13 @@ export function useVoiceRoom(params: UseVoiceRoomParams): UseVoiceRoom {
       }
     };
     pc.ontrack = (ev) => {
+      // OJO: el par pudo negociar su carril SIN pista (entró muteado y su micro ni
+      // se abrió). Entonces no hay MSID y `ev.streams` llega VACÍO: envolvemos la
+      // pista en un MediaStream propio para reproducirla y medirla igual. Cuando el
+      // par desmutee, su `replaceTrack` llena ESTE mismo carril (misma pista, sin
+      // renegociar) y empieza a sonar sin tocar nada más.
       const [stream0] = ev.streams;
-      if (stream0) attachRemoteStream(peerId, stream0);
+      attachRemoteStream(peerId, stream0 ?? new MediaStream([ev.track]));
     };
     pc.onconnectionstatechange = () => {
       refreshConnectionState();
@@ -314,6 +385,75 @@ export function useVoiceRoom(params: UseVoiceRoomParams): UseVoiceRoom {
     refreshParticipants();
   }, [refreshConnectionState, refreshParticipants]);
 
+  // --- Micrófono local: medidor, adquisición y liberación --------------------
+
+  /** Senders del carril de audio de cada par (destino de `replaceTrack`). */
+  const audioSenders = useCallback((): RTCRtpSender[] => {
+    const out: RTCRtpSender[] = [];
+    for (const entry of peersRef.current.values()) if (entry.sender) out.push(entry.sender);
+    return out;
+  }, []);
+
+  /** Engancha el medidor de "hablando" del micro propio al stream recién abierto. */
+  const attachLocalMeter = useCallback((stream: MediaStream) => {
+    const ctx = audioCtxRef.current;
+    if (!ctx) return;
+    try {
+      void ctx.resume().catch(() => {}); // por si el contexto quedó suspendido.
+      const source = ctx.createMediaStreamSource(stream);
+      const analyser = ctx.createAnalyser();
+      analyser.fftSize = 512;
+      source.connect(analyser);
+      localMeterRef.current = { source, analyser };
+    } catch {
+      /* medición best-effort: sin medidor sigues hablando igual */
+    }
+  }, []);
+
+  /** Desconecta el medidor del micro (el stream se va: su nodo fuente ya no vale). */
+  const disposeLocalMeter = useCallback(() => {
+    const meter = localMeterRef.current;
+    localMeterRef.current = null;
+    if (!meter) return;
+    try {
+      meter.source.disconnect();
+      meter.analyser.disconnect();
+    } catch {
+      /* nodo ya suelto */
+    }
+  }, []);
+
+  /**
+   * Suelta el micro DE VERDAD: lo retira de la malla (`replaceTrack(null)`, sin
+   * renegociar) y para las pistas. Aquí es donde se apaga el indicador de captura
+   * del navegador y el SO puede devolver el Bluetooth a perfil de música (A2DP).
+   */
+  const releaseLocalMic = useCallback(() => {
+    if (micReleaseTimerRef.current) {
+      clearTimeout(micReleaseTimerRef.current);
+      micReleaseTimerRef.current = null;
+    }
+    const stream = localStreamRef.current;
+    localStreamRef.current = null;
+    disposeLocalMeter();
+    // Vacía el carril ANTES de parar la pista: el par deja de recibir sin sobresaltos.
+    void replaceTrackOnSenders(audioSenders(), null);
+    stopMicStream(stream);
+  }, [audioSenders, disposeLocalMeter]);
+
+  /**
+   * Programa la liberación del micro tras la gracia. Si dentro de la ventana te
+   * vuelves a desmutear, el temporizador se cancela y no se re-adquiere nada.
+   */
+  const scheduleMicRelease = useCallback(() => {
+    if (!localStreamRef.current || micReleaseTimerRef.current) return;
+    micReleaseTimerRef.current = setTimeout(() => {
+      micReleaseTimerRef.current = null;
+      if (!mutedRef.current) return; // te desmuteaste dentro de la gracia: consérvalo.
+      releaseLocalMic();
+    }, MIC_RELEASE_GRACE_MS);
+  }, [releaseLocalMic]);
+
   // --- Limpieza total (leave / desmontar) ------------------------------------
   const teardown = useCallback(() => {
     if (meterTimerRef.current) {
@@ -323,10 +463,9 @@ export function useVoiceRoom(params: UseVoiceRoomParams): UseVoiceRoom {
     for (const id of Array.from(peersRef.current.keys())) closePeer(id);
     signalingRef.current?.leave();
     signalingRef.current = null;
-    const stream = localStreamRef.current;
-    if (stream) for (const t of stream.getTracks()) t.stop();
-    localStreamRef.current = null;
-    localMeterRef.current = null;
+    // Sin pares ya: `releaseLocalMic` sólo para el micro y desmonta su medidor.
+    acquiringRef.current = false;
+    releaseLocalMic();
     speakingRef.current.clear();
     rosterRef.current = [];
     if (audioCtxRef.current) {
@@ -341,7 +480,7 @@ export function useVoiceRoom(params: UseVoiceRoomParams): UseVoiceRoom {
       setConnectionState("idle");
       setErrorReason(null);
     }
-  }, [closePeer]);
+  }, [closePeer, releaseLocalMic]);
 
   // --- Bucle de medición de "hablando" ---------------------------------------
   const startMeter = useCallback(() => {
@@ -397,8 +536,10 @@ export function useVoiceRoom(params: UseVoiceRoomParams): UseVoiceRoom {
     setConnectionState("connecting");
 
     // 0.5) Pre-chequeo del permiso (best-effort; no todos los navegadores soportan
-    // el nombre "microphone" en la Permissions API). Si ya está DENEGADO de forma
-    // persistente, no llames a getUserMedia en vano: dirige directo al candado 🔒.
+    // el nombre "microphone" en la Permissions API). Es el ÚNICO chequeo de micro
+    // del join —aquí ya no se abre el dispositivo—, y sirve para no meterte en un
+    // canal donde nunca podrás hablar: si está DENEGADO de forma persistente, corta
+    // ya y dirige al candado 🔒 en vez de dejarte descubrirlo al primer desmuteo.
     try {
       const permissions = navigator.permissions;
       if (permissions?.query) {
@@ -417,50 +558,26 @@ export function useVoiceRoom(params: UseVoiceRoomParams): UseVoiceRoom {
       /* Permissions API sin soporte para "microphone": seguimos a getUserMedia. */
     }
 
-    // 1) Micro (entramos MUTEADOS). getUserMedia dispara el prompt del navegador la
-    // PRIMERA vez, tras el gesto del usuario (botón "Unirse a voz") y en contexto
-    // seguro. Si falla, CATEGORIZAMOS el DOMException para un mensaje honesto.
-    let stream: MediaStream;
-    try {
-      stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
-    } catch (err) {
-      console.warn("[voz]", err); // diagnóstico real (antes se tiraba con `void err`).
-      if (mountedRef.current) {
-        setConnectionState("error");
-        setErrorReason(classifyGetUserMediaError(err));
-        setJoined(false);
-      }
-      return;
-    }
-    if (!mountedRef.current) {
-      for (const t of stream.getTracks()) t.stop();
-      return;
-    }
+    if (!mountedRef.current) return;
 
-    // A partir de aquí el MICRO está bien: cualquier fallo posterior es de
-    // señalización/negociación (red/servidor), NO de micrófono → "connection".
-    try {
-      localStreamRef.current = stream;
-      mutedRef.current = true;
-      setMuted(true);
-      for (const t of stream.getAudioTracks()) t.enabled = false; // muteado.
+    // 1) NO abrimos el micrófono aquí: al canal se entra MUTEADO, y un micro abierto
+    // que no captura nada es sólo un indicador de captura encendido (y, en
+    // Bluetooth, el auricular clavado en perfil de llamada). El `getUserMedia` real
+    // ocurre en el PRIMER desmuteo —que también es un gesto del usuario, así que el
+    // prompt del navegador sigue siendo válido— y sus fallos se categorizan allí con
+    // el mismo `classifyGetUserMediaError`.
+    mutedRef.current = true;
+    setMuted(true);
 
-      // 2) AudioContext + medidor del micro propio.
+    // Desde aquí, cualquier fallo es de señalización/negociación (red/servidor), NO
+    // de micrófono → "connection".
+    try {
+      // 2) AudioContext para los medidores de "hablando". Se crea ya (estamos en un
+      // gesto del usuario, así que arranca "running"): los remotos se enganchan al
+      // llegar cada pista y el del micro propio, cuando se adquiera al desmutear.
       const AC: typeof AudioContext =
         window.AudioContext ?? (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
-      if (AC) {
-        const ctx = new AC();
-        audioCtxRef.current = ctx;
-        try {
-          const src = ctx.createMediaStreamSource(stream);
-          const analyser = ctx.createAnalyser();
-          analyser.fftSize = 512;
-          src.connect(analyser);
-          localMeterRef.current = { analyser };
-        } catch {
-          /* medición best-effort */
-        }
-      }
+      if (AC) audioCtxRef.current = new AC();
 
       // 3) Señalización Supabase + malla.
       const signaling = new VoiceSignaling(
@@ -503,12 +620,14 @@ export function useVoiceRoom(params: UseVoiceRoomParams): UseVoiceRoom {
       setErrorReason(null);
       refreshParticipants();
     } catch (err) {
-      // El micro fue bien; esto es un fallo de señalización/negociación (no del micro).
+      // Fallo de señalización/negociación (el micro ni se tocó todavía).
       console.warn("[voz]", err);
-      for (const t of stream.getTracks()) t.stop();
-      localStreamRef.current = null;
       signalingRef.current?.leave();
       signalingRef.current = null;
+      if (audioCtxRef.current) {
+        void audioCtxRef.current.close().catch(() => {});
+        audioCtxRef.current = null;
+      }
       if (mountedRef.current) {
         setConnectionState("error");
         setErrorReason("connection");
@@ -531,19 +650,93 @@ export function useVoiceRoom(params: UseVoiceRoomParams): UseVoiceRoom {
     teardown();
   }, [teardown]);
 
+  /**
+   * DESMUTEAR. Dos caminos:
+   *   · El micro sigue vivo (mute reciente, dentro de la gracia) → basta reactivar
+   *     las pistas: instantáneo y sin re-adquirir el dispositivo.
+   *   · No hay micro (primer desmuteo o gracia vencida) → `getUserMedia` con las
+   *     constraints explícitas y `replaceTrack` en cada par, SIN renegociar.
+   *
+   * Si la adquisición falla (permiso revocado mientras tanto, micro robado por otra
+   * app, dispositivo desconectado) NO te echa del canal: vuelves a MUTEADO —sigues
+   * oyendo a los demás— y `errorReason` toma la categoría de `errors.ts`, que la UI
+   * pinta como error duro de micrófono.
+   */
+  const unmute = useCallback(async () => {
+    // Cancela una liberación pendiente: sigues queriendo el micro.
+    if (micReleaseTimerRef.current) {
+      clearTimeout(micReleaseTimerRef.current);
+      micReleaseTimerRef.current = null;
+    }
+    const alive = localStreamRef.current;
+    if (alive) {
+      for (const t of alive.getAudioTracks()) t.enabled = true;
+      return;
+    }
+    // Una sola adquisición en vuelo: si haces doble clic, la que ya corre honrará la
+    // intención FINAL (`mutedRef`) al terminar.
+    if (acquiringRef.current) return;
+
+    const usable =
+      typeof navigator !== "undefined" &&
+      navigator.mediaDevices &&
+      typeof navigator.mediaDevices.getUserMedia === "function";
+    if (!usable) {
+      mutedRef.current = true;
+      setMuted(true);
+      setErrorReason("insecure");
+      return;
+    }
+
+    acquiringRef.current = true;
+    let stream: MediaStream;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia(MIC_CONSTRAINTS);
+    } catch (err) {
+      console.warn("[voz]", err);
+      acquiringRef.current = false;
+      if (mountedRef.current) {
+        mutedRef.current = true;
+        setMuted(true); // vuelta a muteado: no te quedas "hablando" sin micro.
+        setErrorReason(classifyGetUserMediaError(err));
+      }
+      return;
+    }
+    acquiringRef.current = false;
+
+    // ¿Sigo dentro y sigo queriendo hablar? Si saliste (o volviste a mutear) durante
+    // el prompt, tira el stream recién abierto: el micro no se queda encendido.
+    if (!mountedRef.current || !signalingRef.current || mutedRef.current) {
+      stopMicStream(stream);
+      return;
+    }
+
+    localStreamRef.current = stream;
+    for (const t of stream.getAudioTracks()) t.enabled = true;
+    attachLocalMeter(stream);
+    // Inyecta la pista en el carril ya negociado de cada par: sin offer/answer.
+    await replaceTrackOnSenders(audioSenders(), stream.getAudioTracks()[0] ?? null);
+    // Limpia SÓLO un error de MICRO anterior; un aviso de conexión sigue vigente.
+    if (mountedRef.current) setErrorReason((r) => (isMicErrorReason(r) ? null : r));
+  }, [attachLocalMeter, audioSenders]);
+
   const toggleMute = useCallback(() => {
-    const stream = localStreamRef.current;
-    if (!stream) return;
+    if (!signalingRef.current) return; // fuera del canal no hay nada que alternar.
     const next = !mutedRef.current;
-    mutedRef.current = next;
-    for (const t of stream.getAudioTracks()) t.enabled = !next; // enabled = NO muteado.
+    mutedRef.current = next; // intención del usuario: fuente de verdad.
     setMuted(next);
     if (next) {
-      // Al mutear, deja de figurar como "hablando" de inmediato.
+      // MUTEAR: silencio INMEDIATO; la liberación física va tras la gracia.
+      const stream = localStreamRef.current;
+      if (stream) for (const t of stream.getAudioTracks()) t.enabled = false;
+      // Deja de figurar como "hablando" de inmediato.
       speakingRef.current.delete(identity);
       refreshParticipants();
+      scheduleMicRelease();
+      return;
     }
-  }, [identity, refreshParticipants]);
+    void unmute();
+  }, [identity, refreshParticipants, scheduleMicRelease, unmute]);
 
   // Limpieza al desmontar.
   useEffect(() => {

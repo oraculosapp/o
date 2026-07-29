@@ -16,7 +16,7 @@
   border: 2px solid var(--gold-dim);
   border-top-color: var(--gold-bright);
   box-shadow: 0 0 26px var(--glow);
-  background: center / 62% no-repeat url("/runa.png");
+  background: center / 62% no-repeat url("/runa.webp");
   animation: spin 2.4s linear infinite;
 }
 .loadingLabel {
@@ -59,7 +59,7 @@
   box-shadow: 0 0 36px var(--glow);
   background:
     radial-gradient(60% 60% at 50% 40%, rgba(227, 176, 99, 0.18), transparent 70%),
-    center / 60% no-repeat url("/runa.png"),
+    center / 60% no-repeat url("/runa.webp"),
     var(--panel-solid);
 }
 .inviteTitle {
@@ -441,7 +441,7 @@
   width: 44px;
   height: 44px;
   border-radius: 50%;
-  background: center / 70% no-repeat url("/runa.png");
+  background: center / 70% no-repeat url("/runa.webp");
 }
 .runeLit {
   border-color: var(--line);

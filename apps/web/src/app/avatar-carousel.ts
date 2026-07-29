@@ -32,7 +32,7 @@ export interface AvatarCarouselOptions {
   initialIndex?: number;
   /** Se llama cuando el avatar al FRENTE cambia (por arrastre o inercia). */
   onSelect?: (index: number) => void;
-  /** URL de la textura de la runa central (default `/runa.png`). */
+  /** URL de la textura de la runa central (default `/runa.webp`). */
   runaUrl?: string;
   /**
    * Si se pasa, tras montar los placeholders PROCEDURALES (instantáneos) el anillo
@@ -89,7 +89,7 @@ export class AvatarCarousel {
     this.step = (Math.PI * 2) / this.count;
     this.reducedMotion = opts?.reducedMotion ?? false;
     this.onSelect = opts?.onSelect;
-    this.runaUrl = opts?.runaUrl ?? "/runa.png";
+    this.runaUrl = opts?.runaUrl ?? "/runa.webp";
     this.loadRig = opts?.loadRig;
     this.selectedIndex = ((opts?.initialIndex ?? 0) % this.count + this.count) % this.count;
     this.rot = -this.selectedIndex * this.step;
@@ -238,7 +238,7 @@ export class AvatarCarousel {
       },
       undefined,
       () => {
-        /* sin runa.png: se queda el disco dorado tenue */
+        /* sin runa.webp: se queda el disco dorado tenue */
       },
     );
   }

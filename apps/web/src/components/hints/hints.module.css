@@ -1,16 +1,33 @@
 /* Pistas susurradas — píldora glass flotante superior estilo "selbar".
-   Entra/sale con el easing de marca (docs/investigacion §2, §4). */
+   Entra/sale con el easing de marca (docs/investigacion §2, §4).
+
+   CONVIVENCIA CON EL HUD (mismos criterios que MobileControls / InstallButton):
+     · Respeta las áreas seguras (notch, bordes redondeados).
+     · En móvil baja BAJO la banda del menú superior (nav centrado a top:14 con
+       ~56px de alto; a ≤400px reflowa a dos filas), igual que el HUD del juego.
+     · Con el chat abierto en móvil (hoja superior "top", panel lateral "side" o
+       pantalla completa "max") se OCULTA en vez de pelear por el z-index: el chat
+       es el foco y la pista volverá con la siguiente señal de zona. */
 
 .layer {
   position: fixed;
-  top: 18px;
+  top: calc(18px + env(safe-area-inset-top));
   left: 0;
   right: 0;
   z-index: 40;
   display: flex;
   justify-content: center;
   pointer-events: none;
-  padding: 0 1rem;
+  padding: 0 calc(1rem + env(safe-area-inset-right)) 0 calc(1rem + env(safe-area-inset-left));
+  transition: opacity var(--dur-fast) var(--ease-brand);
+}
+
+:global(html[data-chat-sheet="top"]) .layer,
+:global(html[data-chat-sheet="side"]) .layer,
+:global(html[data-chat-sheet="max"]) .layer,
+:global(html[data-chat-sheet="full"]) .layer {
+  opacity: 0;
+  visibility: hidden;
 }
 
 .toast {
@@ -93,10 +110,64 @@
   }
 }
 
+/* VELO DORADO de la ceremonia al ENCONTRAR a Paqo. Susurro, no fuegos
+   artificiales: un halo cálido que respira desde el borde y se va. Nunca captura
+   toques (pointer-events:none) y vive POR DEBAJO de la píldora y del menú. */
+.veil {
+  position: fixed;
+  inset: 0;
+  z-index: 24;
+  pointer-events: none;
+  background: radial-gradient(
+    120% 90% at 50% 55%,
+    transparent 45%,
+    rgba(227, 176, 99, 0.1) 78%,
+    rgba(227, 176, 99, 0.2) 100%
+  );
+  opacity: 0;
+  animation: veilBreath 2.6s var(--ease-brand) forwards;
+}
+@keyframes veilBreath {
+  0% {
+    opacity: 0;
+  }
+  22% {
+    opacity: 1;
+  }
+  55% {
+    opacity: 0.85;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+/* Móvil: la píldora baja BAJO la banda del menú (mismo escalón que el HUD del
+   juego, game.module.css) para no taparlo ni ser tapada. */
+@media (pointer: coarse), (max-width: 640px) {
+  .layer {
+    top: calc(72px + env(safe-area-inset-top));
+  }
+}
+/* ≤400px el menú usa DOS filas (~112px de banda): un escalón más abajo. */
+@media (max-width: 400px) {
+  .layer {
+    top: calc(128px + env(safe-area-inset-top));
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .entering,
   .leaving,
   .toastFound {
     animation: none;
+  }
+  .layer {
+    transition: none;
+  }
+  /* Sin movimiento: el velo se queda quieto y muy tenue mientras dura el toast. */
+  .veil {
+    animation: none;
+    opacity: 0.5;
   }
 }

@@ -104,7 +104,7 @@
     linear-gradient(160deg, #0a0c16, #0b0d18 45%, #0a0b13);
 }
 
-/* Runa girando: borde dorado + sigilo runa.png superpuesto. */
+/* Runa girando: borde dorado + sigilo runa.webp superpuesto. */
 .rune {
   width: 84px;
   height: 84px;
@@ -112,7 +112,7 @@
   border: 2px solid var(--gold-dim);
   border-top-color: var(--gold-bright);
   box-shadow: 0 0 26px var(--glow);
-  background: center / 64% no-repeat url("/runa.png");
+  background: center / 64% no-repeat url("/runa.webp");
   animation: runaspin 2.4s linear infinite;
 }
 
