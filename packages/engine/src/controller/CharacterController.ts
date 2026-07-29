@@ -258,6 +258,9 @@ export class CharacterController {
   private avatar?: THREE.Group;
   private blob!: THREE.Mesh;
   private rig?: IAvatarRig;
+  /** Texturas propias (Material.dispose no las libera): se guardan para dispose(). */
+  private blobTex?: THREE.Texture;
+  private avatarRamp?: THREE.DataTexture;
 
   constructor(
     private island: Island,
@@ -731,13 +734,13 @@ export class CharacterController {
 
   private buildAvatar(): void {
     this.avatar = new THREE.Group();
-    const ramp = makeToonRamp();
-    const body = new THREE.MeshToonMaterial({ color: 0x8fa98c, gradientMap: ramp });
+    this.avatarRamp = makeToonRamp();
+    const body = new THREE.MeshToonMaterial({ color: 0x8fa98c, gradientMap: this.avatarRamp });
     const noseMat = new THREE.MeshToonMaterial({
       color: 0x3a2f18,
       emissive: new THREE.Color(0xe3b063),
       emissiveIntensity: 0.9,
-      gradientMap: ramp,
+      gradientMap: this.avatarRamp,
     });
     const capsule = new THREE.Mesh(new THREE.CapsuleGeometry(0.42, 0.95, 6, 12), body);
     addInvertedHullOutline(capsule, 0x0e1512, 1.06);
@@ -751,9 +754,9 @@ export class CharacterController {
   }
 
   private buildBlobShadow(): void {
-    const tex = makeSoftCircleTexture("rgba(10,14,10,0.55)");
+    this.blobTex = makeSoftCircleTexture("rgba(10,14,10,0.55)");
     const mat = new THREE.MeshBasicMaterial({
-      map: tex,
+      map: this.blobTex,
       transparent: true,
       opacity: 0.5,
       depthWrite: false,
@@ -807,7 +810,14 @@ export class CharacterController {
   }
 
   dispose(): void {
-    if (this.rig) this.object.remove(this.rig.root);
+    // El rig es NUESTRO (setRig lo dispone al sustituirlo): hay que disponerlo
+    // también aquí, y ANTES de sacarlo del grupo — si se remueve primero, el
+    // traverse de abajo ya no lo alcanza y sus mallas/materiales se filtran.
+    if (this.rig) {
+      this.rig.dispose();
+      this.object.remove(this.rig.root);
+      this.rig = undefined;
+    }
     this.object.traverse((o) => {
       const mesh = o as THREE.Mesh;
       if (mesh.geometry) mesh.geometry.dispose();
@@ -817,5 +827,9 @@ export class CharacterController {
     });
     this.blob.geometry.dispose();
     (this.blob.material as THREE.Material).dispose();
+    // Material.dispose() NO libera texturas: la del blob y la rampa toon de la
+    // cápsula placeholder se liberan explícitamente o quedan en la GPU.
+    this.blobTex?.dispose();
+    this.avatarRamp?.dispose();
   }
 }

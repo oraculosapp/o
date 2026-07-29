@@ -944,6 +944,11 @@ export class Vegetation {
     for (const m of this.meshes) {
       m.geometry.dispose();
       (m.material as THREE.Material).dispose();
+      // Los buffers GL de instanceMatrix/instanceColor NO cuelgan de la geometría:
+      // WebGLObjects los registra contra el propio InstancedMesh y sólo los libera
+      // su dispose(). Sin esta línea, ~42.5k instancias de pasto dejaban ≈3 MB de
+      // VRAM huérfana por montaje.
+      m.dispose();
     }
     this.ramp.dispose();
   }

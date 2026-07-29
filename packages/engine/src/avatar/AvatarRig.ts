@@ -368,7 +368,13 @@ export class AvatarRig implements IAvatarRig {
     this.driver?.dispose();
     this.root.traverse((obj) => {
       const mesh = obj as THREE.Mesh;
-      if (mesh.geometry) mesh.geometry.dispose();
+      // La GEOMETRÍA sólo es nuestra si la escena lo es: los clones que salen de
+      // AvatarGLTFCache (`SkeletonUtils.clone`, disposeSource:false) COMPARTEN los
+      // BufferGeometry con la escena cacheada y con los demás remotos. Liberarlos
+      // aquí borraba buffers GL que otros clones vivos seguían usando (re-subida a
+      // GPU y contabilidad rota). Los materiales toon sí son por clon: se disponen
+      // siempre.
+      if (this.disposeSourceMats && mesh.geometry) mesh.geometry.dispose();
       const mat = mesh.material as THREE.Material | THREE.Material[] | undefined;
       if (Array.isArray(mat)) mat.forEach((m) => m.dispose());
       else mat?.dispose();

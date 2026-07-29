@@ -44,7 +44,6 @@ export class PaqoWorld {
   /** Hooks de multijugador (avatares remotos, pelotas, zonas). Disponible tras start(). */
   net!: WorldNet;
 
-  private rig!: TestDummy;
   private follow!: FollowCamera;
 
   /**
@@ -58,6 +57,8 @@ export class PaqoWorld {
   private viewportInset = { left: 0, right: 0, top: 0, bottom: 0 };
 
   private rune!: THREE.Mesh;
+  /** Rampa toon de la runa: hay que liberarla a mano (Material.dispose no lo hace). */
+  private runeRamp?: THREE.DataTexture;
   private pixels!: PixelSwarm;
   private marker!: THREE.Mesh;
   private moveTarget: THREE.Vector3 | null = null;
@@ -139,6 +140,13 @@ export class PaqoWorld {
   private reducedMotion = false;
   private reducedMq?: MediaQueryList;
 
+  // [MANDOS] Media query de puntero grueso. Se guarda como CAMPO (junto a su
+  // handler) porque un listener anónimo sobre una MediaQueryList local jamás se
+  // podría retirar en dispose(): su clausura captura `this` y el MediaQueryList
+  // vive mientras viva la pestaña → retendría el mundo entero (escena, renderer
+  // y red) en cada montaje (StrictMode/Fast Refresh acumulan montajes).
+  private coarseMq?: MediaQueryList;
+
   private _fwd = new THREE.Vector3();
   private _right = new THREE.Vector3();
   private _worldDir = new THREE.Vector3();
@@ -204,8 +212,11 @@ export class PaqoWorld {
     // arquetipo elegido, se carga en segundo plano y sustituye al maniquí; si el
     // GLB no existe aún, se queda el maniquí (con su tinte). Cambiar de avatar en
     // caliente pasa por el mismo camino (setAvatar).
-    this.rig = new TestDummy();
-    this.controller = new CharacterController(this.island, this.spawnPos, this.rig);
+    // El maniquí NO se guarda como campo del mundo: su dueño es el controller
+    // (setRig lo dispone al cambiar de avatar). Un campo aquí quedaría obsoleto
+    // tras setAvatar y en dispose() re-dispondría un rig ya muerto mientras el
+    // rig VIVO se filtraba en cada desmontaje.
+    this.controller = new CharacterController(this.island, this.spawnPos, new TestDummy());
     this.controller.onVoidFall = () => this.beginFall();
     // [EQUIPO TIERRA] copas de árbol pisables: la vegetación aporta alturas extra.
     this.controller.addHeightProvider((x, z) => this.vegetation.platformHeightAt(x, z));
@@ -245,11 +256,9 @@ export class PaqoWorld {
     // [MANDOS] Táctil (puntero grueso): el sprite de la tecla "E" no aplica (hay
     // botón "Tomar"). Lo cableamos al media query y seguimos cambios de puntero.
     if (typeof window !== "undefined" && typeof window.matchMedia === "function") {
-      const coarseMq = window.matchMedia("(pointer: coarse)");
-      this.net.setKeyHintEnabled(!coarseMq.matches);
-      coarseMq.addEventListener?.("change", (e) => {
-        if (!this.disposed) this.net.setKeyHintEnabled(!e.matches);
-      });
+      this.coarseMq = window.matchMedia("(pointer: coarse)");
+      this.net.setKeyHintEnabled(!this.coarseMq.matches);
+      this.coarseMq.addEventListener?.("change", this.onCoarsePointerChange);
     }
 
     // Director de clima (equipo Atmos): modula fog/cielo/luces y, vía callbacks,
@@ -815,11 +824,14 @@ export class PaqoWorld {
   private buildRune(): void {
     const p = this.island.field.surfacePoint(0, 0);
     const geo = new THREE.TorusGeometry(3.6, 0.26, 10, 48);
+    // La rampa se guarda como campo: `Material.dispose()` NO libera sus texturas,
+    // así que sin referencia la DataTexture quedaría huérfana en la GPU.
+    this.runeRamp = makeToonRamp();
     const mat = new THREE.MeshToonMaterial({
       color: 0x3a2f18,
       emissive: new THREE.Color(0xe3b063),
       emissiveIntensity: 0.6,
-      gradientMap: makeToonRamp(),
+      gradientMap: this.runeRamp,
     });
     this.rune = new THREE.Mesh(geo, mat);
     this.rune.position.copy(p).add(new THREE.Vector3(0, 0.4, 0));
@@ -874,6 +886,15 @@ export class PaqoWorld {
 
   private onReducedMotionChange = (): void => {
     if (!this.disposed) this.applyReducedMotion();
+  };
+
+  /**
+   * [MANDOS] Cambio de tipo de puntero (p.ej. conectar un ratón a una tablet):
+   * el sprite de la tecla "E" sólo tiene sentido con puntero fino. Campo (arrow)
+   * para poder retirarlo con removeEventListener en dispose().
+   */
+  private onCoarsePointerChange = (e: MediaQueryListEvent): void => {
+    if (!this.disposed) this.net.setKeyHintEnabled(!e.matches);
   };
 
   /**
@@ -1139,6 +1160,7 @@ export class PaqoWorld {
     this.resizeObs?.disconnect();
     window.removeEventListener("resize", this.onResize);
     this.reducedMq?.removeEventListener?.("change", this.onReducedMotionChange);
+    this.coarseMq?.removeEventListener?.("change", this.onCoarsePointerChange);
     if (typeof window !== "undefined") {
       window.removeEventListener("storage", this.onReducedMotionChange);
     }
@@ -1150,8 +1172,7 @@ export class PaqoWorld {
     this.net?.dispose();
     this.soundscape?.dispose();
     this.input?.dispose();
-    this.controller?.dispose();
-    this.rig?.dispose();
+    this.controller?.dispose(); // dispone también su rig actual (dummy o GLB)
     this.vegetation?.dispose();
     this.atmosphere?.dispose();
     this.pixels?.dispose();
@@ -1166,7 +1187,13 @@ export class PaqoWorld {
       if (Array.isArray(mat)) mat.forEach((m) => m.dispose());
       else mat?.dispose();
     });
+    this.runeRamp?.dispose();
     const el = this.renderer?.domElement;
+    // forceContextLoss() ANTES de dispose(): `dispose()` sólo suelta los recursos
+    // JS del renderer, no el contexto WebGL. Sin esto, cada montaje deja un
+    // contexto vivo y Chrome tumba el más antiguo al llegar a ~16 (lienzos en
+    // negro tras varios Fast Refresh o cambios de biósfera).
+    if (el) this.renderer?.forceContextLoss?.();
     this.renderer?.dispose();
     if (el && el.parentElement) el.parentElement.removeChild(el);
   }

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import * as THREE from "three";
-import { Balls } from "@phygitalia/engine";
+import { Balls, WorldNet } from "@phygitalia/engine";
 
 /** Campo plano de prueba (altura 0, normal vertical, claro a nivel 1). */
 const flatField = {
@@ -106,5 +106,252 @@ describe("Balls — atribución por PATADA del jugador local", () => {
     const noVel = new THREE.Vector3();
     for (let i = 0; i < 60; i++) balls.update(0.1, far, noVel); // ~6 s
     expect(balls.isLiveByLocal(0)).toBe(false);
+  });
+});
+
+/**
+ * FIX-RED #1 — la atribución local (`liveBy`, ventana de 4 s) NUNCA se revocaba
+ * cuando un REMOTO tocaba la pelota: ni las ramas SNAP/lerp de applyState ni
+ * applyGrab (que retornaba antes) la limpiaban. Consecuencia en producción: dos
+ * clientes puntuaban el MISMO impacto y uno podía puntuar con una pelota que otro
+ * llevaba en las manos (doble respawn con teleport visible).
+ */
+describe("Balls — un toque REMOTO revoca la autoría local", () => {
+  /** Lanza la pelota 0 y devuelve el sistema con la atribución local viva. */
+  function thrownBalls(): Balls {
+    const balls = new Balls(flatField as never);
+    balls.build();
+    balls.setLocalId("me");
+    balls.grab(0);
+    balls.throwBall(new THREE.Vector3(0, 0, -1), new THREE.Vector3());
+    expect(balls.isLiveByLocal(0)).toBe(true);
+    return balls;
+  }
+
+  it("rama LERP (ajuste pequeño): un paquete 'ball' ajeno revoca la autoría", () => {
+    const balls = thrownBalls();
+    const p = balls.stateOf(0).pos;
+    balls.applyState(0, { pos: [p[0] + 0.4, p[1], p[2]], vel: [0, 0, 0] });
+    expect(balls.isLiveByLocal(0)).toBe(false);
+  });
+
+  it("rama SNAP (salto grande en zona): un paquete 'ball' ajeno revoca la autoría", () => {
+    const balls = thrownBalls();
+    balls.applyState(0, { pos: [10, 1.15, 0], vel: [0, 0, 0] });
+    expect(balls.isLiveByLocal(0)).toBe(false);
+  });
+
+  it("rama FUERA DE ZONA: sigue revocando la autoría (no había regresión)", () => {
+    const balls = thrownBalls();
+    balls.applyState(0, { pos: [30, 1, 0], vel: [0, 0, 0] });
+    expect(balls.isLiveByLocal(0)).toBe(false);
+  });
+
+  it("un 'ball_grab' ajeno revoca la autoría AUNQUE yo no lleve ese balón", () => {
+    const balls = thrownBalls();
+    expect(balls.isHolding()).toBe(false); // la lancé: no la llevo
+    balls.applyGrab(0, "thief", Date.now());
+    expect(balls.isLiveByLocal(0)).toBe(false);
+  });
+
+  it("el 'ball_grab' ajeno no toca la autoría de OTRAS pelotas", () => {
+    const balls = thrownBalls();
+    balls.grab(1);
+    balls.throwBall(new THREE.Vector3(0, 0, -1), new THREE.Vector3());
+    balls.applyGrab(0, "thief", Date.now());
+    expect(balls.isLiveByLocal(0)).toBe(false);
+    expect(balls.isLiveByLocal(1)).toBe(true);
+  });
+});
+
+/**
+ * FIX-RED #2 — applyState no validaba nada: un `pos` con NaN mataba la pelota PARA
+ * SIEMPRE (todas las guardas de zona/sueño comparan con NaN → false: ni respawnea,
+ * ni se puede agarrar, ni se ve). La guarda vive en el engine además de en la capa
+ * de red, porque el engine también corre sin red (QA, single-player, tests).
+ */
+describe("Balls — applyState rechaza paquetes de red envenenados", () => {
+  const POISON: Array<[string, unknown]> = [
+    ["NaN", [Number.NaN, 0, 0]],
+    ["Infinity", [0, Number.POSITIVE_INFINITY, 0]],
+    ["null dentro de la terna", [0, null, 0]],
+    ["string dentro de la terna", ["7", 0, 0]],
+    ["terna corta", [0, 0]],
+    ["no es array", { x: 0, y: 0, z: 0 }],
+    ["null", null],
+    ["undefined", undefined],
+  ];
+
+  for (const [label, pos] of POISON) {
+    it(`pos ${label} se ignora y la pelota sigue VIVA`, () => {
+      const balls = new Balls(flatField as never);
+      balls.build();
+      const before = balls.stateOf(0).pos;
+      balls.applyState(0, { pos, vel: [0, 0, 0] } as never);
+      const after = balls.stateOf(0).pos;
+      expect(after.every(Number.isFinite)).toBe(true);
+      expect(after).toEqual(before);
+      // Y sigue siendo agarrable/respawneable (no quedó fuera del mundo).
+      expect(balls.canGrab(before[0], before[2])).toBe(true);
+    });
+  }
+
+  it("una vel envenenada también se ignora (la pos no se toca)", () => {
+    const balls = new Balls(flatField as never);
+    balls.build();
+    const before = balls.stateOf(0).pos;
+    balls.applyState(0, { pos: [7, 0.35, 0], vel: [Number.NaN, 0, 0] } as never);
+    expect(balls.stateOf(0).pos).toEqual(before);
+  });
+
+  it("un id inválido (fuera de rango, no entero, string) no rompe ni toca nada", () => {
+    const balls = new Balls(flatField as never);
+    balls.build();
+    const snapshot = Array.from({ length: balls.count }, (_, i) => balls.stateOf(i).pos);
+    for (const bad of [-1, 9, 1.5, Number.NaN, "0" as never]) {
+      expect(() => balls.applyState(bad as number, { pos: [7, 1, 0], vel: [0, 0, 0] })).not.toThrow();
+    }
+    for (let i = 0; i < balls.count; i++) expect(balls.stateOf(i).pos).toEqual(snapshot[i]);
+  });
+
+  it("tras un paquete envenenado, uno SANO sigue reconciliando con normalidad", () => {
+    const balls = new Balls(flatField as never);
+    balls.build();
+    balls.applyState(0, { pos: [Number.NaN, 0, 0], vel: [0, 0, 0] });
+    balls.applyState(0, { pos: [7, 0.35, 0], vel: [0, 0, 0] }); // salto grande → snap
+    expect(xz(balls.stateOf(0).pos)).toBeCloseTo(7, 5);
+  });
+});
+
+/**
+ * FIX-RED #4 — doble portador irrecuperable: la propiedad del balón sólo viajaba en
+ * el evento ÚNICO "ball_grab" (fire-and-forget). Si se perdía, A y B lo llevaban
+ * para siempre (cada uno ignoraba el flujo "ball" del otro). Ahora el portador
+ * adjunta heldBy/grabT en su paquete "ball" y el receptor se auto-cura en ≤100 ms.
+ * COMPATIBILIDAD: los campos son opcionales; sin ellos el comportamiento es el viejo.
+ */
+describe("Balls — auto-cura del doble portador por el flujo 'ball'", () => {
+  function holding(localId = "victim"): Balls {
+    const balls = new Balls(flatField as never);
+    balls.build();
+    balls.setLocalId(localId);
+    expect(balls.grab(0)).toBe(true);
+    return balls;
+  }
+
+  it("el portador ADJUNTA heldBy/grabT al estado del balón que lleva", () => {
+    const balls = holding("me");
+    const s = balls.stateOf(0);
+    expect(s.heldBy).toBe("me");
+    expect(typeof s.grabT).toBe("number");
+    // Las que NO llevo viajan limpias (paquete idéntico al de siempre).
+    expect(balls.stateOf(1).heldBy).toBeUndefined();
+    expect(balls.stateOf(1).grabT).toBeUndefined();
+  });
+
+  /** Mano del ladrón: lejos del slot casa de la 0 (r=4) → cae en la rama SNAP. */
+  const THIEF_HAND: [number, number, number] = [12, 1.15, 0];
+
+  it("un paquete 'ball' de un portador que GANA el desempate me lo quita y se aplica", () => {
+    const balls = holding();
+    balls.applyState(0, {
+      pos: THIEF_HAND,
+      vel: [0, 0, 0],
+      heldBy: "thief",
+      grabT: Date.now() + 1_000_000,
+    });
+    expect(balls.isHolding()).toBe(false);
+    expect(balls.heldBall()).toBe(-1);
+    // Y el estado del ladrón se adoptó (snap por salto grande): ya no queda en mi mano.
+    expect(xz(balls.stateOf(0).pos)).toBeCloseTo(12, 5);
+  });
+
+  it("un portador que PIERDE el desempate (grabT viejo) no me roba nada", () => {
+    const balls = holding();
+    const mine = balls.stateOf(0).pos;
+    balls.applyState(0, { pos: THIEF_HAND, vel: [0, 0, 0], heldBy: "thief", grabT: 1 });
+    expect(balls.isHolding()).toBe(true);
+    expect(balls.stateOf(0).pos).toEqual(mine); // su paquete se descartó entero
+  });
+
+  it("COMPAT: un paquete SIN heldBy/grabT (cliente viejo) se ignora como siempre", () => {
+    const balls = holding();
+    const mine = balls.stateOf(0).pos;
+    balls.applyState(0, { pos: THIEF_HAND, vel: [0, 0, 0] });
+    expect(balls.isHolding()).toBe(true);
+    expect(balls.stateOf(0).pos).toEqual(mine);
+  });
+
+  it("COMPAT: un grabT no finito no dispara la auto-cura (paquete corrupto)", () => {
+    const balls = holding();
+    const mine = balls.stateOf(0).pos;
+    balls.applyState(0, {
+      pos: THIEF_HAND,
+      vel: [0, 0, 0],
+      heldBy: "thief",
+      grabT: Number.NaN,
+    });
+    expect(balls.isHolding()).toBe(true);
+    expect(balls.stateOf(0).pos).toEqual(mine);
+  });
+
+  it("el eco de mi PROPIO heldBy nunca me quita el balón", () => {
+    const balls = holding("me");
+    balls.applyState(0, {
+      pos: THIEF_HAND,
+      vel: [0, 0, 0],
+      heldBy: "me",
+      grabT: Date.now() + 1_000_000,
+    });
+    expect(balls.isHolding()).toBe(true);
+  });
+});
+
+/**
+ * FIX-RED #6 (lado Balls) — `deflect` dejaba la pelota EXACTAMENTE en `radius`, y el
+ * test de impacto del mini-juego es inclusivo (<=): tangente a la base de Paqo,
+ * volvía a "golpear" cada frame. Ahora sale con epsilon, estrictamente fuera.
+ */
+describe("Balls — deflect expulsa ESTRICTAMENTE fuera del cilindro", () => {
+  it("tras el rebote, la distancia al eje es > radio (no tangente)", () => {
+    const balls = new Balls(flatField as never);
+    balls.build();
+    const radius = 2;
+    // Colócala pegada al eje del cilindro y empújala hacia dentro.
+    balls.applyState(0, { pos: [1.2, 1, 0], vel: [-3, 0, 0] });
+    balls.deflect(0, 0, 0, radius, 0.5);
+    const p = balls.stateOf(0).pos;
+    expect(Math.hypot(p[0], p[2])).toBeGreaterThan(radius);
+  });
+});
+
+/** FIX-RED #7 (menores) — limpieza de escena e idempotencia del arranque. */
+describe("Balls / WorldNet — limpieza e idempotencia", () => {
+  it("dispose() saca la malla de pelotas de la escena", () => {
+    const scene = new THREE.Scene();
+    const balls = new Balls(flatField as never);
+    balls.build();
+    balls.addTo(scene);
+    expect(scene.getObjectByName("net-balls")).toBeTruthy();
+    balls.dispose();
+    expect(scene.getObjectByName("net-balls")).toBeFalsy();
+  });
+
+  it("WorldNet.start() es idempotente (no duplica las 9 pelotas ni la malla)", () => {
+    const scene = new THREE.Scene();
+    const net = new WorldNet({
+      scene,
+      camera: new THREE.PerspectiveCamera(),
+      playerPosition: new THREE.Vector3(),
+      playerForward: (out?: THREE.Vector3) => (out ?? new THREE.Vector3()).set(0, 0, -1),
+      playerGrounded: () => true,
+      field: flatField as never,
+    });
+    net.start();
+    const children = scene.children.length;
+    net.start(); // doble montaje (StrictMode / remonte del mundo)
+    expect(net.ballsSystem.count).toBe(9);
+    expect(scene.children.length).toBe(children);
+    net.dispose();
   });
 });

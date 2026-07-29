@@ -98,6 +98,25 @@ const ZONE_FALL_MARGIN = 8;
  */
 const RESPAWN_R_MIN = 3.5;
 const RESPAWN_R_MAX = 8.5;
+/**
+ * Holgura (u) con la que `deflect` expulsa la pelota del cilindro de impacto. El
+ * test de golpe del mini-juego es inclusivo (<= radio), así que dejarla EXACTAMENTE
+ * en el radio la volvía a contar como impacto el frame siguiente (bucle de chispas).
+ */
+const DEFLECT_EPS = 1e-3;
+
+/**
+ * ¿`v` es una terna [x,y,z] de números FINITOS? Guarda de red del engine: un
+ * `pos`/`vel` con NaN/null/undefined envenena la pelota de forma IRREVERSIBLE
+ * (toda comparación con NaN es false → nunca respawnea ni se puede agarrar).
+ */
+function isVec3(v: unknown): v is [number, number, number] {
+  return (
+    Array.isArray(v) &&
+    v.length === 3 &&
+    v.every((n) => typeof n === "number" && Number.isFinite(n))
+  );
+}
 
 interface Ball {
   pos: THREE.Vector3;
@@ -427,6 +446,29 @@ export class Balls {
     b.liveTimer = LIVE_ATTRIB_TIME;
   }
 
+  /**
+   * REVOCA la atribución local de `b`. Es la contrapartida de {@link attributeLocal}
+   * y el porqué de que exista: en cuanto un REMOTO toca la pelota (llega un paquete
+   * "ball" por applyState, o un "ball_grab" ajeno), dejo de ser su autor. Sin esto,
+   * la ventana de 4 s seguía viva en mi cliente y DOS clientes puntuaban el mismo
+   * impacto (marcador doble, doble respawn con teleport visible, y hasta "A puntúa
+   * con una pelota que B lleva en las manos").
+   */
+  private clearAttribution(b: Ball): void {
+    b.liveBy = null;
+    b.liveTimer = 0;
+  }
+
+  /**
+   * ¿Un agarre ajeno `(by, t)` GANA el desempate contra el mío (`heldGrabT`)?
+   * Regla única compartida por `applyGrab` (evento "ball_grab") y por la auto-cura
+   * del doble portador en `applyState` (campos heldBy/grabT del flujo "ball"):
+   * gana el `t` más nuevo; si empatan, gana el id lexicográfico menor.
+   */
+  private remoteGrabWins(by: string, t: number): boolean {
+    return t > this.heldGrabT || (t === this.heldGrabT && by < this.localId);
+  }
+
   /** Copia la posición actual de la pelota `id` en `out`. */
   positionOf(id: number, out: THREE.Vector3): THREE.Vector3 {
     const b = this.balls[id];
@@ -452,8 +494,7 @@ export class Balls {
     this.randomHomePos(b.pos);
     b.vel.set(0, 0, 0);
     b.grounded = true;
-    b.liveBy = null;
-    b.liveTimer = 0;
+    this.clearAttribution(b);
     b.kickCd = 0;
     b.recPos = undefined;
     b.recVel = undefined;
@@ -511,8 +552,7 @@ export class Balls {
     this.heldId = id;
     b.vel.set(0, 0, 0);
     b.grounded = false;
-    b.liveBy = null; // agarrarla cancela la atribución local
-    b.liveTimer = 0;
+    this.clearAttribution(b); // agarrarla cancela la atribución local
     b.recPos = undefined;
     b.recVel = undefined;
     b.recTimer = 0;
@@ -535,10 +575,15 @@ export class Balls {
    */
   applyGrab(ballId: number, by: string, t: number): void {
     if (typeof by !== "string") return;
+    if (!Number.isInteger(ballId) || ballId < 0 || ballId >= this.balls.length) return;
+    if (!Number.isFinite(t)) return;
     if (by === this.localId) return; // eco de mi propio agarre
-    if (ballId !== this.heldId) return; // sólo me afecta si YO lo llevaba
-    const theyWin = t > this.heldGrabT || (t === this.heldGrabT && by < this.localId);
-    if (theyWin) this.forceDrop(ballId);
+    // Un agarre AJENO revoca SIEMPRE mi autoría, la lleve yo o no: si otro la tiene
+    // en las manos, ni la moví yo ni debo puntuar con ella. Va ANTES del early-return
+    // de "no la llevaba" — ese return era justo el que dejaba viva la atribución.
+    this.clearAttribution(this.balls[ballId]);
+    if (ballId !== this.heldId) return; // el force-drop sólo aplica si YO lo llevaba
+    if (this.remoteGrabWins(by, t)) this.forceDrop(ballId);
   }
 
   /**
@@ -555,8 +600,7 @@ export class Balls {
     if (b) {
       b.vel.set(0, 0, 0);
       b.grounded = false;
-      b.liveBy = null;
-      b.liveTimer = 0;
+      this.clearAttribution(b);
       b.recPos = undefined;
       b.recVel = undefined;
       b.recTimer = 0;
@@ -595,19 +639,42 @@ export class Balls {
     return true;
   }
 
-  /** Reconciliación suave hacia el estado recibido (lerp, no teleport). */
+  /**
+   * Reconciliación suave hacia el estado recibido (lerp, no teleport).
+   *
+   * NADA de lo que llega por red es de fiar (M-5): un `id` fuera de rango o un
+   * pos/vel con NaN/null MATABA la pelota para siempre (todas las guardas de zona y
+   * de sueño comparan con NaN → false: ni respawneaba, ni se podía agarrar, ni se
+   * veía). Por eso la primera línea de defensa vive AQUÍ, además de en la capa de
+   * red: el engine también se usa sin ella (tests, QA, single-player).
+   */
   applyState(id: number, s: BallState): void {
+    if (!Number.isInteger(id) || id < 0 || id >= this.balls.length) return;
+    if (!isVec3(s?.pos) || !isVec3(s?.vel)) return;
     const b = this.balls[id];
-    if (!b) return;
-    if (id === this.heldId) return; // la pelota agarrada la manda el portador local
+    if (id === this.heldId) {
+      // AUTO-CURA DEL DOBLE PORTADOR: la propiedad viaja en el evento ÚNICO
+      // "ball_grab" (fire-and-forget); si se pierde, A y B llevan el mismo balón
+      // PARA SIEMPRE (yo ignoro su flujo "ball", él ignora el mío). Si el paquete
+      // trae los campos nuevos heldBy/grabT y ese agarre gana el desempate, suelto
+      // en silencio y sigo aplicando su estado: se cura en ≤100 ms (1 tick del
+      // portador). Sin esos campos (cliente viejo) el comportamiento es el de antes.
+      const by = s.heldBy;
+      const t = s.grabT;
+      if (typeof by !== "string" || by === this.localId) return;
+      if (typeof t !== "number" || !Number.isFinite(t)) return;
+      if (!this.remoteGrabWins(by, t)) return;
+      this.forceDrop(id);
+    }
+    // Cualquier paquete "ball" ajeno significa que un REMOTO tocó la pelota: mi
+    // autoría se revoca en las TRES ramas (fuera de zona, snap y lerp).
+    this.clearAttribution(b);
     // Reconciliación entrante FUERA de zona: en vez de lerp hacia el monte, snap al
     // slot casa. Así todos los clientes convergen sin pelearse por una pelota perdida.
     if (Math.hypot(s.pos[0], s.pos[2]) > ZONE_RADIUS) {
       this.homeSlot(id, b.pos);
       b.vel.set(0, 0, 0);
       b.grounded = true;
-      b.liveBy = null;
-      b.liveTimer = 0;
       b.recPos = undefined;
       b.recVel = undefined;
       b.recTimer = 0;
@@ -665,20 +732,34 @@ export class Balls {
       b.vel.x += j * nx;
       b.vel.z += j * nz;
     }
-    // Sácala justo al borde del cilindro (no la dejes penetrando).
-    b.pos.x = cx + nx * radius;
-    b.pos.z = cz + nz * radius;
+    // Sácala JUSTO FUERA del cilindro, con epsilon. Dejarla exactamente en `radius`
+    // la mantenía dentro del test de impacto (insideCyl usa <=) y una pelota tangente
+    // a la base de Paqo, sin ronda activa, disparaba chispas + deflect + vel.y+=0.4
+    // POR FRAME durante los 4 s de la ventana de atribución.
+    b.pos.x = cx + nx * (radius + DEFLECT_EPS);
+    b.pos.z = cz + nz * (radius + DEFLECT_EPS);
     b.vel.y += 0.4; // saltito juguetón
     b.grounded = false;
   }
 
-  /** Estado actual de una pelota (para el smoke test / difusión). */
+  /**
+   * Estado actual de una pelota (para el smoke test / difusión). Si es la que YO
+   * llevo en la mano, adjunta `heldBy`/`grabT` (campos nuevos y opcionales): así el
+   * flujo "ball" transporta también la PROPIEDAD y un doble portador se auto-cura
+   * aunque se pierda el evento único "ball_grab". Sólo lo hace la difusión periódica
+   * del portador: respawnToHome y throwBall limpian `heldId` ANTES de llamar aquí.
+   */
   stateOf(id: number): BallState {
     const b = this.balls[id];
-    return {
+    const s: BallState = {
       pos: [b.pos.x, b.pos.y, b.pos.z],
       vel: [b.vel.x, b.vel.y, b.vel.z],
     };
+    if (id === this.heldId && this.localId) {
+      s.heldBy = this.localId;
+      s.grabT = this.heldGrabT;
+    }
+    return s;
   }
 
   /** Energía cinética total (para el smoke test: debe decrecer y llegar a ~0). */
@@ -782,8 +863,7 @@ export class Balls {
         if (horiz < SLEEP_SPEED && Math.abs(b.vel.y) < BOUNCE_STOP) {
           b.vel.set(0, 0, 0);
           b.pos.y = groundY;
-          b.liveBy = null; // durmió: en reposo ya no cuenta como movida por mí
-          b.liveTimer = 0;
+          this.clearAttribution(b); // durmió: en reposo ya no cuenta como movida por mí
         }
       } else {
         b.grounded = false;
@@ -901,6 +981,9 @@ export class Balls {
     this.throwCbs.clear();
     this.respawnCbs.clear();
     this.grabCbs.clear();
+    // Sácala de la escena ANTES de liberar: sin esto la InstancedMesh seguía colgada
+    // del grafo con geometría/material ya dispuestos (glitch al reconstruir el mundo).
+    this.mesh.removeFromParent();
     this.mesh.geometry.dispose();
     (this.mesh.material as THREE.Material).dispose();
     this.mesh.dispose();

@@ -73,8 +73,13 @@ export class WorldNet implements WorldNetHooks {
     this.drawBridge = bridge;
   }
 
-  /** Construye la malla de pelotas y las añade a la escena. */
+  /**
+   * Construye la malla de pelotas y las añade a la escena. IDEMPOTENTE: un segundo
+   * `start()` (doble montaje de PaqoWorld, StrictMode) duplicaba las 9 pelotas en
+   * `balls` y añadía otra InstancedMesh a la escena, dejando la primera colgada.
+   */
   start(): void {
+    if (this.started) return;
     this.balls.build();
     this.balls.addTo(this.deps.scene);
     this.lastPos.copy(this.deps.playerPosition);

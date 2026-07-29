@@ -165,7 +165,34 @@ export class InputManager {
     this.el.addEventListener("pointerleave", this.onPointerLeave);
     this.el.addEventListener("wheel", this.onWheel, { passive: false });
     this.el.addEventListener("contextmenu", this.preventCtx);
+    // Alt+Tab / cambio de pestaña con una tecla PULSADA: el keyup se dispara en la
+    // otra ventana y nunca nos llega → la tecla queda "pegada" y el avatar camina
+    // solo al volver. En blur soltamos todo (simétrico: se retira en dispose()).
+    window.addEventListener("blur", this.onBlur);
   }
+
+  /**
+   * Suelta TODO el input mantenido (teclas, joystick, correr) y descarta los
+   * edges pendientes. Lógica pura sobre el estado del manager: la comparten el
+   * interruptor de la UI (`setInputEnabled(false)`) y el blur de ventana.
+   */
+  private releaseHeldInput(): void {
+    this.keys.clear();
+    this.joyVec.set(0, 0);
+    this.jumpEdge = false;
+    this.grabEdge = false;
+    this.flyEdge = false;
+    this.mobileRun = false;
+  }
+
+  private onBlur = (): void => {
+    this.releaseHeldInput();
+    // El dedo tampoco "sigue" en pantalla: cierra los punteros vivos y esconde
+    // el joystick, que si no se quedaría dibujado flotando al volver.
+    this.pointers.clear();
+    this.pointerActive = false;
+    this.joyBase.style.display = "none";
+  };
 
   // ---- teclado ----
 
@@ -231,14 +258,7 @@ export class InputManager {
    */
   setInputEnabled(enabled: boolean): void {
     this.inputEnabled = enabled;
-    if (!enabled) {
-      this.keys.clear();
-      this.joyVec.set(0, 0);
-      this.jumpEdge = false;
-      this.grabEdge = false;
-      this.flyEdge = false;
-      this.mobileRun = false; // suelta el correr móvil al perder el input
-    }
+    if (!enabled) this.releaseHeldInput(); // suelta teclas, joystick y correr móvil
   }
 
   /** ¿El input del juego está habilitado? */
@@ -470,6 +490,7 @@ export class InputManager {
     this.actionSubs.clear();
     window.removeEventListener("keydown", this.onKeyDown);
     window.removeEventListener("keyup", this.onKeyUp);
+    window.removeEventListener("blur", this.onBlur);
     this.el.removeEventListener("pointerdown", this.onPointerDown);
     this.el.removeEventListener("pointermove", this.onPointerMove);
     this.el.removeEventListener("pointerup", this.onPointerUp);

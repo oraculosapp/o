@@ -149,8 +149,11 @@ class RemoteAvatar {
         })
         .catch(() => {
           this.loadingArchetype = false;
-          // Fallback: chibi procedural del arquetipo base (id "<arquetipo>").
-          const base = id.slice(0, id.lastIndexOf("-"));
+          // Fallback: chibi procedural del arquetipo base (id "<arquetipo>-<f|m|n>").
+          // Con un id SIN guion, lastIndexOf da -1 y slice(0,-1) recortaba la última
+          // letra ("vampiro" → "vampir"): sin guion el id ya ES el arquetipo base.
+          const dash = id.lastIndexOf("-");
+          const base = dash > 0 ? id.slice(0, dash) : id;
           if (!this.dead && isProceduralArchetypeId(base)) {
             try {
               this.swapRig(buildArchetype(base));
@@ -341,6 +344,9 @@ class RemoteAvatar {
       this.labelTex = undefined;
     }
     if (!name) return;
+    // Sin DOM (SSR/tests) no hay etiqueta: el resto del remoto funciona igual
+    // (misma guarda que el sprite "E" de Balls).
+    if (typeof document === "undefined") return;
 
     const canvas = document.createElement("canvas");
     const pad = 16;
@@ -428,6 +434,11 @@ class RemoteAvatar {
   }
 
   dispose(scene: THREE.Scene): void {
+    // Muerto ANTES de liberar nada: un GLB en vuelo (`loadAvatarRigShared`) resolvía
+    // después del dispose y, al no ver `dead`, hacía swapRig sobre un holder ya
+    // huérfano — resucitando al remoto y disponiendo el rig DOS veces.
+    this.dead = true;
+    this.loadingArchetype = false;
     scene.remove(this.holder);
     if (this.puff) {
       scene.remove(this.puff);

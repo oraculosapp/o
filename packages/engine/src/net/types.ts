@@ -104,10 +104,22 @@ export interface RemoteState {
   archetype?: string;
 }
 
-/** Estado dinámico de una pelota (posición + velocidad en mundo). */
+/**
+ * Estado dinámico de una pelota (posición + velocidad en mundo).
+ *
+ * `heldBy`/`grabT` son campos NUEVOS y OPCIONALES (compatibilidad hacia atrás):
+ * sólo viajan cuando el emisor lleva ese balón EN LA MANO, y sirven para auto-curar
+ * el "doble portador" si se pierde el evento único `ball_grab` (fire-and-forget).
+ * Los clientes viejos los ignoran al emitir y al recibir; los nuevos toleran su
+ * ausencia (sin ellos el flujo "ball" se comporta exactamente como antes).
+ */
 export interface BallState {
   pos: Vec3;
   vel: Vec3;
+  /** Id del jugador que la lleva en la mano al emitir (ausente si nadie la lleva). */
+  heldBy?: string;
+  /** `Date.now()` del agarre de `heldBy` (autoridad del desempate de robos). */
+  grabT?: number;
 }
 
 /** Señal de proximidad al tótem. */

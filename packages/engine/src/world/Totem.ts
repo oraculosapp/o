@@ -16,6 +16,12 @@ export class Totem {
   readonly group = new THREE.Group();
   private disposed = false;
   private materials: THREE.Material[] = [];
+  /**
+   * Rampa toon compartida por todos los materiales del tótem. Campo (no const
+   * local) porque `Material.dispose()` NO libera texturas: sin referencia, la
+   * DataTexture quedaría inalcanzable y su buffer GL vivo tras cada desmontaje.
+   */
+  private ramp?: THREE.DataTexture;
 
   constructor(
     private field: IslandField,
@@ -40,7 +46,8 @@ export class Totem {
       const model = gltf.scene;
 
       // Re-ilumina cada material a toon conservando su map baseColor.
-      const ramp = makeToonRamp();
+      this.ramp = makeToonRamp();
+      const ramp = this.ramp;
       model.traverse((obj) => {
         const mesh = obj as THREE.Mesh;
         if (!mesh.isMesh) return;
@@ -58,6 +65,10 @@ export class Totem {
         this.applyRimDark(toon);
         mesh.material = toon;
         this.materials.push(toon);
+        // Los MeshStandardMaterial originales del GLB quedan descartados aquí: si
+        // no se disponen, sus programas/uniforms siguen contabilizados. Su `map`
+        // NO se toca (lo hereda el toon; se libera en dispose()).
+        for (const m of Array.isArray(src) ? src : [src]) m?.dispose();
       });
 
       // Escala a la altura objetivo desde su bounding box nativo.
@@ -107,10 +118,25 @@ export class Totem {
 
   dispose(): void {
     this.disposed = true;
+    // Las TEXTURAS son responsabilidad nuestra: `Material.dispose()` sólo libera
+    // el material. Se recolectan en un Set porque el GLB comparte el mismo `map`
+    // (y la misma rampa) entre varias mallas → una sola liberación por textura.
+    const textures = new Set<THREE.Texture>();
     this.group.traverse((obj) => {
       const mesh = obj as THREE.Mesh;
       if (mesh.geometry) mesh.geometry.dispose();
+      const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+      for (const m of mats) {
+        const mm = m as THREE.MeshToonMaterial | undefined;
+        if (!mm) continue;
+        if (mm.map) textures.add(mm.map);
+        if (mm.gradientMap) textures.add(mm.gradientMap);
+      }
     });
     this.materials.forEach((m) => m.dispose());
+    if (this.ramp) textures.add(this.ramp);
+    textures.forEach((t) => t.dispose());
+    this.materials = [];
+    this.ramp = undefined;
   }
 }

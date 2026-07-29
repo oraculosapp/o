@@ -576,7 +576,12 @@ export class ChibiAvatar implements IAvatarRig {
     const add = (geo: THREE.BufferGeometry, m: THREE.Material, outline = true) => {
       this.ownedGeoms.push(geo);
       const mesh = new THREE.Mesh(geo, m);
-      if (outline) addInvertedHullOutline(mesh, INK, 1.06);
+      if (outline) {
+        // addInvertedHullOutline crea un MeshBasicMaterial NUEVO por llamada: si no
+        // se registra aquí, no lo alcanza ni ownedMaterials ni el traverse final
+        // (que sólo mira geometrías) → un material huérfano por prop y por join.
+        this.ownedMaterials.push(addInvertedHullOutline(mesh, INK, 1.06).material as THREE.Material);
+      }
       g.add(mesh);
       return mesh;
     };

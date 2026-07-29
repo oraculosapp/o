@@ -82,6 +82,14 @@ const FLASH_DECAY = 0.5;
 const SOFT_FACTOR = 0.4;
 /** Restitución del rebote de cortesía cuando no hay partida. */
 const SOFT_RESTITUTION = 0.5;
+/**
+ * Enfriamiento (s) del golpe de CORTESÍA por pelota (fase sin partida). Sin él, una
+ * pelota atribuida al local que quede apoyada contra la base de Paqo vuelve a entrar
+ * en el cilindro frame tras frame: chispas + deflect + vel.y+=0.4 a 60 Hz durante
+ * toda la ventana de atribución (4 s). El epsilon de `deflect` la saca del cilindro;
+ * este cooldown cubre el caso en que la física la devuelve (pendiente, rebote, patada).
+ */
+const SOFT_HIT_COOLDOWN = 0.6;
 
 interface SparkBurst {
   points: THREE.Points;
@@ -115,6 +123,9 @@ export class BallGame {
 
   private beaconAcc = 0;
   private nextBeacon = this.pickBeacon();
+
+  /** ballId → segundos restantes de enfriamiento del golpe de cortesía (sin partida). */
+  private softHitCd = new Map<number, number>();
 
   private changeCbs = new Set<(s: GameSnapshot) => void>();
   private eventCbs = new Set<(e: GameEvent) => void>();
@@ -205,7 +216,13 @@ export class BallGame {
         // visual (chispas + flash + sonido) y puntuamos, pero NO respawneamos la
         // pelota localmente: su nueva posición llega por reconciliación (applyBallState),
         // evitando un doble teleport (nuestra pos aleatoria ≠ la del lanzador).
-        this.scores[e.by] = (this.scores[e.by] ?? 0) + 1;
+        //
+        // PUNTÚA SÓLO EN "running": cada cliente cierra la ronda contra SU reloj, así
+        // que un hit tardío (emitido justo antes del fin, recibido justo después)
+        // mutaba el marcador DESPUÉS de que enterResults congelara `winnerIds` → dos
+        // clientes anunciaban ganadores DISTINTOS. El FX y el sonido sí siguen siempre:
+        // el golpe ocurrió de verdad y se ve, simplemente no altera el resultado.
+        if (this.phase === "running") this.scores[e.by] = (this.scores[e.by] ?? 0) + 1;
         this.triggerSpark(e.hitPos[0], e.hitPos[1], e.hitPos[2], false);
         this.flash(false);
         this.hooks.onSound("hit");
@@ -248,6 +265,7 @@ export class BallGame {
   update(dt: number): void {
     this.updateFx(dt);
     this.refreshTotem();
+    this.tickSoftHitCd(dt);
 
     // Detección de golpe: SOLO para las pelotas atribuidas al jugador local (las
     // que él puso en movimiento por patada O lanzamiento — autoridad del que la
@@ -327,8 +345,12 @@ export class BallGame {
       if (!this.startedBy) this.startedBy = e.startedBy;
     }
     // Puntos por jugador = max(local, recibido): aplicar dos veces no cambia nada.
-    for (const id of Object.keys(e.scores)) {
-      this.scores[id] = Math.max(this.scores[id] ?? 0, e.scores[id]);
+    // En "results" NO se fusionan: el marcador ya está cerrado y `winnerIds` congelado;
+    // un beacon rezagado sólo serviría para que este cliente mostrara otros ganadores.
+    if (this.phase !== "results") {
+      for (const id of Object.keys(e.scores)) {
+        this.scores[id] = Math.max(this.scores[id] ?? 0, e.scores[id]);
+      }
     }
     this.notifyChange();
   }
@@ -346,6 +368,16 @@ export class BallGame {
 
   // ---- impacto --------------------------------------------------------------
 
+  /** Decae los enfriamientos de golpe de cortesía (mapa pequeño: ≤ nº de pelotas). */
+  private tickSoftHitCd(dt: number): void {
+    if (this.softHitCd.size === 0) return;
+    for (const [id, cd] of this.softHitCd) {
+      const next = cd - dt;
+      if (next <= 0) this.softHitCd.delete(id);
+      else this.softHitCd.set(id, next);
+    }
+  }
+
   private handleHit(id: number, pos: THREE.Vector3): void {
     if (this.phase === "running") {
       this.scores[this.localId] = (this.scores[this.localId] ?? 0) + 1;
@@ -361,7 +393,11 @@ export class BallGame {
       this.hooks.balls.respawnToHome(id, "hit");
       this.notifyChange();
     } else {
-      // Sin partida: Paqo reacciona un poquito (FX suave + rebote), sin punto.
+      // Sin partida: Paqo reacciona un poquito (FX suave + rebote), sin punto. Con
+      // enfriamiento POR PELOTA: una que quede apoyada contra la base no debe
+      // disparar chispas + empujón cada frame (ver SOFT_HIT_COOLDOWN).
+      if ((this.softHitCd.get(id) ?? 0) > 0) return;
+      this.softHitCd.set(id, SOFT_HIT_COOLDOWN);
       this.triggerSpark(pos.x, pos.y, pos.z, true);
       this.flash(true);
       if (this.cyl) {
@@ -530,6 +566,10 @@ export class BallGame {
   }
 
   private notifyChange(): void {
+    // Red de seguridad barata: mientras estemos en "results", los ganadores se
+    // derivan SIEMPRE del marcador vigente. Así ninguna ruta que llegue a tocar
+    // `scores` puede dejar un `winnerIds` congelado que contradiga al marcador.
+    if (this.phase === "results") this.winnerIds = this.computeWinners();
     if (this.changeCbs.size === 0) return;
     const snap = this.snapshot();
     for (const cb of this.changeCbs) cb(snap);
@@ -543,6 +583,7 @@ export class BallGame {
     this.eventCbs.clear();
     this.unsubRespawn?.();
     this.unsubRespawn = null;
+    this.softHitCd.clear();
     // Restaura baselines por si el tótem sobrevive al juego.
     for (const f of this.flashMats) {
       f.mat.emissive.copy(f.baseColor);

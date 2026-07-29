@@ -27,6 +27,12 @@ export class Island {
   readonly hitmesh: THREE.Mesh;
   private extras: THREE.Mesh[] = [];
   private group = new THREE.Group();
+  /**
+   * Rampas toon del terreno, la falda y la panza. Se guardan porque
+   * `Material.dispose()` NO libera las texturas: cada `makeToonRamp()` es una
+   * DataTexture nueva que, sin referencia, quedaría viva en la GPU por montaje.
+   */
+  private ramps: THREE.DataTexture[] = [];
 
   private raycaster = new THREE.Raycaster();
 
@@ -60,6 +66,13 @@ export class Island {
 
   addTo(scene: THREE.Scene): void {
     scene.add(this.group);
+  }
+
+  /** Rampa toon registrada para liberarse en `dispose()`. */
+  private newRamp(): THREE.DataTexture {
+    const ramp = makeToonRamp();
+    this.ramps.push(ramp);
+    return ramp;
   }
 
   // ---- disco radial de terreno ----
@@ -119,7 +132,7 @@ export class Island {
   private buildTerrain(preset: BiospherePreset): THREE.Mesh {
     const geo = this.buildDiscGeometry(Island.VIS_SPOKES, Island.VIS_RINGS);
     this.paintVertexColors(geo, preset);
-    const mat = new THREE.MeshToonMaterial({ vertexColors: true, gradientMap: makeToonRamp() });
+    const mat = new THREE.MeshToonMaterial({ vertexColors: true, gradientMap: this.newRamp() });
     const mesh = new THREE.Mesh(geo, mat);
     mesh.name = "island-terrain";
     // [EQUIPO CIELO] El terreno RECIBE las sombras del sol (key DirectionalLight).
@@ -212,7 +225,7 @@ export class Island {
     geo.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
     geo.setAttribute("color", new THREE.Float32BufferAttribute(colors, 3));
     geo.computeVertexNormals(); // non-indexed → facetas planas de roca
-    const mat = new THREE.MeshToonMaterial({ vertexColors: true, gradientMap: makeToonRamp() });
+    const mat = new THREE.MeshToonMaterial({ vertexColors: true, gradientMap: this.newRamp() });
     const mesh = new THREE.Mesh(geo, mat);
     mesh.name = "island-cliff";
     return mesh;
@@ -280,7 +293,7 @@ export class Island {
     geo.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
     geo.setAttribute("color", new THREE.Float32BufferAttribute(colors, 3));
     geo.computeVertexNormals(); // facetas planas
-    const mat = new THREE.MeshToonMaterial({ vertexColors: true, gradientMap: makeToonRamp() });
+    const mat = new THREE.MeshToonMaterial({ vertexColors: true, gradientMap: this.newRamp() });
     const mesh = new THREE.Mesh(geo, mat);
     mesh.name = "island-belly";
     return mesh;
@@ -299,11 +312,19 @@ export class Island {
   }
 
   dispose(): void {
-    for (const m of [this.mesh, this.hitmesh, ...this.extras]) {
-      m.geometry.dispose();
-      const mat = m.material as THREE.Material | THREE.Material[];
-      if (Array.isArray(mat)) mat.forEach((x) => x.dispose());
-      else mat.dispose();
+    // Traverse (no lista plana): así entra también el outline inverted-hull de la
+    // panza, que es un hijo con material propio y quedaba huérfano por montaje.
+    for (const root of [this.mesh, this.hitmesh, ...this.extras]) {
+      root.traverse((obj) => {
+        const m = obj as THREE.Mesh;
+        if (!m.isMesh) return;
+        m.geometry?.dispose();
+        const mat = m.material as THREE.Material | THREE.Material[];
+        if (Array.isArray(mat)) mat.forEach((x) => x.dispose());
+        else mat?.dispose();
+      });
     }
+    for (const r of this.ramps) r.dispose();
+    this.ramps = [];
   }
 }

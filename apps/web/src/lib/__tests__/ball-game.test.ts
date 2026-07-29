@@ -241,3 +241,121 @@ describe("BallGame — máquina del mini-juego ¡Dale a Paqo!", () => {
     expect(game.snapshot().scores.local).toBe(1);
   });
 });
+
+/**
+ * FIX-RED #3 — cada cliente cierra la ronda contra SU reloj y `enterResults` congela
+ * `winnerIds` UNA vez. Un "hit" (o un beacon "state") que llegara después mutaba el
+ * marcador ya cerrado → dos clientes anunciaban ganadores DISTINTOS. Ahora el
+ * marcador sólo se toca en "running"; el FX/sonido del golpe sí sigue siempre.
+ */
+describe("BallGame — el marcador se congela con los ganadores", () => {
+  /** Arranca una ronda y la lleva a "results" con "me"=2 y "otro"=1. */
+  function playedRound(): Harness {
+    vi.useFakeTimers();
+    vi.setSystemTime(0);
+    const h = makeGame();
+    h.game.setLocalPlayer("me");
+    h.game.start();
+    h.game.applyRemote({ type: "hit", by: "me", ballId: 1, hitPos: [0, 0, 0] });
+    h.game.applyRemote({ type: "hit", by: "me", ballId: 2, hitPos: [0, 0, 0] });
+    h.game.applyRemote({ type: "hit", by: "otro", ballId: 3, hitPos: [0, 0, 0] });
+    vi.setSystemTime(180_001);
+    h.game.update(0.016); // → results, winnerIds = ["me"]
+    expect(h.game.snapshot().phase).toBe("results");
+    expect(h.game.snapshot().winnerIds).toEqual(["me"]);
+    return h;
+  }
+
+  it("un 'hit' TARDÍO (ya en results) NO puntúa ni cambia los ganadores", () => {
+    const { game } = playedRound();
+    // Dos hits rezagados de "otro" que, antes, lo habrían empatado y luego pasado.
+    game.applyRemote({ type: "hit", by: "otro", ballId: 4, hitPos: [0, 0, 0] });
+    game.applyRemote({ type: "hit", by: "otro", ballId: 5, hitPos: [0, 0, 0] });
+    const s = game.snapshot();
+    expect(s.scores).toEqual({ me: 2, otro: 1 });
+    expect(s.winnerIds).toEqual(["me"]);
+  });
+
+  it("el 'hit' tardío SÍ hace su FX/sonido (el golpe ocurrió de verdad)", () => {
+    const { game, sounds } = playedRound();
+    const before = sounds.filter((s) => s === "hit").length;
+    game.applyRemote({ type: "hit", by: "otro", ballId: 4, hitPos: [0, 0, 0] });
+    expect(sounds.filter((s) => s === "hit").length).toBe(before + 1);
+  });
+
+  it("un beacon 'state' rezagado no fusiona puntos durante results", () => {
+    const { game } = playedRound();
+    game.applyRemote({
+      type: "state",
+      endsAt: 180_000,
+      scores: { otro: 9 },
+      startedBy: "me",
+    });
+    const s = game.snapshot();
+    expect(s.scores.otro).toBe(1);
+    expect(s.winnerIds).toEqual(["me"]);
+  });
+
+  it("un golpe LOCAL tardío tampoco puntúa en results (misma guarda de fase)", () => {
+    const { game, balls } = playedRound();
+    balls.throwAt(0, 0, 0, 0); // dentro del cilindro, atribuida al local
+    game.update(0.016);
+    expect(game.snapshot().scores).toEqual({ me: 2, otro: 1 });
+    expect(game.snapshot().winnerIds).toEqual(["me"]);
+  });
+
+  it("la siguiente ronda vuelve a puntuar con normalidad (la guarda no se pega)", () => {
+    const { game } = playedRound();
+    vi.setSystemTime(180_001 + 8_001);
+    game.update(0.016); // results → idle
+    game.start();
+    game.applyRemote({ type: "hit", by: "otro", ballId: 4, hitPos: [0, 0, 0] });
+    expect(game.snapshot().scores.otro).toBe(1);
+  });
+});
+
+/**
+ * FIX-RED #6 — sin ronda activa, una pelota atribuida al local y tangente a la base
+ * de Paqo re-entraba en el cilindro cada frame: chispas + deflect + vel.y+=0.4 a
+ * 60 Hz durante los 4 s de la ventana de atribución. El epsilon de `Balls.deflect`
+ * la saca del cilindro y este cooldown por pelota cubre que la física la devuelva.
+ */
+describe("BallGame — el golpe de cortesía (sin partida) tiene enfriamiento", () => {
+  it("una pelota clavada en el cilindro NO dispara deflect cada frame", () => {
+    const { game, balls } = makeGame();
+    // El mock NO mueve la pelota al deflect: simula el peor caso (tangente que la
+    // física devuelve al cilindro de inmediato).
+    balls.throwAt(0, 0, 0, 0);
+    for (let f = 0; f < 30; f++) game.update(0.016); // ~0.5 s a 60 fps
+    expect(balls.deflected).toHaveLength(1);
+  });
+
+  it("pasado el enfriamiento, Paqo vuelve a reaccionar", () => {
+    const { game, balls } = makeGame();
+    balls.throwAt(0, 0, 0, 0);
+    game.update(0.016);
+    expect(balls.deflected).toHaveLength(1);
+    game.update(0.7); // > SOFT_HIT_COOLDOWN
+    game.update(0.016);
+    expect(balls.deflected).toHaveLength(2);
+  });
+
+  it("el enfriamiento es POR PELOTA (otra pelota reacciona en el mismo frame)", () => {
+    const { game, balls } = makeGame();
+    balls.throwAt(0, 0, 0, 0);
+    balls.throwAt(1, 0.2, 0, 0.2);
+    game.update(0.016);
+    expect(balls.deflected).toEqual([0, 1]);
+  });
+
+  it("el enfriamiento de cortesía NO frena la puntuación con partida activa", () => {
+    const { game, balls } = makeGame();
+    game.setLocalPlayer("me");
+    game.start();
+    balls.throwAt(0, 0, 0, 0);
+    game.update(0.016);
+    balls.throwAt(0, 0, 0, 0); // vuelve a entrar (nuevo lanzamiento)
+    game.update(0.016);
+    expect(game.snapshot().scores.me).toBe(2);
+  });
+});

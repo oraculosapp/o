@@ -31,6 +31,17 @@ import { isArchetypeId, isAvatarId } from "./avatars";
 import type { GameEventUi, WorldGameHooks } from "./world-ui";
 
 // --- Contrato con el engine (lo implementa el equipo PaqoWorld) --------------
+/**
+ * Estado de un balón que cruza la frontera engine↔red. `heldBy`/`grabT` son
+ * opcionales y sólo aparecen cuando el emisor lo lleva en la mano (ver BallPayload).
+ */
+export interface NetBallState {
+  pos: [number, number, number];
+  vel: [number, number, number];
+  heldBy?: string;
+  grabT?: number;
+}
+
 export interface WorldNetHooks {
   getLocalState(): { pos: [number, number, number]; yaw: number; anim: "idle" | "walk" | "run" | "jump" };
   onLocalTick(
@@ -50,13 +61,8 @@ export interface WorldNetHooks {
     }
   ): void;
   removeRemote(id: string): void;
-  onBallKick(
-    cb: (ballId: number, s: { pos: [number, number, number]; vel: [number, number, number] }) => void
-  ): () => void;
-  applyBallState(
-    ballId: number,
-    s: { pos: [number, number, number]; vel: [number, number, number] }
-  ): void;
+  onBallKick(cb: (ballId: number, s: NetBallState) => void): () => void;
+  applyBallState(ballId: number, s: NetBallState): void;
   /**
    * Suscribe AGARRES locales de balón (primero o robo) → difundir "ball_grab".
    * Opcionales (`?`) para degradar con gracia si el engine aún no expone la feature
@@ -302,11 +308,20 @@ interface PosPayload {
   name?: string;
   archetype?: string;
 }
+/**
+ * Sobre de "ball": estado del balón difundido por el último que lo tocó.
+ * `heldBy`/`grabT` son campos NUEVOS y OPCIONALES: sólo viajan cuando el emisor
+ * lleva ese balón en la mano, y permiten auto-curar un doble portador si se perdió
+ * el evento único "ball_grab". Los clientes viejos no los emiten (y el receptor
+ * tolera su ausencia), así que el flujo es compatible en ambos sentidos.
+ */
 interface BallPayload {
   by: string;
   ballId: number;
   pos: [number, number, number];
   vel: [number, number, number];
+  heldBy?: string;
+  grabT?: number;
 }
 /**
  * Sobre de "ball_grab": quién agarró qué balón y cuándo. Difundido en TODO agarre
@@ -650,14 +665,20 @@ export class BiosphereRealtime {
       if (!payload || payload.id === me.sessionId) return;
       // Anti-griefing (M-5): ignora a quien no figura en el roster de presence.
       if (!this.presentIds.has(payload.id)) return;
+      // Misma validación de forma que el resto (el flujo "pos" también la había
+      // perdido): un pos/yaw con NaN mete muestras envenenadas en el buffer de
+      // interpolación del remoto y su avatar pega saltos hasta que se purgan.
+      if (!isVec3(payload.pos) || !isFiniteNum(payload.yaw)) return;
+      if (typeof payload.anim !== "string") return;
       const net = this.net();
       this.lastSeen.set(payload.id, Date.now());
       net?.upsertRemote(payload.id, {
         pos: payload.pos,
         yaw: payload.yaw,
         anim: payload.anim,
-        tint: payload.tint,
-        name: payload.name,
+        // Strings o nada: el engine los mete en THREE.Color / canvas de etiqueta.
+        tint: typeof payload.tint === "string" ? payload.tint : undefined,
+        name: typeof payload.name === "string" ? payload.name : undefined,
         // Sólo ids de arquetipo válidos (lista blanca) pasan al engine (M-5).
         archetype: safeArchetype(payload.archetype),
       });
@@ -667,8 +688,25 @@ export class BiosphereRealtime {
     channel.on("broadcast", { event: "ball" }, ({ payload }: { payload: BallPayload }) => {
       if (!payload || payload.by === me.sessionId) return;
       // Anti-griefing (M-5): sólo aceptamos patadas de emisores presentes.
-      if (!this.presentIds.has(payload.by)) return;
-      this.net()?.applyBallState(payload.ballId, { pos: payload.pos, vel: payload.vel });
+      if (typeof payload.by !== "string" || !this.presentIds.has(payload.by)) return;
+      // Validación de forma como el resto de handlers: era el ÚNICO flujo que pasaba
+      // el payload crudo al engine. Un pos/vel con NaN mataba la pelota PARA SIEMPRE
+      // (toda comparación con NaN es false: ni respawn, ni agarre, ni render).
+      if (!isFiniteNum(payload.ballId)) return;
+      if (!isVec3(payload.pos) || !isVec3(payload.vel)) return;
+      // Propiedad opcional (auto-cura del doble portador): sólo se reenvía si viene
+      // sana; si falta, applyBallState se comporta como con un cliente viejo.
+      const held =
+        typeof payload.heldBy === "string" &&
+        payload.heldBy.length <= 64 &&
+        isFiniteNum(payload.grabT)
+          ? { heldBy: payload.heldBy, grabT: payload.grabT }
+          : null;
+      this.net()?.applyBallState(payload.ballId, {
+        pos: payload.pos,
+        vel: payload.vel,
+        ...(held ?? {}),
+      });
     });
 
     // (c1) Broadcast "ball_grab" — agarre/robo de balón (autoridad pasa al emisor)
@@ -800,7 +838,15 @@ export class BiosphereRealtime {
       void ch.send({
         type: "broadcast",
         event: "ball",
-        payload: { by: me.sessionId, ballId, pos: s.pos, vel: s.vel } satisfies BallPayload,
+        payload: {
+          by: me.sessionId,
+          ballId,
+          pos: s.pos,
+          vel: s.vel,
+          // Sólo presentes cuando difundo un balón que llevo EN LA MANO (campos
+          // nuevos: los clientes viejos simplemente los ignoran).
+          ...(s.heldBy ? { heldBy: s.heldBy, grabT: s.grabT } : {}),
+        } satisfies BallPayload,
       });
     });
 
