@@ -7,6 +7,13 @@ import { mulberry32 } from "./rng";
 
 type WindUniform = { value: number };
 
+/**
+ * Círculo (u de mundo) donde NO se planta vegetación alta. Lo usan los claros de
+ * los Oráculos: el tótem necesita aire alrededor para leerse y para que su aro
+ * de proximidad no nazca dentro de un matorral.
+ */
+export type ExclusionCircle = { x: number; z: number; r: number };
+
 // ============================================================================
 // [EQUIPO FLORA] CONTEO Y DENSIDAD — knobs para la ronda de arte.
 // Poblamos TODA la isla (claro r≈5 → filo orgánico r≈49..63) por ANILLOS
@@ -70,6 +77,15 @@ const CANYON_R_MIN = 12;
 const CANYON_R_MAX = 52;
 
 /**
+ * Margen extra (u) del claro de un Oráculo SÓLO para árboles: el filtro mira el
+ * tronco, pero las copas se desplazan lateralmente (TIER_RAD·scale·0.62) y se
+ * abren (TIER_W·scale·0.7) hasta ~4 u. 2.5 u bastan para que la fronda no invada
+ * el claro sin abrir un calvero antinatural (la separación mínima entre Oráculos
+ * es 14.8 u, así que dos claros de árboles apenas se rozan).
+ */
+const TREE_CLEAR_MARGIN = 2.5;
+
+/**
  * Vegetación instanciada del valle de Paqo (isla flotante), fiel a la ficha:
  * pasto alto denso (cards con viento en shader), árboles "guardianes" retorcidos
  * agrupados en los bordes (con musgo colgante), helechos y flores en el claro, y
@@ -119,12 +135,42 @@ export class Vegetation {
   private _corner = new THREE.Vector3();
   private static readonly UP = new THREE.Vector3(0, 1, 0);
 
+  /**
+   * Claros de los Oráculos, con el radio ya al cuadrado (el test de exclusión se
+   * ejecuta miles de veces por build: cero raíces). Se copia en el constructor
+   * porque las posiciones son ESTÁTICAS — nada depende de que los GLB hayan
+   * cargado, así que da igual que Vegetation se construya antes que los tótems.
+   */
+  private exclusions: { x: number; z: number; r: number; r2: number }[] = [];
+
   constructor(
     private field: IslandField,
     private preset: BiospherePreset,
     /** Posición de spawn (XZ): define el cono de visión spawn→tótem libre de rocas. */
     private spawnPos = new THREE.Vector3(0, 0, 7),
-  ) {}
+    /** Claros a respetar (Oráculos). Vacío = vegetación como siempre (determinista). */
+    exclusions: ReadonlyArray<ExclusionCircle> = [],
+  ) {
+    this.exclusions = exclusions.map((c) => ({ x: c.x, z: c.z, r: c.r, r2: c.r * c.r }));
+  }
+
+  /**
+   * ¿(x,z) cae en el claro de algún Oráculo? Descarta árboles (y con ellos sus
+   * copas), rocas, menhires, matas y helechos. El PASTO y las flores SÍ se quedan:
+   * son bajos, no tapan la silueta del tótem ni estorban al aro del suelo — y el
+   * claro se lee mejor como pradera que como calva pelada.
+   * `margin` amplía el radio (los árboles se apartan un poco más: ver TREE_CLEAR_MARGIN).
+   */
+  private inExclusion(x: number, z: number, margin = 0): boolean {
+    for (let i = 0; i < this.exclusions.length; i++) {
+      const c = this.exclusions[i];
+      const dx = x - c.x;
+      const dz = z - c.z;
+      const r2 = margin === 0 ? c.r2 : (c.r + margin) * (c.r + margin);
+      if (dx * dx + dz * dz < r2) return true;
+    }
+    return false;
+  }
 
   build(): void {
     const hasPerf = typeof performance !== "undefined";
@@ -257,6 +303,9 @@ export class Vegetation {
       const r = Math.hypot(p.x, p.y);
       if (r > this.field.edgeRadiusAt(p.x, p.y) - 4) continue;
       if (this.field.clearingMask(p.x, p.y) > 0.25) continue;
+      // El ancla se rechaza si cae en un claro de Oráculo: así el bosquecillo ni
+      // se plantea nacer ahí (el filtro por instancia de abajo remata los bordes).
+      if (this.inExclusion(p.x, p.y)) continue;
       anchors.push(p.clone());
     }
     return anchors;
@@ -588,6 +637,7 @@ export class Vegetation {
       const x = anchor.x + Math.cos(ang) * rr;
       const z = anchor.y + Math.sin(ang) * rr;
       if (this.field.clearingMask(x, z) > 0.3) continue;
+      if (this.inExclusion(x, z)) continue;
       const yaw = rand() * Math.PI * 2;
       const sc = 0.85 + rand() * 0.7;
       // Recorte sutil de ALTURA (solo Y): los helechos son la pieza que más compite
@@ -630,6 +680,7 @@ export class Vegetation {
       const x = anchor.x + Math.cos(ang) * rr;
       const z = anchor.y + Math.sin(ang) * rr;
       if (this.field.clearingMask(x, z) > 0.25) continue;
+      if (this.inExclusion(x, z)) continue;
       const base = sizes[(rand() * sizes.length) | 0];
       const yaw = rand() * Math.PI * 2;
       this._s.set(base * (0.9 + rand() * 0.2), base * (0.85 + rand() * 0.3), base * (0.9 + rand() * 0.2));
@@ -789,6 +840,10 @@ export class Vegetation {
       }
       if (!this.field.insideIsland(x, z)) continue;
       if (this.field.clearingMask(x, z) > 0.25) continue;
+      // Claro del Oráculo. El radio se mide al TRONCO, pero las copas de un
+      // guardián grande se abren hasta ~4 u en lateral: con el margen extra
+      // ninguna fronda se mete por encima del claro ni tapa la silueta del tótem.
+      if (this.inExclusion(x, z, TREE_CLEAR_MARGIN)) continue;
       // Corredores del cañón: densidad muy baja (deja los pasos transitables).
       if (this.inCanyonCorridor(x, z) && rand() < 0.85) continue;
       // Nada de guardianes colgando de paredes de acantilado.
@@ -918,6 +973,7 @@ export class Vegetation {
       const z = p.y;
       if (Math.hypot(x, z) > this.field.edgeRadiusAt(x, z) - 3) continue;
       if (this.field.clearingMask(x, z) > 0.15) continue;
+      if (this.inExclusion(x, z)) continue; // guijarros y menhires fuera del claro
       toRock.set(x, 0, z).sub(spawnP);
       const dist = toRock.length();
       if (dist < 12 && toRock.normalize().dot(viewDir) > cosCone) continue;

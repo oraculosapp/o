@@ -310,9 +310,12 @@ export default function Home() {
           pierde presencia) y sin Supabase se oculta con aviso. */}
       <ChatDock biosphereId={BIOSPHERE_ID} getWorldNet={getWorldNet} getWorld={getWorld} />
       {/* Los LLAMADOS DE PAQO: pistas susurradas por señal de zona (far/mid/near)
-          y ceremonia visual al ENCONTRARLO (found). Degrada con gracia si el
-          engine aún no publicó world.net (reintenta y se calla). */}
-      <HintToasts oracleId={BIOSPHERE_ID} getWorldNet={getWorldNet} />
+          y, al ENCONTRARLO (found), su papel de BRÚJULA del quest (progreso +
+          pista hacia un Oráculo que aún no conoces). Con `getWorld` engancha
+          además `onOracleFound`: el toast de presentación de cada uno de los
+          NUEVE Oráculos desperdigados por la isla. Degrada con gracia si el
+          engine aún no publicó world.net ni el mundo (reintenta y se calla). */}
+      <HintToasts oracleId={BIOSPHERE_ID} getWorldNet={getWorldNet} getWorld={getWorld} />
 
       {/* Botones táctiles de saltar/agarrar (sólo en dispositivos touch). El gate
           vive arriba (isTouch) para que en escritorio ni siquiera se descarguen. */}

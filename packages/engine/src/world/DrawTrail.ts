@@ -4,11 +4,18 @@ import * as THREE from "three";
  * DrawTrail — modo DIBUJAR (equipo Vuelo/Mandos).
  *
  * Con el modo activo, el avatar deja una LÍNEA DE COLORES continua (estela
- * arcoíris) que persiste ~LIFE s y se desvanece. Se dibuja desde la posición del
+ * arcoíris) que persiste ~LIFE s y se DESDIBUJA. Se dibuja desde la posición del
  * jugador a la altura pies+0.5. Es un RIBBON de triángulos (una tira que mira a
  * la cámara) con vertex colors que ciclan el matiz y BLENDING ADITIVO suave → un
  * trazo de neón que respira. Cap de puntos (~CAP) con reciclaje (se sueltan los
  * trazos/puntos más viejos). 1 draw call (un solo Mesh).
+ *
+ * DESDIBUJADO (no es un simple fade): con la edad, cada punto del trazo ENSANCHA
+ * su semiancho (hasta SMUDGE_MAX×), pierde intensidad de pico en proporción
+ * inversa (la tinta se reparte, no se apaga) y se LAVA de color (menos saturación
+ * y menos luz). Al final de la vida entra `vanish`, que apaga lo que queda con
+ * pendiente nula justo en LIFE → el punto se retira sin corte visible. Todo se
+ * calcula por punto y por frame en `rebuild`: ni postproceso ni shaders nuevos.
  *
  * Multijugador: el trazo local se trocea en LOTES (`emitBatch`, ≤BATCH_MAX puntos
  * cada ~BATCH_PERIOD s) que la capa de red difunde; los trazos remotos entran por
@@ -35,6 +42,62 @@ const HUE_STEP = 0.018;
 /** Altura sobre los pies desde la que sale el trazo. */
 const DRAW_HEIGHT = 0.5;
 
+// ---- desdibujado (smudge) ----
+/** Cuánto se abre el semiancho al cumplir la vida (× HALF_WIDTH). */
+const SMUDGE_MAX = 5;
+/**
+ * Perfil del ensanche vs edad. >1 → el trazo aguanta NÍTIDO al principio (dibujar
+ * se lee bien) y se abre acelerando después. Con pow 1.5 la derivada en t=0 es 0:
+ * no hay «pop» en el punto recién trazado.
+ */
+const SMUDGE_POW = 1.5;
+/** Fracción de vida a partir de la cual el trazo empieza a perderse del todo. */
+const VANISH_START = 0.45;
+/** Tinta fresca → tinta lavada (saturación). */
+const SAT_FRESH = 0.85;
+const SAT_WASHED = 0.42;
+/**
+ * Luz de la tinta fresca → lavada. Baja con el lavado A PROPÓSITO: desaturar en
+ * aditivo sube el canal mínimo (abrillanta hacia blanco), así que se compensa
+ * quitando luz al mismo ritmo.
+ */
+const LIG_FRESH = 0.55;
+const LIG_WASHED = 0.44;
+
+/**
+ * Perfil maestro del desdibujado por edad normalizada `t` (0 = recién trazado,
+ * 1 = fin de vida). Devuelve 0→1. Puro: gobierna ensanche y lavado a la vez para
+ * que ambos vayan acompasados.
+ */
+export function smudgeWash(t: number): number {
+  const u = t < 0 ? 0 : t > 1 ? 1 : t;
+  return Math.pow(u, SMUDGE_POW);
+}
+
+/**
+ * Multiplicador del semiancho del ribbon por edad normalizada. 1 = recién
+ * trazado; SMUDGE_MAX al cumplir la vida. Puro.
+ */
+export function smudgeWidth(t: number): number {
+  return 1 + (SMUDGE_MAX - 1) * smudgeWash(t);
+}
+
+/**
+ * Multiplicador de intensidad del color por edad normalizada. Dos factores:
+ *  · 1/ensanche → CONSERVA la tinta (el brillo integrado a lo ancho se mantiene
+ *    mientras el trazo se abre: se difumina, no se apaga).
+ *  · `vanish` → a partir de VANISH_START apaga lo que queda con una smoothstep
+ *    invertida que llega a 0 con pendiente 0 justo en t=1, para que retirar el
+ *    punto en LIFE no produzca ningún corte visible.
+ * Monótona decreciente. Puro.
+ */
+export function smudgeGain(t: number): number {
+  const u = t < 0 ? 0 : t > 1 ? 1 : t;
+  const k = u <= VANISH_START ? 0 : (u - VANISH_START) / (1 - VANISH_START);
+  const vanish = 1 - k * k * (3 - 2 * k);
+  return vanish / smudgeWidth(u);
+}
+
 interface DrawPoint {
   x: number;
   y: number;
@@ -59,6 +122,15 @@ export interface DrawBatch {
 }
 
 export class DrawTrail {
+  /**
+   * Curvas del desdibujado colgadas de la clase: `@phygitalia/engine` solo
+   * reexporta `DrawTrail`, así que este es el camino para que QA/tests puedan
+   * verificarlas sin instanciar nada. Son las MISMAS funciones que usa `rebuild`.
+   */
+  static readonly smudgeWash = smudgeWash;
+  static readonly smudgeWidth = smudgeWidth;
+  static readonly smudgeGain = smudgeGain;
+
   private geo = new THREE.BufferGeometry();
   private mat: THREE.MeshBasicMaterial;
   private mesh: THREE.Mesh;
@@ -287,9 +359,11 @@ export class DrawTrail {
   // ---- geometría ----
 
   /**
-   * Reconstruye el ribbon: para cada punto vivo, dos vértices offset ±HALF_WIDTH
+   * Reconstruye el ribbon: para cada punto vivo, dos vértices offset ±semiancho
    * en la dirección perpendicular al segmento y a la vista (ribbon que mira a la
-   * cámara). Color = HSL(hue) escalado por el fade (aditivo → negro = invisible).
+   * cámara). El semiancho y el color dependen de la EDAD DEL PUNTO (desdibujado),
+   * así que a lo largo del trazo hay un degradado continuo de nítido (cabeza) a
+   * difuso (cola). Aditivo → negro = invisible.
    */
   private rebuild(camPos: THREE.Vector3): void {
     let v = 0; // índice de vértice
@@ -319,13 +393,18 @@ export class DrawTrail {
         this._view.normalize();
         this._side.crossVectors(this._seg, this._view);
         if (this._side.lengthSq() < 1e-10) this._side.set(0, 1, 0);
-        this._side.normalize().multiplyScalar(HALF_WIDTH);
 
-        // Fade por edad (suave). Aditivo: color*fade, 0 = transparente.
-        const age = this.time - p.birth;
-        const fade = Math.max(0, 1 - age / LIFE);
-        const f = fade * fade; // curva suave al final
-        this._col.setHSL(p.hue, 0.85, 0.55).multiplyScalar(f);
+        // DESDIBUJADO por edad: el trazo se abre, se lava y pierde pico.
+        const t = (this.time - p.birth) / LIFE;
+        const wash = smudgeWash(t);
+        this._side.normalize().multiplyScalar(HALF_WIDTH * smudgeWidth(t));
+        this._col
+          .setHSL(
+            p.hue,
+            SAT_FRESH + (SAT_WASHED - SAT_FRESH) * wash,
+            LIG_FRESH + (LIG_WASHED - LIG_FRESH) * wash,
+          )
+          .multiplyScalar(smudgeGain(t));
 
         const a = v * 3;
         this.positions[a] = this._center.x + this._side.x;

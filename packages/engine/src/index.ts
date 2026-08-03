@@ -1,5 +1,5 @@
 // Escena jugable de la Biósfera Paqo (isla flotante + controller + cámara + input).
-export { PaqoWorld } from "./PaqoWorld";
+export { PaqoWorld, type OracleId } from "./PaqoWorld";
 export { Island } from "./island/Island";
 export { IslandField } from "./island/IslandField";
 export { CharacterController } from "./controller/CharacterController";
@@ -96,8 +96,11 @@ export { WeatherDirector, WEATHER_IDS, type WeatherId, type WeatherRefs } from "
 
 // --- Vida ambiente (equipo Flora) ---
 export { AmbientLife } from "./world/AmbientLife";
-// Vegetación instanciada (equipo Flora/Tierra): expone platformHeightAt (copas pisables).
-export { Vegetation } from "./world/Vegetation";
+// Vegetación instanciada (equipo Flora/Tierra): expone platformHeightAt (copas pisables)
+// y respeta los claros de los Oráculos (ExclusionCircle).
+export { Vegetation, type ExclusionCircle } from "./world/Vegetation";
+// Aros de proximidad de los Oráculos (se encienden al acercarse).
+export { OracleRings, type OracleRingSpec } from "./world/OracleRings";
 
 // --- Vuelo/Mandos: estela de partículas + modo DIBUJAR ---
 export { MotionTrail } from "./world/MotionTrail";

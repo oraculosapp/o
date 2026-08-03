@@ -110,6 +110,41 @@
   }
 }
 
+/* CONOCER A UN ORÁCULO del quest: misma píldora ceremonial, pero teñida con el
+   COLOR DE SU ARO (lo inyecta el componente como --oracle; si falta, dorado de
+   la casa). Sólo se tiñe el detalle —glifo, borde, nombre—: el texto se queda en
+   el color de lectura para que la mini-historia siempre se lea bien. */
+.toastQuest {
+  border-color: var(--oracle, var(--gold));
+  background:
+    radial-gradient(
+      120% 140% at 50% 0%,
+      color-mix(in srgb, var(--oracle, var(--gold)) 18%, transparent),
+      transparent 70%
+    ),
+    var(--panel-hud);
+  box-shadow:
+    var(--shadow),
+    0 0 26px color-mix(in srgb, var(--oracle, var(--gold)) 42%, transparent);
+  /* El texto vuelve al color de lectura: la mini-historia se lee, no se admira. */
+  color: var(--text);
+}
+.toastQuest .glyph {
+  color: var(--oracle, var(--gold));
+  filter: drop-shadow(0 0 6px var(--glow));
+}
+/* Nombre del Oráculo: entra destacado, con su color, y deja respirar la historia. */
+.name {
+  color: var(--oracle, var(--gold-bright));
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+.name::after {
+  content: " · ";
+  color: var(--text-dim);
+  font-weight: 400;
+}
+
 /* VELO DORADO de la ceremonia al ENCONTRAR a Paqo. Susurro, no fuegos
    artificiales: un halo cálido que respira desde el borde y se va. Nunca captura
    toques (pointer-events:none) y vive POR DEBAJO de la píldora y del menú. */

@@ -124,6 +124,21 @@ export interface WorldUiHooks {
   setDrawing?(on: boolean): void;
   /** ¿El modo DIBUJAR está activo? (para el estado visual del botón). */
   isDrawing?(): boolean;
+  // ---- QUEST DE LOS NUEVE ORÁCULOS (equipo Mundo) ----
+  /**
+   * Se dispara UNA vez por Oráculo y por sesión cuando el viajero entra en su
+   * radio de cercanía (~7 u), el mismo que enciende su aro. Devuelve la función
+   * de baja. La PERSISTENCIA entre sesiones no vive en el engine: la guarda la
+   * UI en localStorage (ver lib/oracle-quest.ts).
+   *
+   * El `id` se tipa como `string` a propósito —y no como el `OracleId` del
+   * engine— por el mismo criterio que el resto de este archivo: espejo
+   * ESTRUCTURAL, sin acoplar la app al paquete del engine en tiempo de tipos.
+   * Quien lo consume lo valida con `isOracleId()` antes de usarlo. Al ser
+   * sintaxis de MÉTODO, los parámetros son bivariantes y un
+   * `(id: OracleId) => void` real encaja sin fricción.
+   */
+  onOracleFound?(cb: (id: string) => void): () => void;
 }
 
 /** Getter perezoso del mundo (puede devolver null si aún no montó). */

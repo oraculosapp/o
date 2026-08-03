@@ -12,6 +12,7 @@ import { Vegetation } from "./world/Vegetation";
 import { Atmosphere } from "./world/Atmosphere";
 import { PixelSwarm } from "./world/PixelSwarm";
 import { Totem } from "./world/Totem";
+import { OracleRings } from "./world/OracleRings";
 import { BloomComposer } from "./postfx/BloomComposer";
 import { WorldNet } from "./net/WorldNet";
 import { Soundscape } from "./audio/Soundscape";
@@ -24,6 +25,22 @@ import { BallGame } from "./game/BallGame";
 import type { MoodId } from "./postfx/MoodGrading";
 import type { BiospherePreset } from "./planet/types";
 import type { BallState } from "./net/types";
+
+/**
+ * Ids de los nueve Oráculos desperdigados por la isla (Paqo, el central, va
+ * aparte: su llegada ya la señala la zona "found" de world.net). Contrato del
+ * QUEST con la UI: coinciden con el nombre de archivo de su GLB.
+ */
+export type OracleId =
+  | "brangulio"
+  | "nin"
+  | "espinosito"
+  | "eme-y-uru"
+  | "cosmogenes"
+  | "tecnomancio"
+  | "chemajo"
+  | "mavea"
+  | "personage";
 
 /**
  * PaqoWorld — escena jugable de la Biósfera Paqo, ahora sobre una ISLA FLOTANTE.
@@ -69,46 +86,71 @@ export class PaqoWorld {
   private totem!: Totem;
   /** Los otros nueve Oráculos, desperdigados por la isla. Se cargan tras Paqo. */
   private oracles: Totem[] = [];
+  /** Suscriptores del quest (ver onOracleFound). */
+  private oracleFoundSubs = new Set<(id: OracleId) => void>();
+  /** Oráculos ya descubiertos ESTA sesión (el estado persistente vive en la UI). */
+  private oraclesFound = new Set<OracleId>();
+  /** Aros de proximidad de los 9 Oráculos + la runa adoptada de Paqo. */
+  private oracleRings!: OracleRings<OracleId>;
   private bloom!: BloomComposer;
 
   /**
-   * Los NUEVE Oráculos que acompañan a Paqo, en un anillo disperso (r ≈ 31..43 u)
-   * alrededor del claro. Posiciones FIJAS (no procedurales) elegidas a mano contra
-   * la geografía de IslandField y verificadas con `field.slopeAt()`:
-   *  - Fuera del claro central (r>16) y lejos del filo (r ≈ 49..63 u): no se
-   *    asoman al acantilado ni pisan la runa.
-   *  - Azimut a ≥30° de los ejes ±X: ahí van los DOS pasos del cañón (gateSigma
+   * Los NUEVE Oráculos que acompañan a Paqo, en un anillo disperso (r ≈ 35..41 u)
+   * alrededor del claro. Posiciones FIJAS (no procedurales), re-optimizadas contra
+   * la geografía de IslandField (paqo.json, seed 20260710) con un barrido de 0.25 u
+   * sobre el anillo, verificado con `field.slopeAt()`:
+   *  - PENDIENTE ≤ 0.042 rad (2.4°) en todas — antes había una de 0.180. El
+   *    criterio de desempate fue la pendiente MEDIA en un disco de 4 u alrededor
+   *    del punto ("planito y con espacio", no un pico llano en mitad de una loma).
+   *  - SEPARACIÓN mínima entre Oráculos 14.8 u: sus claros de vegetación (7 u de
+   *    radio) no llegan a solaparse.
+   *  - Fuera del claro central y de la cresta del anfiteatro (r ≥ 35, cresta en
+   *    r=20) y a ≥12 u del filo orgánico (r ≈ 49..63): nadie se asoma al vacío.
+   *  - Azimut a ≥28° de los ejes ±X: ahí van los DOS pasos del cañón (gateSigma
    *    ≈ 18°) y el río que sale por +X — el anillo no los tapona.
-   *  - Pendiente medida < 0.19 rad en todas (el terreno tiene laderas de hasta
-   *    ~0.9 rad; cada punto se buscó en la repisa llana más cercana al objetivo).
-   *  - Alturas 5.5..7 u: Paqo (8.5 u, central) sigue dominando la silueta.
+   *  - Alturas: todos a 8.5 u como Paqo, salvo Chemajo (3.0 u, "el pequeño").
    * El yaw NO se guarda aquí: se deriva de (x,z) al instanciar (ver loadOracles).
+   * `color` es el del aro de proximidad (paleta fija del lore, ver OracleRings).
    */
   private static readonly ORACLES: ReadonlyArray<{
+    id: OracleId;
     url: string;
     x: number;
     z: number;
     h: number;
+    color: number;
   }> = [
-    // az 33°, r 41.7 — pendiente 0.006
-    { url: "/assets/totems/brangulio.glb", x: 35.0, z: 22.7, h: 7 },
-    // az 74°, r 31.0 — pendiente 0.180
-    { url: "/assets/totems/nin.glb", x: 8.3, z: 29.9, h: 6.2 },
-    // az 91°, r 36.7 — pendiente 0.060
-    { url: "/assets/totems/espinosito.glb", x: -0.6, z: 36.7, h: 5.5 },
-    // az 117°, r 43.2 — pendiente 0.038
-    { url: "/assets/totems/eme-y-uru.glb", x: -19.6, z: 38.5, h: 6.6 },
-    // az 144°, r 33.5 — pendiente 0.015
-    { url: "/assets/totems/cosmogenes.glb", x: -27.1, z: 19.7, h: 5.9 },
-    // az 210°, r 40.3 — pendiente 0.037
-    { url: "/assets/totems/tecnomancio.glb", x: -34.9, z: -20.1, h: 6.4 },
-    // az 244°, r 31.7 — pendiente 0.006
-    { url: "/assets/totems/chemajo.glb", x: -13.9, z: -28.5, h: 6.0 },
-    // az 285°, r 40.8 — pendiente 0.055
-    { url: "/assets/totems/mavea.glb", x: 10.2, z: -39.5, h: 7 },
-    // az 316°, r 36.3 — pendiente 0.066
-    { url: "/assets/totems/personage.glb", x: 26.3, z: -25.0, h: 6.8 },
+    // az 30°, r 35.1 — pendiente 0.007
+    { id: "brangulio", url: "/assets/totems/brangulio.glb", x: 30.25, z: 17.75, h: 8.5, color: 0x58c47f },
+    // az 68°, r 41.3 — pendiente 0.029
+    { id: "nin", url: "/assets/totems/nin.glb", x: 15.5, z: 38.25, h: 8.5, color: 0xf078b6 },
+    // az 92°, r 36.5 — pendiente 0.015
+    { id: "espinosito", url: "/assets/totems/espinosito.glb", x: -1.0, z: 36.5, h: 8.5, color: 0xe0483a },
+    // az 116°, r 41.3 — pendiente 0.042
+    { id: "eme-y-uru", url: "/assets/totems/eme-y-uru.glb", x: -18.25, z: 37.0, h: 8.5, color: 0x43d9c2 },
+    // az 146°, r 35.3 — pendiente 0.021
+    { id: "cosmogenes", url: "/assets/totems/cosmogenes.glb", x: -29.25, z: 19.75, h: 8.5, color: 0x4f7df0 },
+    // az 233°, r 40.2 — pendiente 0.009
+    { id: "tecnomancio", url: "/assets/totems/tecnomancio.glb", x: -24.25, z: -32.0, h: 8.5, color: 0xa6f050 },
+    // az 269°, r 39.5 — pendiente 0.041 · MITAD de tamaño (el pequeño del lore)
+    { id: "chemajo", url: "/assets/totems/chemajo.glb", x: -0.75, z: -39.5, h: 3.0, color: 0xf5d442 },
+    // az 299°, r 36.5 — pendiente 0.015
+    { id: "mavea", url: "/assets/totems/mavea.glb", x: 17.5, z: -32.0, h: 8.5, color: 0xb268e0 },
+    // az 321°, r 39.4 — pendiente 0.023
+    { id: "personage", url: "/assets/totems/personage.glb", x: 30.5, z: -25.0, h: 8.5, color: 0xff8c3b },
   ];
+
+  /** Radio (u) del claro de vegetación alrededor de cada Oráculo. */
+  private static readonly ORACLE_CLEAR_R = 7;
+  /** Radio (u) que enciende el aro de un Oráculo y dispara su evento de quest. */
+  private static readonly ORACLE_NEAR_R = 7;
+  /** Radio (u) que enciende la runa de Paqo: el claro entero, que es más ancho. */
+  private static readonly PAQO_NEAR_R = 9;
+  /** Radio del aro respecto a la altura del tótem; suelo de 1.4 u para Chemajo. */
+  private static readonly RING_RATIO = 0.34;
+  private static readonly RING_MIN = 1.4;
+  /** Color dorado de la runa de Paqo (el mismo de siempre). */
+  private static readonly PAQO_GOLD = 0xe3b063;
 
   // Referencias de la escena promovidas a campos para que las module el clima.
   // El skydome alienígena expone gradiente (top/bottom) + sol + lunas + nubes +
@@ -218,10 +260,14 @@ export class PaqoWorld {
     this.island.addTo(this.scene);
 
     this.buildRune();
+    this.buildOracleRings();
     this.buildMarker();
     this.buildFade();
 
-    this.vegetation = new Vegetation(this.island.field, this.preset, this.spawnPos);
+    // Los claros de los Oráculos son ESTÁTICOS (salen de ORACLES, no de los GLB),
+    // así que la vegetación puede respetarlos aunque se construya mucho antes de
+    // que los tótems terminen de cargar.
+    this.vegetation = new Vegetation(this.island.field, this.preset, this.spawnPos, this.oracleClearings());
     this.vegetation.build();
     this.vegetation.addTo(this.scene);
     this.enableVegetationShadows();
@@ -349,7 +395,11 @@ export class PaqoWorld {
       this.camera,
       this.preset.postFx?.bloom ?? 0.3,
     );
+    // Bloom para los DIEZ aros. El coste del SelectiveBloomEffect es el de su
+    // pase (uno, sea cual sea el tamaño de la selección): nueve toros de ~480 tri
+    // que además pasan la mayor parte del tiempo con `visible=false` no lo mueven.
     this.bloom.addSelection(this.rune);
+    this.bloom.addSelection(this.oracleRings.group);
     const { w, h } = this.size();
     this.bloom.setSize(w, h);
 
@@ -381,6 +431,24 @@ export class PaqoWorld {
    * Cada uno mira al centro: sin rotar el frente del modelo va a +Z (Paqo, sin
    * yaw, mira al spawn en (0,0,7)), así que apuntarlo al origen es atan2(-x,-z).
    */
+  /**
+   * CONTRATO QUEST (lo consume la UI, p.ej. HintToasts): se dispara UNA vez por
+   * Oráculo y por sesión cuando el viajero entra en su radio de cercanía (el
+   * mismo que enciende su aro). Devuelve la función de baja. La persistencia
+   * entre sesiones NO vive aquí (la UI la guarda en localStorage).
+   */
+  onOracleFound(cb: (id: OracleId) => void): () => void {
+    this.oracleFoundSubs.add(cb);
+    return () => this.oracleFoundSubs.delete(cb);
+  }
+
+  /** Marca un Oráculo como descubierto y avisa a los suscriptores (1 vez/sesión). */
+  protected emitOracleFound(id: OracleId): void {
+    if (this.oraclesFound.has(id)) return;
+    this.oraclesFound.add(id);
+    for (const cb of this.oracleFoundSubs) cb(id);
+  }
+
   private async loadOracles(): Promise<void> {
     for (const o of PaqoWorld.ORACLES) {
       if (this.disposed) return;
@@ -863,7 +931,7 @@ export class PaqoWorld {
 
   /**
    * Marca las mallas de un tótem como proyectoras de sombra (tras cargar el GLB).
-   * Los Oráculos del anillo (r hasta ~43 u) caen fuera de la cámara orto de sombra
+   * Los Oráculos del anillo (r ≈ 35..41 u) caen fuera de la cámara orto de sombra
    * (±SHADOW_HALF = 35 u): castShadow queda puesto igual y no cuesta nada — sólo
    * proyectan cuando entran en el frustum, que es justo lo que se quiere.
    */
@@ -878,8 +946,8 @@ export class PaqoWorld {
    * [COLLIDER] Registra el poste de un tótem como collider cilíndrico en el controller,
    * para que el avatar no lo atraviese. Cilindro con el MISMO patrón que BallGame:
    * Box3 del group, radio = max(size.x, size.z)/2 × 0.8, centro = centro XZ del box,
-   * topY = box.max.y (~8.6 u en Paqo → saltar por encima prácticamente nunca; los
-   * Oráculos del anillo, 5.5-7 u, son algo más franqueables en vuelo). La runa del
+   * topY = box.max.y (~8.6 u en Paqo y en los ocho Oráculos grandes → saltar por
+   * encima prácticamente nunca; Chemajo, 3 u, sí se franquea en vuelo). La runa del
    * suelo NO colisiona (es un mesh aparte, no del tótem: se camina sobre ella). Si el
    * GLB no cargó, el group está vacío → box vacío → no se registra nada.
    */
@@ -898,7 +966,12 @@ export class PaqoWorld {
     });
   }
 
-  /** Anillo-runa emisivo dorado en el suelo del claro (origen), plano. */
+  /**
+   * Anillo-runa emisivo dorado en el suelo del claro (origen), plano. Aquí el
+   * terreno SÍ es una meseta (centralClearing), así que un toro rígido basta.
+   * Nace transparente y apagado: lo enciende OracleRings por cercanía, igual que
+   * a los otros nueve (ver buildOracleRings).
+   */
   private buildRune(): void {
     const p = this.island.field.surfacePoint(0, 0);
     const geo = new THREE.TorusGeometry(3.6, 0.26, 10, 48);
@@ -907,14 +980,55 @@ export class PaqoWorld {
     this.runeRamp = makeToonRamp();
     const mat = new THREE.MeshToonMaterial({
       color: 0x3a2f18,
-      emissive: new THREE.Color(0xe3b063),
+      emissive: new THREE.Color(PaqoWorld.PAQO_GOLD),
       emissiveIntensity: 0.6,
       gradientMap: this.runeRamp,
+      // El fundido va por opacidad; sin escritura de profundidad para que a media
+      // opacidad no recorte el pasto que crece dentro del anillo.
+      transparent: true,
+      opacity: 0,
+      depthWrite: false,
     });
     this.rune = new THREE.Mesh(geo, mat);
     this.rune.position.copy(p).add(new THREE.Vector3(0, 0.4, 0));
     this.rune.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), PaqoWorld.UP);
     this.scene.add(this.rune);
+  }
+
+  /** Claros (círculos) que la vegetación debe respetar: uno por Oráculo. */
+  private oracleClearings(): { x: number; z: number; r: number }[] {
+    return PaqoWorld.ORACLES.map((o) => ({ x: o.x, z: o.z, r: PaqoWorld.ORACLE_CLEAR_R }));
+  }
+
+  /**
+   * Aros de proximidad: uno por Oráculo (color del lore, radio proporcional a su
+   * altura) más la runa de Paqo ADOPTADA — así los diez comparten exactamente el
+   * mismo fundido y el mismo pulso, y el evento del quest sale del mismo sitio que
+   * enciende la luz (no hay dos definiciones de "estar cerca" que se desincronicen).
+   */
+  private buildOracleRings(): void {
+    this.oracleRings = new OracleRings<OracleId>(this.island.field, (id) => this.emitOracleFound(id));
+    for (const o of PaqoWorld.ORACLES) {
+      this.oracleRings.add({
+        id: o.id,
+        x: o.x,
+        z: o.z,
+        radius: Math.max(PaqoWorld.RING_MIN, o.h * PaqoWorld.RING_RATIO),
+        color: o.color,
+        nearR: PaqoWorld.ORACLE_NEAR_R,
+      });
+    }
+    // Paqo no dispara evento de quest (id null): su llegada ya la señala la zona
+    // "found" de world.net. Su radio de cercanía es el del claro, no 7 u.
+    this.oracleRings.adopt(this.rune, {
+      id: null,
+      x: 0,
+      z: 0,
+      radius: 3.6,
+      color: PaqoWorld.PAQO_GOLD,
+      nearR: PaqoWorld.PAQO_NEAR_R,
+    });
+    this.oracleRings.addTo(this.scene);
   }
 
   private buildMarker(): void {
@@ -1181,8 +1295,9 @@ export class PaqoWorld {
 
     this.updateFade(dt);
 
-    const runeMat = this.rune.material as THREE.MeshToonMaterial;
-    runeMat.emissiveIntensity = 0.55 + Math.sin(t * 1.6) * 0.18;
+    // Aros de proximidad (los 9 + la runa de Paqo): distancia² en XZ contra una
+    // lista estática de diez entradas. Aquí sale también el evento del quest.
+    this.oracleRings.update(dt, t, this.controller.position.x, this.controller.position.z);
 
     // Campo magnético del puntero: proyecta el cursor/dedo a un punto 3D del área
     // de juego (a la distancia cámara→avatar) y alimenta el enjambre de píxeles.
@@ -1259,6 +1374,9 @@ export class PaqoWorld {
     // load() en vuelo se corta sin llegar a añadir nada a la escena.
     this.oracles.forEach((o) => o.dispose());
     this.oracles = [];
+    // Los aros propios (geometría + material + rampa compartida); la runa de Paqo
+    // la adopta pero NO la libera: es de este mundo (runeRamp/traverse de abajo).
+    this.oracleRings?.dispose();
     this.bloom?.dispose();
     this.island?.dispose();
     this.fade?.remove();

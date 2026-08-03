@@ -5,7 +5,8 @@ import { DrawTrail } from "@phygitalia/engine";
 /**
  * [EQUIPO VUELO/MANDOS] Modo DIBUJAR (DrawTrail).
  *  - Cap global de ~2000 puntos con reciclaje (se sueltan los más viejos).
- *  - Persistencia ~30 s y desvanecimiento (cull de puntos caducos).
+ *  - Persistencia ~30 s y DESDIBUJADO (el trazo se abre y se lava hasta perderse;
+ *    cull de puntos caducos al cumplir la vida).
  *  - Difusión: lotes de ≤40 puntos [x,y,z] cada ~0.5 s (onBatch); los lotes
  *    remotos se pintan con el mismo sistema (applyRemoteBatch).
  */
@@ -39,8 +40,8 @@ describe("DrawTrail — cap de puntos con reciclaje", () => {
   });
 });
 
-describe("DrawTrail — persistencia ~30 s y fade", () => {
-  it("los puntos viven ~30 s y luego se retiran (fade completo)", () => {
+describe("DrawTrail — persistencia ~30 s y desdibujado", () => {
+  it("los puntos viven ~30 s y luego se retiran (desdibujado completo)", () => {
     const trail = new DrawTrail();
     const points: number[] = [];
     for (let i = 0; i < 10; i++) points.push(i * 0.5, 0.5, 0);
@@ -53,6 +54,79 @@ describe("DrawTrail — persistencia ~30 s y fade", () => {
     expect(trail.pointCount()).toBe(10);
     // …pasados los 30 s se retiran del todo.
     trail.update(2, pos, 0, CAM);
+    expect(trail.pointCount()).toBe(0);
+    trail.dispose();
+  });
+});
+
+describe("DrawTrail — curvas del desdibujado (ancho / brillo / lavado)", () => {
+  /** Muestreo denso de la vida normalizada del punto: 0 (fresco) → 1 (perdido). */
+  const SAMPLES = 201;
+  const ts = Array.from({ length: SAMPLES }, (_, i) => i / (SAMPLES - 1));
+
+  it("el semiancho se ABRE con la edad, de 1× a ~5×, y sin salto al nacer", () => {
+    expect(DrawTrail.smudgeWidth(0)).toBeCloseTo(1, 6);
+    expect(DrawTrail.smudgeWidth(1)).toBeCloseTo(5, 6);
+    // Monótono creciente: nunca se estrecha.
+    for (let i = 1; i < ts.length; i++) {
+      expect(DrawTrail.smudgeWidth(ts[i])).toBeGreaterThanOrEqual(DrawTrail.smudgeWidth(ts[i - 1]));
+    }
+    // Arranque suave (derivada ~0 en t=0): el punto recién trazado se lee nítido.
+    expect(DrawTrail.smudgeWidth(0.02)).toBeLessThan(1.02);
+    // A media vida ya se nota que se ha abierto, pero sin llegar al extremo.
+    const half = DrawTrail.smudgeWidth(0.5);
+    expect(half).toBeGreaterThan(2);
+    expect(half).toBeLessThan(3);
+    // Fuera de rango se clampea (no explota ni se vuelve negativo).
+    expect(DrawTrail.smudgeWidth(-1)).toBeCloseTo(1, 6);
+    expect(DrawTrail.smudgeWidth(4)).toBeCloseTo(5, 6);
+  });
+
+  it("la intensidad decae de forma monótona y llega a 0 justo al cumplir la vida", () => {
+    expect(DrawTrail.smudgeGain(0)).toBeCloseTo(1, 6);
+    expect(DrawTrail.smudgeGain(1)).toBe(0);
+    expect(DrawTrail.smudgeGain(2)).toBe(0); // ya retirado
+    for (let i = 1; i < ts.length; i++) {
+      expect(DrawTrail.smudgeGain(ts[i])).toBeLessThanOrEqual(DrawTrail.smudgeGain(ts[i - 1]));
+    }
+    // Llega a cero con pendiente ~0 → retirar el punto en LIFE no da corte visible.
+    expect(DrawTrail.smudgeGain(0.99)).toBeLessThan(0.001);
+  });
+
+  it("conserva la tinta mientras se difumina y solo la pierde al final", () => {
+    // Brillo integrado a lo ancho ≈ gain × ancho. Se mantiene ~1 en la primera
+    // mitad de la vida (se DESDIBUJA, no se desvanece)…
+    for (const t of [0, 0.1, 0.25, 0.4]) {
+      expect(DrawTrail.smudgeGain(t) * DrawTrail.smudgeWidth(t)).toBeCloseTo(1, 6);
+    }
+    // …y a partir de ahí se va perdiendo hasta apagarse del todo.
+    expect(DrawTrail.smudgeGain(0.7) * DrawTrail.smudgeWidth(0.7)).toBeLessThan(0.7);
+    expect(DrawTrail.smudgeGain(0.9) * DrawTrail.smudgeWidth(0.9)).toBeLessThan(0.2);
+    expect(DrawTrail.smudgeGain(1) * DrawTrail.smudgeWidth(1)).toBe(0);
+    // El pico sí baja siempre: es lo que hace que el trazo se ablande.
+    expect(DrawTrail.smudgeGain(0.5)).toBeLessThan(0.5);
+  });
+
+  it("el lavado del color va acompasado al ensanche (misma curva maestra)", () => {
+    expect(DrawTrail.smudgeWash(0)).toBe(0);
+    expect(DrawTrail.smudgeWash(1)).toBe(1);
+    for (const t of ts) {
+      // width = 1 + 4·wash por construcción: un solo perfil gobierna ambos.
+      expect(DrawTrail.smudgeWidth(t)).toBeCloseTo(1 + 4 * DrawTrail.smudgeWash(t), 6);
+    }
+    for (let i = 1; i < ts.length; i++) {
+      expect(DrawTrail.smudgeWash(ts[i])).toBeGreaterThanOrEqual(DrawTrail.smudgeWash(ts[i - 1]));
+    }
+  });
+
+  it("update() sigue reconstruyendo sin romper con puntos de cualquier edad", () => {
+    const trail = new DrawTrail();
+    const points: number[] = [];
+    for (let i = 0; i < 12; i++) points.push(i * 0.5, 0.5, 0);
+    trail.applyRemoteBatch("remoto-1", { stroke: 0, points });
+    const pos = new THREE.Vector3();
+    // Recorre toda la vida en pasos: no debe lanzar en ningún punto de la curva.
+    for (let i = 0; i < 32; i++) trail.update(1, pos, 0, CAM);
     expect(trail.pointCount()).toBe(0);
     trail.dispose();
   });
