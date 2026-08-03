@@ -67,7 +67,48 @@ export class PaqoWorld {
   private vegetation!: Vegetation;
   private atmosphere!: Atmosphere;
   private totem!: Totem;
+  /** Los otros nueve Oráculos, desperdigados por la isla. Se cargan tras Paqo. */
+  private oracles: Totem[] = [];
   private bloom!: BloomComposer;
+
+  /**
+   * Los NUEVE Oráculos que acompañan a Paqo, en un anillo disperso (r ≈ 31..43 u)
+   * alrededor del claro. Posiciones FIJAS (no procedurales) elegidas a mano contra
+   * la geografía de IslandField y verificadas con `field.slopeAt()`:
+   *  - Fuera del claro central (r>16) y lejos del filo (r ≈ 49..63 u): no se
+   *    asoman al acantilado ni pisan la runa.
+   *  - Azimut a ≥30° de los ejes ±X: ahí van los DOS pasos del cañón (gateSigma
+   *    ≈ 18°) y el río que sale por +X — el anillo no los tapona.
+   *  - Pendiente medida < 0.19 rad en todas (el terreno tiene laderas de hasta
+   *    ~0.9 rad; cada punto se buscó en la repisa llana más cercana al objetivo).
+   *  - Alturas 5.5..7 u: Paqo (8.5 u, central) sigue dominando la silueta.
+   * El yaw NO se guarda aquí: se deriva de (x,z) al instanciar (ver loadOracles).
+   */
+  private static readonly ORACLES: ReadonlyArray<{
+    url: string;
+    x: number;
+    z: number;
+    h: number;
+  }> = [
+    // az 33°, r 41.7 — pendiente 0.006
+    { url: "/assets/totems/brangulio.glb", x: 35.0, z: 22.7, h: 7 },
+    // az 74°, r 31.0 — pendiente 0.180
+    { url: "/assets/totems/nin.glb", x: 8.3, z: 29.9, h: 6.2 },
+    // az 91°, r 36.7 — pendiente 0.060
+    { url: "/assets/totems/espinosito.glb", x: -0.6, z: 36.7, h: 5.5 },
+    // az 117°, r 43.2 — pendiente 0.038
+    { url: "/assets/totems/eme-y-uru.glb", x: -19.6, z: 38.5, h: 6.6 },
+    // az 144°, r 33.5 — pendiente 0.015
+    { url: "/assets/totems/cosmogenes.glb", x: -27.1, z: 19.7, h: 5.9 },
+    // az 210°, r 40.3 — pendiente 0.037
+    { url: "/assets/totems/tecnomancio.glb", x: -34.9, z: -20.1, h: 6.4 },
+    // az 244°, r 31.7 — pendiente 0.006
+    { url: "/assets/totems/chemajo.glb", x: -13.9, z: -28.5, h: 6.0 },
+    // az 285°, r 40.8 — pendiente 0.055
+    { url: "/assets/totems/mavea.glb", x: 10.2, z: -39.5, h: 7 },
+    // az 316°, r 36.3 — pendiente 0.066
+    { url: "/assets/totems/personage.glb", x: 26.3, z: -25.0, h: 6.8 },
+  ];
 
   // Referencias de la escena promovidas a campos para que las module el clima.
   // El skydome alienígena expone gradiente (top/bottom) + sol + lunas + nubes +
@@ -321,12 +362,44 @@ export class PaqoWorld {
       .catch(() => undefined)
       .finally(() => {
         if (!this.disposed) {
-          this.enableTotemShadows();
-          this.registerTotemCollider();
+          this.enableTotemShadows(this.totem.group);
+          this.registerTotemCollider(this.totem.group);
           this.renderer.compile(this.scene, this.camera);
         }
         this.onReady?.();
+        // Los otros nueve NO bloquean onReady: el mundo ya es jugable y van
+        // apareciendo. Sin await aquí (start() es síncrono); loadOracles no rechaza.
+        void this.loadOracles();
       });
+  }
+
+  /**
+   * Carga los nueve Oráculos del anillo, UNO A UNO (for..of con await). En serie
+   * a propósito: nueve loadAsync en paralelo pelean por el mismo decoder Draco
+   * (wasm) y devuelven sus geometrías al hilo principal a la vez → tirón de varios
+   * frames en Intel UHD. En serie el coste se reparte y sólo aparecen más tarde.
+   * Cada uno mira al centro: sin rotar el frente del modelo va a +Z (Paqo, sin
+   * yaw, mira al spawn en (0,0,7)), así que apuntarlo al origen es atan2(-x,-z).
+   */
+  private async loadOracles(): Promise<void> {
+    for (const o of PaqoWorld.ORACLES) {
+      if (this.disposed) return;
+      const t = new Totem(this.island.field, {
+        url: o.url,
+        x: o.x,
+        z: o.z,
+        targetHeight: o.h,
+        yaw: Math.atan2(-o.x, -o.z),
+      });
+      // Se registra ANTES del await: si dispose() cae a mitad de la carga, el
+      // Totem ya está en la lista y su dispose() aborta el load en curso.
+      this.oracles.push(t);
+      await t.load(this.scene);
+      if (this.disposed) return;
+      this.enableTotemShadows(t.group);
+      this.registerTotemCollider(t.group);
+      this.renderer.compile(this.scene, this.camera);
+    }
   }
 
   /**
@@ -788,24 +861,29 @@ export class PaqoWorld {
     });
   }
 
-  /** Marca las mallas del tótem como proyectoras de sombra (tras cargar el GLB). */
-  private enableTotemShadows(): void {
-    this.totem?.group.traverse((o) => {
+  /**
+   * Marca las mallas de un tótem como proyectoras de sombra (tras cargar el GLB).
+   * Los Oráculos del anillo (r hasta ~43 u) caen fuera de la cámara orto de sombra
+   * (±SHADOW_HALF = 35 u): castShadow queda puesto igual y no cuesta nada — sólo
+   * proyectan cuando entran en el frustum, que es justo lo que se quiere.
+   */
+  private enableTotemShadows(group: THREE.Object3D | undefined): void {
+    group?.traverse((o) => {
       const m = o as THREE.Mesh;
       if (m.isMesh) m.castShadow = true;
     });
   }
 
   /**
-   * [COLLIDER] Registra el poste del tótem como collider cilíndrico en el controller,
+   * [COLLIDER] Registra el poste de un tótem como collider cilíndrico en el controller,
    * para que el avatar no lo atraviese. Cilindro con el MISMO patrón que BallGame:
    * Box3 del group, radio = max(size.x, size.z)/2 × 0.8, centro = centro XZ del box,
-   * topY = box.max.y (~8.6 u → saltar por encima prácticamente nunca). La runa del
+   * topY = box.max.y (~8.6 u en Paqo → saltar por encima prácticamente nunca; los
+   * Oráculos del anillo, 5.5-7 u, son algo más franqueables en vuelo). La runa del
    * suelo NO colisiona (es un mesh aparte, no del tótem: se camina sobre ella). Si el
    * GLB no cargó, el group está vacío → box vacío → no se registra nada.
    */
-  private registerTotemCollider(): void {
-    const g = this.totem?.group;
+  private registerTotemCollider(g: THREE.Object3D | undefined): void {
     if (!g) return;
     const box = new THREE.Box3().setFromObject(g);
     if (box.isEmpty()) return;
@@ -1177,6 +1255,10 @@ export class PaqoWorld {
     this.atmosphere?.dispose();
     this.pixels?.dispose();
     this.totem?.dispose();
+    // Incluye los que aún estuvieran cargando: su dispose() marca `disposed` y el
+    // load() en vuelo se corta sin llegar a añadir nada a la escena.
+    this.oracles.forEach((o) => o.dispose());
+    this.oracles = [];
     this.bloom?.dispose();
     this.island?.dispose();
     this.fade?.remove();

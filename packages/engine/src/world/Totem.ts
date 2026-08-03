@@ -5,12 +5,16 @@ import type { IslandField } from "../island/IslandField";
 import { makeToonRamp } from "../util/toon";
 
 /**
- * Tótem de Paqo: el ancla del claro. Carga `paqo.glb` (EXT_texture_webp +
+ * Tótem de un Oráculo. Carga su GLB (EXT_texture_webp +
  * KHR_draco_mesh_compression) con GLTFLoader + DRACOLoader (decoder Draco
  * auto-hospedado en /draco/, sin CDNs), conserva su textura baseColor pero
  * re-ilumina a cel-shading (MeshToonMaterial + rim darkening en shader, en vez
- * de inverted-hull: 90k tris duplicados sería caro). Escala a ~8.5 u de alto y
- * lo posa en el centro del claro (+Y) mirando al spawn.
+ * de inverted-hull: 90k tris duplicados sería caro). Escala a `targetHeight` y
+ * posa la base sobre el terreno en (x,z), con `yaw` de giro sobre +Y.
+ *
+ * Por defecto es el tótem de PAQO: `paqo.glb`, 8.5 u, en el centro del claro
+ * (0,0) y sin girar — el frente del modelo mira a +Z, o sea al spawn. Los otros
+ * nueve Oráculos usan las mismas opciones con su url/posición/altura.
  */
 export class Totem {
   readonly group = new THREE.Group();
@@ -25,7 +29,16 @@ export class Totem {
 
   constructor(
     private field: IslandField,
-    private opts: { url?: string; dracoPath?: string; targetHeight?: number } = {},
+    private opts: {
+      url?: string;
+      dracoPath?: string;
+      targetHeight?: number;
+      /** Posición en el plano (u). Default (0,0): el claro central de Paqo. */
+      x?: number;
+      z?: number;
+      /** Giro sobre +Y (rad). Default 0: el frente del modelo mira a +Z. */
+      yaw?: number;
+    } = {},
   ) {}
 
   /** Carga y coloca el tótem. Resuelve cuando ya está en la escena (o falla). */
@@ -33,6 +46,8 @@ export class Totem {
     const url = this.opts.url ?? "/assets/totems/paqo.glb";
     const dracoPath = this.opts.dracoPath ?? "/draco/";
     const targetHeight = this.opts.targetHeight ?? 8.5;
+    const px = this.opts.x ?? 0;
+    const pz = this.opts.z ?? 0;
 
     const draco = new DRACOLoader();
     draco.setDecoderPath(dracoPath);
@@ -79,11 +94,14 @@ export class Totem {
       const scale = targetHeight / nativeH;
       model.scale.setScalar(scale);
 
-      // Posa la base en el suelo del claro (origen), up = +Y mundial.
-      const ground = this.field.surfacePoint(0, 0);
+      // Posa la base en el suelo de (x,z), up = +Y mundial.
+      const ground = this.field.surfacePoint(px, pz);
       // Tras escalar, el mínimo Y del modelo local queda en box.min.y*scale.
       const baseOffset = -box.min.y * scale;
       this.group.position.copy(ground).add(new THREE.Vector3(0, baseOffset - 0.15, 0));
+      // El yaw va en el GROUP, no en el modelo: el Box3 de arriba se midió en
+      // local sin rotar, y girar sobre +Y no toca su min.y → el posado sigue valiendo.
+      this.group.rotation.y = this.opts.yaw ?? 0;
       this.group.add(model);
       scene.add(this.group);
     } catch (err) {
