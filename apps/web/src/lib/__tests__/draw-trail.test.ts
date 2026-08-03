@@ -5,13 +5,57 @@ import { DrawTrail } from "@phygitalia/engine";
 /**
  * [EQUIPO VUELO/MANDOS] Modo DIBUJAR (DrawTrail).
  *  - Cap global de ~2000 puntos con reciclaje (se sueltan los más viejos).
- *  - Persistencia ~30 s y DESDIBUJADO (el trazo se abre y se lava hasta perderse;
- *    cull de puntos caducos al cumplir la vida).
+ *  - Persistencia de 6 s y BORRADO GEOMÉTRICO: el trazo nunca se transparenta ni
+ *    se ensancha; la cola se lo va comiendo por el mismo camino y al mismo ritmo
+ *    con que se pintó (una goma 6 s por detrás del pincel).
  *  - Difusión: lotes de ≤40 puntos [x,y,z] cada ~0.5 s (onBatch); los lotes
  *    remotos se pintan con el mismo sistema (applyRemoteBatch).
  */
 
 const CAM = new THREE.PerspectiveCamera(50, 1, 0.1, 200);
+/** Vida de cada punto (s) — debe coincidir con LIFE del engine. */
+const LIFE = 6;
+/** Paso mínimo entre puntos (u) — debe coincidir con MIN_STEP del engine. */
+const MIN_STEP = 0.14;
+/** Semiancho del ribbon (u) — debe coincidir con HALF_WIDTH del engine. */
+const HALF_WIDTH = 0.06;
+
+/** Monta un trazo dentro de una escena para poder leerle la geometría (QA). */
+function mounted() {
+  const trail = new DrawTrail();
+  const scene = new THREE.Scene();
+  trail.addTo(scene);
+  const mesh = scene.children[0] as THREE.Mesh;
+  const geo = mesh.geometry as THREE.BufferGeometry;
+  return {
+    trail,
+    /** Nº de índices dibujados (6 por segmento del ribbon). */
+    drawn: () => geo.drawRange.count,
+    col: () => geo.getAttribute("color") as THREE.BufferAttribute,
+    /** Centro del extremo de la COLA (par de vértices 0/1 del primer trazo). */
+    tailX: () => {
+      const p = geo.getAttribute("position") as THREE.BufferAttribute;
+      return (p.getX(0) + p.getX(1)) / 2;
+    },
+    /** Ancho del ribbon en el punto `i` (vértices i·2 y i·2+1). */
+    widthAt: (i: number) => {
+      const p = geo.getAttribute("position") as THREE.BufferAttribute;
+      const dx = p.getX(i * 2) - p.getX(i * 2 + 1);
+      const dy = p.getY(i * 2) - p.getY(i * 2 + 1);
+      const dz = p.getZ(i * 2) - p.getZ(i * 2 + 1);
+      return Math.sqrt(dx * dx + dy * dy + dz * dz);
+    },
+  };
+}
+
+/**
+ * Canal máximo del color de un vértice. Con S y L fijos, HSL→RGB da SIEMPRE el
+ * mismo canal máximo sea cual sea el matiz → es un invariante independiente del
+ * arcoíris, que se rompería en cuanto hubiera cualquier atenuación.
+ */
+function maxChannel(col: THREE.BufferAttribute, v: number): number {
+  return Math.max(col.getX(v), col.getY(v), col.getZ(v));
+}
 
 describe("DrawTrail — cap de puntos con reciclaje", () => {
   it("nunca supera ~2000 puntos vivos aunque lleguen muchos más", () => {
@@ -40,8 +84,8 @@ describe("DrawTrail — cap de puntos con reciclaje", () => {
   });
 });
 
-describe("DrawTrail — persistencia ~30 s y desdibujado", () => {
-  it("los puntos viven ~30 s y luego se retiran (desdibujado completo)", () => {
+describe("DrawTrail — vida de 6 s y retirada exacta", () => {
+  it("los puntos aguantan hasta los 6 s y entonces se retiran", () => {
     const trail = new DrawTrail();
     const points: number[] = [];
     for (let i = 0; i < 10; i++) points.push(i * 0.5, 0.5, 0);
@@ -49,86 +93,174 @@ describe("DrawTrail — persistencia ~30 s y desdibujado", () => {
     expect(trail.pointCount()).toBe(10);
 
     const pos = new THREE.Vector3();
-    // A los ~29 s siguen vivos (desvaneciéndose)…
-    trail.update(29, pos, 0, CAM);
+    // A 5.9 s el trazo sigue ENTERO (no ha perdido ni un punto por el camino).
+    trail.update(5.9, pos, 0, CAM);
     expect(trail.pointCount()).toBe(10);
-    // …pasados los 30 s se retiran del todo.
-    trail.update(2, pos, 0, CAM);
+    // Al cumplirse la vida se retiran (nacieron todos en el mismo instante).
+    trail.update(0.2, pos, 0, CAM);
     expect(trail.pointCount()).toBe(0);
+    trail.dispose();
+  });
+
+  it("a los 6 s exactos ya no queda nada del punto", () => {
+    const trail = new DrawTrail();
+    trail.applyRemoteBatch("remoto-1", { stroke: 0, points: [0, 0.5, 0, 1, 0.5, 0] });
+    const pos = new THREE.Vector3();
+    trail.update(LIFE, pos, 0, CAM);
+    expect(trail.pointCount()).toBe(0);
+    expect(trail.strokeCount()).toBe(0);
     trail.dispose();
   });
 });
 
-describe("DrawTrail — curvas del desdibujado (ancho / brillo / lavado)", () => {
-  /** Muestreo denso de la vida normalizada del punto: 0 (fresco) → 1 (perdido). */
-  const SAMPLES = 201;
-  const ts = Array.from({ length: SAMPLES }, (_, i) => i / (SAMPLES - 1));
+describe("DrawTrail — el trazo NO se desvanece ni se ensancha mientras vive", () => {
+  it("mantiene el mismo ancho y la misma intensidad del primer al último frame", () => {
+    const m = mounted();
+    const pos = new THREE.Vector3(0, 1.5, 0);
 
-  it("el semiancho se ABRE con la edad, de 1× a ~5×, y sin salto al nacer", () => {
-    expect(DrawTrail.smudgeWidth(0)).toBeCloseTo(1, 6);
-    expect(DrawTrail.smudgeWidth(1)).toBeCloseTo(5, 6);
-    // Monótono creciente: nunca se estrecha.
-    for (let i = 1; i < ts.length; i++) {
-      expect(DrawTrail.smudgeWidth(ts[i])).toBeGreaterThanOrEqual(DrawTrail.smudgeWidth(ts[i - 1]));
+    // Pinta ~2 s caminando a 4 u/s (velocidad de paseo del avatar).
+    m.trail.setDrawing(true);
+    for (let i = 0; i < 120; i++) {
+      pos.x += 4 / 60;
+      m.trail.update(1 / 60, pos, 1.0, CAM);
     }
-    // Arranque suave (derivada ~0 en t=0): el punto recién trazado se lee nítido.
-    expect(DrawTrail.smudgeWidth(0.02)).toBeLessThan(1.02);
-    // A media vida ya se nota que se ha abierto, pero sin llegar al extremo.
-    const half = DrawTrail.smudgeWidth(0.5);
-    expect(half).toBeGreaterThan(2);
-    expect(half).toBeLessThan(3);
-    // Fuera de rango se clampea (no explota ni se vuelve negativo).
-    expect(DrawTrail.smudgeWidth(-1)).toBeCloseTo(1, 6);
-    expect(DrawTrail.smudgeWidth(4)).toBeCloseTo(5, 6);
+    m.trail.setDrawing(false);
+    // A 4 u/s y 1/60 s por frame se avanza 0.067 u: se añade punto cada 3 frames
+    // (0.2 u ≥ MIN_STEP). 120 frames → 40 puntos.
+    expect(m.trail.pointCount()).toBe(40);
+
+    const ref = maxChannel(m.col(), 0);
+    expect(ref).toBeGreaterThan(0.1); // hay tinta de verdad
+
+    // Recorre el resto de la vida del trazo: ni un solo vértice se atenúa ni el
+    // ribbon se abre. Si hubiera fade o ensanche, esto cae en el primer frame.
+    let comprobados = 0;
+    for (let i = 0; i < 400 && m.trail.pointCount() > 1; i++) {
+      m.trail.update(1 / 60, pos, 1.0, CAM);
+      const verts = m.drawn() / 3 + 1; // índices → vértices realmente dibujados
+      for (let v = 0; v < verts; v++) {
+        expect(maxChannel(m.col(), v)).toBeCloseTo(ref, 5);
+        comprobados++;
+      }
+      for (let k = 0; k * 2 + 1 < verts; k++) {
+        expect(m.widthAt(k)).toBeCloseTo(2 * HALF_WIDTH, 5);
+      }
+    }
+    expect(comprobados).toBeGreaterThan(1000);
+    m.trail.dispose();
+  });
+});
+
+describe("DrawTrail — la goma recorre el trazo en el orden en que se pintó", () => {
+  it("la cola avanza hacia delante, nunca hacia atrás, y acaba vaciando el trazo", () => {
+    const m = mounted();
+    const pos = new THREE.Vector3(0, 1.5, 0);
+
+    m.trail.setDrawing(true);
+    for (let i = 0; i < 180; i++) {
+      pos.x += 4 / 60; // camina en +X: el trazo se pinta de x≈0 hacia x≈12
+      m.trail.update(1 / 60, pos, 1.0, CAM);
+    }
+    m.trail.setDrawing(false);
+    expect(m.trail.pointCount()).toBe(60); // 180 frames / 3 → punto cada 0.2 u
+
+    // La cola arranca en el ORIGEN del trazo, no en el final.
+    expect(m.tailX()).toBeLessThan(0.5);
+
+    let prevTail = m.tailX();
+    let prevCount = m.trail.pointCount();
+    let frames = 0;
+    while (m.trail.pointCount() > 0 && frames < 1200) {
+      m.trail.update(1 / 60, pos, 1.0, CAM);
+      frames++;
+      if (m.trail.pointCount() === 0) break;
+      const tail = m.tailX();
+      // Monótona hacia delante: la goma sigue el camino del pincel, no vuelve.
+      expect(tail).toBeGreaterThanOrEqual(prevTail - 1e-6);
+      // Y solo se pierden puntos, nunca se ganan (ya no se dibuja).
+      expect(m.trail.pointCount()).toBeLessThanOrEqual(prevCount);
+      prevTail = tail;
+      prevCount = m.trail.pointCount();
+    }
+    // Se vació dentro de lo esperado (3 s de trazo + 6 s de vida ≈ 540 frames).
+    expect(m.trail.pointCount()).toBe(0);
+    expect(frames).toBeLessThan(700);
+    // Y la goma llegó hasta el final del trazo (x≈12) antes de desaparecer.
+    expect(prevTail).toBeGreaterThan(10);
+    m.trail.dispose();
   });
 
-  it("la intensidad decae de forma monótona y llega a 0 justo al cumplir la vida", () => {
-    expect(DrawTrail.smudgeGain(0)).toBeCloseTo(1, 6);
-    expect(DrawTrail.smudgeGain(1)).toBe(0);
-    expect(DrawTrail.smudgeGain(2)).toBe(0); // ya retirado
-    for (let i = 1; i < ts.length; i++) {
-      expect(DrawTrail.smudgeGain(ts[i])).toBeLessThanOrEqual(DrawTrail.smudgeGain(ts[i - 1]));
+  it("el extremo DESLIZA por el path en vez de saltar de punto en punto", () => {
+    const m = mounted();
+    const pos = new THREE.Vector3(0, 1.5, 0);
+
+    m.trail.setDrawing(true);
+    for (let i = 0; i < 180; i++) {
+      pos.x += 4 / 60;
+      m.trail.update(1 / 60, pos, 1.0, CAM);
     }
-    // Llega a cero con pendiente ~0 → retirar el punto en LIFE no da corte visible.
-    expect(DrawTrail.smudgeGain(0.99)).toBeLessThan(0.001);
+    m.trail.setDrawing(false);
+
+    // El trazo tiene 3 s: hay que esperar a que el más viejo cumpla los 6 para
+    // que la goma arranque. Avanza hasta que empiece a comer.
+    let arranque = 0;
+    const antes = m.trail.pointCount();
+    while (m.trail.pointCount() === antes && arranque < 600) {
+      m.trail.update(1 / 60, pos, 1.0, CAM);
+      arranque++;
+    }
+    // ≈ 6 s de vida − 3 s ya vividos = ~180 frames (+3 hasta soltar el ancla).
+    expect(arranque).toBeGreaterThan(150);
+    expect(arranque).toBeLessThan(250);
+
+    let prev = m.tailX();
+    let maxStep = 0;
+    let movidos = 0;
+    let total = 0;
+    for (let i = 0; i < 120 && m.trail.pointCount() > 1; i++) {
+      m.trail.update(1 / 60, pos, 1.0, CAM);
+      const tail = m.tailX();
+      const step = tail - prev;
+      if (step > maxStep) maxStep = step;
+      if (step > 1e-6) movidos++;
+      total++;
+      prev = tail;
+    }
+    // Sin interpolación el extremo saltaría los MIN_STEP=0.14 u de golpe cada
+    // ~2 frames; con ella avanza ~4/60 = 0.067 u por frame, TODOS los frames.
+    expect(total).toBeGreaterThan(100);
+    expect(maxStep).toBeGreaterThan(0);
+    expect(maxStep).toBeLessThan(MIN_STEP * 0.75);
+    expect(movidos).toBe(total); // se mueve cada frame, no a golpes
+    m.trail.dispose();
   });
 
-  it("conserva la tinta mientras se difumina y solo la pierde al final", () => {
-    // Brillo integrado a lo ancho ≈ gain × ancho. Se mantiene ~1 en la primera
-    // mitad de la vida (se DESDIBUJA, no se desvanece)…
-    for (const t of [0, 0.1, 0.25, 0.4]) {
-      expect(DrawTrail.smudgeGain(t) * DrawTrail.smudgeWidth(t)).toBeCloseTo(1, 6);
-    }
-    // …y a partir de ahí se va perdiendo hasta apagarse del todo.
-    expect(DrawTrail.smudgeGain(0.7) * DrawTrail.smudgeWidth(0.7)).toBeLessThan(0.7);
-    expect(DrawTrail.smudgeGain(0.9) * DrawTrail.smudgeWidth(0.9)).toBeLessThan(0.2);
-    expect(DrawTrail.smudgeGain(1) * DrawTrail.smudgeWidth(1)).toBe(0);
-    // El pico sí baja siempre: es lo que hace que el trazo se ablande.
-    expect(DrawTrail.smudgeGain(0.5)).toBeLessThan(0.5);
-  });
+  it("con el avatar parado la cola espera y luego salta el hueco (documentado)", () => {
+    const m = mounted();
+    const pos = new THREE.Vector3(0, 1.5, 0);
 
-  it("el lavado del color va acompasado al ensanche (misma curva maestra)", () => {
-    expect(DrawTrail.smudgeWash(0)).toBe(0);
-    expect(DrawTrail.smudgeWash(1)).toBe(1);
-    for (const t of ts) {
-      // width = 1 + 4·wash por construcción: un solo perfil gobierna ambos.
-      expect(DrawTrail.smudgeWidth(t)).toBeCloseTo(1 + 4 * DrawTrail.smudgeWash(t), 6);
-    }
-    for (let i = 1; i < ts.length; i++) {
-      expect(DrawTrail.smudgeWash(ts[i])).toBeGreaterThanOrEqual(DrawTrail.smudgeWash(ts[i - 1]));
-    }
-  });
+    // Dos puntos y una PAUSA larga entre ellos: el avatar se queda quieto 2 s.
+    m.trail.setDrawing(true);
+    m.trail.update(1 / 60, pos, 1.0, CAM); // punto A en x≈0
+    for (let i = 0; i < 120; i++) m.trail.update(1 / 60, pos, 1.0, CAM); // quieto
+    pos.x += 1; // se mueve de golpe → punto B en x≈1
+    m.trail.update(1 / 60, pos, 1.0, CAM);
+    m.trail.setDrawing(false);
+    expect(m.trail.pointCount()).toBe(2);
 
-  it("update() sigue reconstruyendo sin romper con puntos de cualquier edad", () => {
-    const trail = new DrawTrail();
-    const points: number[] = [];
-    for (let i = 0; i < 12; i++) points.push(i * 0.5, 0.5, 0);
-    trail.applyRemoteBatch("remoto-1", { stroke: 0, points });
-    const pos = new THREE.Vector3();
-    // Recorre toda la vida en pasos: no debe lanzar en ningún punto de la curva.
-    for (let i = 0; i < 32; i++) trail.update(1, pos, 0, CAM);
-    expect(trail.pointCount()).toBe(0);
-    trail.dispose();
+    // A muere a los 6 s; B ~2 s después. Entre medias la cola recorre A→B a la
+    // misma velocidad "lenta" con la que se pintó ese tramo: sigue sin saltar.
+    let prev = m.tailX();
+    let maxStep = 0;
+    for (let i = 0; i < 480 && m.trail.pointCount() > 1; i++) {
+      m.trail.update(1 / 60, pos, 1.0, CAM);
+      const step = m.tailX() - prev;
+      if (step > maxStep) maxStep = step;
+      prev = m.tailX();
+    }
+    expect(prev).toBeGreaterThan(0.9); // llegó hasta B
+    expect(maxStep).toBeLessThan(0.02); // el hueco de 1 u lo cruzó despacio
+    m.trail.dispose();
   });
 });
 
